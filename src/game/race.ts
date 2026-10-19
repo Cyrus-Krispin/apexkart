@@ -4,7 +4,7 @@ import { buildTrackScene, type TrackScene } from './trackMesh';
 import { buildKart, KartPhysics, type KartVisual } from './kart';
 import { Input } from './input';
 import { KartAudio } from './audio';
-import { Atmosphere, initialTimeOfDay, saveTimeOfDay, type TimeOfDay } from './atmosphere';
+import { Atmosphere, resolveTime, saveTimePref, timePref, type TimePref } from './atmosphere';
 import { floodlit } from './floodlights';
 import { RenderPipeline, autoQuality, initialQuality, type Quality, type QualitySetting } from './render';
 import { buildWorld, initialStyle, type World, type WorldStyle } from './world';
@@ -64,6 +64,9 @@ export class Race {
   private style: WorldStyle = initialStyle();
   private world: World | null = null;
   private atmos!: Atmosphere;
+  /** Live, Day or Night; a shared session (multiplayer room) fixes it for everyone. */
+  private timeSetting: TimePref;
+  private worldBuild = 0; // world style toggles can overlap; only the newest build is kept
   private frameTimes: number[] = [];
   private camera = new THREE.PerspectiveCamera(62, 1, 0.1, 5000);
   private track: TrackModel;
@@ -146,6 +149,7 @@ export class Race {
     this.kart = buildKart(opts.driver.color, { number: 7 });
     this.scene.add(this.kart.root);
 
+    this.timeSetting = opts.mode?.time ?? timePref();
     this.intro = new RaceIntro({
       container: this.root,
       track: opts.track,
@@ -153,7 +157,8 @@ export class Race {
       dir: opts.dir,
       driver: opts.driver,
       pb: this.pb?.ms ?? null,
-      time: opts.mode?.time ?? initialTimeOfDay(),
+      time: this.timeSetting,
+      liveNow: resolveTime('live', opts.track.center).time,
       onTime: (t) => this.setTime(t),
       onStart: () => this.begin(),
       onBack: () => opts.onExit(),
@@ -181,7 +186,8 @@ export class Race {
     const s = this.scene;
     this.pipeline.setQuality(this.pipeline.quality);
     // Sky, fog, sun or moon, and the floodlights at night.
-    this.atmos = new Atmosphere(s, this.pipeline, this.kart.root, this.opts.mode?.time ?? initialTimeOfDay());
+    const look = resolveTime(this.timeSetting, this.opts.track.center);
+    this.atmos = new Atmosphere(s, this.pipeline, this.kart.root, look.time, look.sun);
 
     this.ground = new THREE.Mesh(new THREE.PlaneGeometry(9000, 9000).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x7da457 }));
     this.ground.position.y = -0.08;
@@ -197,6 +203,7 @@ export class Race {
   }
 
   private async rebuildWorld() {
+    const build = ++this.worldBuild;
     if (this.world) {
       this.scene.remove(this.world.group);
       disposeTree(this.world.group);
@@ -215,7 +222,8 @@ export class Race {
       this.intro.failed();
       return null;
     });
-    if (!world || this.disposed) return;
+    if (world && (this.disposed || build !== this.worldBuild)) disposeTree(world.group); // a newer build replaced it
+    if (!world || this.disposed || build !== this.worldBuild) return;
     this.world = world;
     this.scene.add(world.group);
     this.atmos.setWorld([world.group], world.lamps, world.emissive);
@@ -349,16 +357,22 @@ export class Race {
       this.hud.toast(this.style === 'stylised' ? 'Stylised world' : 'Satellite world');
       this.rebuildWorld();
     }
-    if (a === 'time') this.setTime(this.atmos.time === 'day' ? 'night' : 'day', true);
+    if (a === 'time') this.setTime(({ live: 'day', day: 'night', night: 'live' } as const)[this.timeSetting], true);
     this.syncToggles();
   }
 
-  private setTime(t: TimeOfDay, toast = false) {
-    if (t === this.atmos.time || this.opts.mode?.time) return; // a shared session's time is fixed
-    saveTimeOfDay(t);
-    this.atmos.set(t); // light counts change, so every material recompiles
-    if (this.world) this.warmShaders();
-    if (toast) this.hud.toast(t === 'night' ? 'Night session · floodlights on' : 'Day session');
+  private setTime(t: TimePref, toast = false) {
+    if (t === this.timeSetting || this.opts.mode?.time) return; // a shared session's time is fixed
+    this.timeSetting = t;
+    saveTimePref(t);
+    const look = resolveTime(t, this.opts.track.center);
+    const flip = look.time !== this.atmos.time;
+    this.atmos.set(look.time, look.sun); // every material recompiles
+    if (this.world && flip) this.warmShaders(); // light counts changed
+    if (toast) {
+      const night = look.time === 'night';
+      this.hud.toast(t === 'live' ? `Live · ${night ? 'night at the circuit, floodlights on' : 'the sun where it is right now'}` : night ? 'Night session · floodlights on' : 'Day session');
+    }
     this.syncToggles();
   }
 
@@ -371,7 +385,9 @@ export class Race {
 
   private syncToggles() {
     const q = this.qualitySetting === 'auto' ? `Auto · ${this.pipeline.quality}` : this.qualitySetting;
-    this.hud.toggles({ muted: this.audio.muted, ghosts: this.showGhosts, cam: CAMS[this.camMode].label, quality: q, style: this.style === 'stylised' ? 'Stylised' : 'Satellite', night: this.atmos?.time === 'night' });
+    const night = this.atmos?.time === 'night';
+    const time = this.timeSetting === 'live' ? `Live · ${night ? 'Night' : 'Day'}` : night ? 'Night' : 'Day';
+    this.hud.toggles({ muted: this.audio.muted, ghosts: this.showGhosts, cam: CAMS[this.camMode].label, quality: q, style: this.style === 'stylised' ? 'Stylised' : 'Satellite', night, time });
   }
 
   private resetToGrid() {
@@ -601,6 +617,7 @@ export class Race {
   }
 
   private finishLap(tCross: number) {
+    if (this.autopilot) return; // the cool-down lap after a multiplayer flag is the game driving, not you
     const ms = Math.round((tCross - (this.lapStart ?? tCross)) * 1000);
     const s1 = Math.round(this.sectorTimes[0] ?? 0);
     const s2 = Math.round(this.sectorTimes[1] ?? 0);

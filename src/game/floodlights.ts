@@ -165,8 +165,11 @@ export function floodlit(root: THREE.Object3D) {
       const prevKey = m.customProgramCacheKey;
       m.onBeforeCompile = (shader, renderer) => {
         prev.call(m, shader, renderer);
-        if (!state.night) return;
+        // Attach the uniforms by day too. Three.js reuses a material's night program when you
+        // switch back, but keeps the uniform set from the last compile (the day one), so without
+        // them the pools read zeros and smoothstep(0, 0, x) turns into NaN that bloom smears everywhere.
         Object.assign(shader.uniforms, state.uniforms);
+        if (!state.night) return;
         shader.defines = { ...shader.defines, AK_FLOOD_SLOTS: state.slots };
         shader.vertexShader = shader.vertexShader
           .replace('#include <common>', `#include <common>${VERT_DECL}`)

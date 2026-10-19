@@ -304,10 +304,10 @@ export class Hud {
     }
   }
 
-  toggles(o: { muted: boolean; ghosts: boolean; cam: string; quality: string; style: string; night: boolean }) {
+  toggles(o: { muted: boolean; ghosts: boolean; cam: string; quality: string; style: string; night: boolean; time: string }) {
     this.$.qualityToggle.innerHTML = `${ICON.gauge}<span>Graphics</span><b>${o.quality}</b>`;
     this.$.styleToggle.innerHTML = `${ICON.globe}<span>World</span><b>${o.style}</b>`;
-    this.$.timeToggle.innerHTML = `${o.night ? ICON.moon : ICON.sun}<span>Time of day</span><b>${o.night ? 'Night' : 'Day'}</b>`;
+    this.$.timeToggle.innerHTML = `${o.night ? ICON.moon : ICON.sun}<span>Time of day</span><b>${o.time}</b>`;
     this.$.muteToggle.innerHTML = `${ICON.sound}<span>Sound</span><b>${o.muted ? 'Off' : 'On'}</b>`;
     this.$.ghostToggle.innerHTML = `${ICON.ghost}<span>Ghosts</span><b>${o.ghosts ? 'On' : 'Off'}</b>`;
     this.$.camToggle.innerHTML = `${ICON.cam}<span>Camera</span><b>${o.cam}</b>`;

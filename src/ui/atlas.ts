@@ -8,6 +8,8 @@ import { ProfileMenu } from './profile';
 import { LayoutEditor } from './layoutEditor';
 import { api, type BoardResponse, type CommunityLayout, type Dir, type Driver, type FeedResponse } from '../net/api';
 import { localPB } from '../game/race';
+import { isNightAt } from '../game/sun';
+import { timePref } from '../game/atmosphere';
 import { coreBounds, distM, loadWorld, localeCountry, type Venue, type WorldIndex } from './world';
 import * as V from './atlasViews';
 
@@ -540,7 +542,9 @@ export class Atlas {
 
   private renderNow() {
     const p = this.nowPick();
-    this.el.now.innerHTML = V.nowTile(p ? { ...p, shape: shapeOf(p.t), pb: localPB(p.t.id, p.dir) } : null);
+    // On Live time of day, say so when the race will be under the floodlights.
+    const why = p && timePref() === 'live' && isNightAt(p.t.center) ? `${p.why} · night race` : p?.why;
+    this.el.now.innerHTML = V.nowTile(p ? { ...p, why: why!, shape: shapeOf(p.t), pb: localPB(p.t.id, p.dir) } : null);
   }
 
   private raceNow() {
@@ -1014,6 +1018,7 @@ export class Atlas {
   private async select(id: string) {
     let t = this.tracks.get(id);
     if (!t) {
+      const route = location.hash;
       this.toast('Loading track…', 'busy');
       try {
         const fetched = (await api.track(id).catch(() => null)) ?? (await trackFromId(id));
@@ -1026,6 +1031,7 @@ export class Atlas {
         this.refreshVenues();
         t = fetched;
         this.toast('');
+        if (location.hash !== route) return; // you went elsewhere while it loaded
       } catch {
         this.toast("Couldn't load that track. OpenStreetMap may be busy.", 'warn');
         return;
@@ -1192,6 +1198,7 @@ export class Atlas {
       siblings,
       shapeOf,
       countryName: t.country ? this.countryName(t.country) : undefined,
+      nightNow: isNightAt(t.center),
     });
     this.el.detail.querySelectorAll<HTMLElement>('[data-el]').forEach((e) => (this.el[e.dataset.el!] = e));
     if (this.board) this.renderBoard();

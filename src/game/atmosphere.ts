@@ -3,15 +3,33 @@ import * as THREE from 'three';
 import { makeNightSky, makeSky, NIGHT_SKY, SKY } from './sky';
 import { Floodlights, floodlit, type Lamp, type RigOptions } from './floodlights';
 import type { Quality, RenderPipeline } from './render';
+import { sunPosition } from './sun';
 
 export type TimeOfDay = 'day' | 'night';
+/** The player's setting: a fixed time of day, or "live" (whatever it is at the circuit right now). */
+export type TimePref = TimeOfDay | 'live';
 
-export function initialTimeOfDay(): TimeOfDay {
-  return localStorage.getItem('ak:time') === 'night' ? 'night' : 'day';
+export function timePref(): TimePref {
+  const v = localStorage.getItem('ak:time');
+  return v === 'day' || v === 'night' ? v : 'live';
 }
 
-export function saveTimeOfDay(t: TimeOfDay) {
+export function saveTimePref(t: TimePref) {
   localStorage.setItem('ak:time', t);
+}
+
+/**
+ * The look for a setting at a circuit. "Live" puts the sun where it really is (kept between 12°
+ * and 62° so shadows stay readable) and turns the floodlights on once it's 4° below the horizon.
+ */
+export function resolveTime(pref: TimePref, center: [number, number], date = new Date()): { time: TimeOfDay; sun: THREE.Vector3 | null } {
+  if (pref !== 'live') return { time: pref, sun: null };
+  const { elevation, azimuth } = sunPosition(center[0], center[1], date);
+  if (elevation < -4) return { time: 'night', sun: null };
+  const el = (Math.min(62, Math.max(12, elevation)) * Math.PI) / 180;
+  const az = (azimuth * Math.PI) / 180;
+  // World axes: +x east, +z south (see game/track.ts).
+  return { time: 'day', sun: new THREE.Vector3(Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el)) };
 }
 
 interface Preset {
@@ -60,6 +78,7 @@ const RIGS: Record<Quality, RigOptions> = {
 
 export class Atmosphere {
   time: TimeOfDay;
+  private sun: THREE.Vector3 | null = null; // real sun direction in "Live"; null = the preset's
   private sky: THREE.Mesh | null = null;
   private hemi = new THREE.HemisphereLight();
   /** Sun by day (the one shadow caster), moon by night. */
@@ -74,8 +93,10 @@ export class Atmosphere {
     private pipeline: RenderPipeline,
     private kart: THREE.Object3D,
     time: TimeOfDay,
+    sun: THREE.Vector3 | null = null,
   ) {
     this.time = time;
+    this.sun = sun;
     this.quality = pipeline.quality;
     const sc = this.key.shadow.camera;
     sc.left = sc.bottom = -38;
@@ -91,12 +112,17 @@ export class Atmosphere {
     this.headlight.target.position.set(0, 0, 16);
     kart.add(this.headlight.target);
     this.flood = new Floodlights(RIGS[this.quality]);
-    this.set(time);
+    this.set(time, sun);
+  }
+
+  private get dir() {
+    return (this.time === 'day' && this.sun) || PRESETS[this.time].dir;
   }
 
   /** Switch the whole look. Light counts change, so materials recompile once. */
-  set(time: TimeOfDay) {
+  set(time: TimeOfDay, sun: THREE.Vector3 | null = null) {
     this.time = time;
+    this.sun = sun;
     const p = PRESETS[time];
     const night = time === 'night';
     if (this.sky) {
@@ -104,7 +130,7 @@ export class Atmosphere {
       this.sky.geometry.dispose();
       (this.sky.material as THREE.Material).dispose();
     }
-    this.sky = night ? makeNightSky(p.dir) : makeSky(p.dir);
+    this.sky = night ? makeNightSky(this.dir) : makeSky(this.dir);
     this.scene.add(this.sky);
     this.scene.fog = new THREE.Fog(p.fog[0], p.fog[1], p.fog[2]);
     this.hemi.color.set(p.hemi[0]);
@@ -160,7 +186,7 @@ export class Atmosphere {
 
   /** Follow the kart: keep the sun's shadow box centred on it and the real floodlights nearby. */
   update(x: number, z: number, dt: number) {
-    const d = PRESETS[this.time].dir;
+    const d = this.dir;
     this.key.position.set(x + d.x * 100, d.y * 100, z + d.z * 100);
     this.key.target.position.set(x, 0, z);
     if (this.time === 'night') this.flood.update(x, z, dt);
