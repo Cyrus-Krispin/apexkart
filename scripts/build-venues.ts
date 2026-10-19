@@ -55,11 +55,13 @@ function layoutsAt(v: Venue, ways: { el: any; bb: [number, number, number, numbe
   const dLon = NEAR_DEG / Math.cos((v[0] * Math.PI) / 180);
   const near = ways.filter(({ bb }) => bb[2] >= v[0] - NEAR_DEG && bb[0] <= v[0] + NEAR_DEG && bb[3] >= v[1] - dLon && bb[1] <= v[1] + dLon).map((w) => w.el);
   if (!near.length) return [];
-  // Loops named as kart tracks first (venues often share a site with handling or car circuits), then longest.
+  // Kart loops first (venues often share a site with handling or car circuits), then longest. A way
+  // counts as kart if it's tagged sport=karting or named like one.
+  const kart = (ways: number[]) => near.some((e) => ways.includes(e.id) && (/karting/.test(e.tags?.sport ?? '') || KARTISH.test(e.tags?.name ?? '')));
   const tracks = findLoops(near, 10)
     .filter((l) => l.lengthM >= KART_M[0] && l.lengthM <= KART_M[1])
-    .map((l) => loopToTrack(l, near, v[3] || 'Unnamed kart track'))
-    .sort((a, b) => Number(KARTISH.test(b.name)) - Number(KARTISH.test(a.name)) || b.lengthM - a.lengthM);
+    .sort((a, b) => Number(kart(b.ways)) - Number(kart(a.ways)) || b.lengthM - a.lengthM)
+    .map((l) => loopToTrack(l, near, v[3] || 'Unnamed kart track'));
   const out: PackedLayout[] = [];
   for (const t of tracks) {
     if (taken.has(t.id) || out.some((o) => o[0] === t.id)) continue;
@@ -132,7 +134,7 @@ await Promise.all(
         failed.push(cell);
         console.log(`✗ ${(e as Error).message}`);
       }
-      await sleep(1500);
+      await sleep(1000);
     }
   }),
 );

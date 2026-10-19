@@ -84,9 +84,11 @@ for (const p of PRESETS) {
       const els = (await osmApiElements(bboxAround(center[0], center[1], p.radius ?? 500))).filter((x) => x.type === 'way' && x.tags?.highway === 'raceway');
       return { loops: findLoops(els, 12), elements: els };
     });
-    // Kart-named loops first (handling and car circuits often share the site), then longest.
-    const named = (l: (typeof loops)[number]) => Number(KARTISH.test(loopToTrack(l, elements, '').name));
-    loops = loops.filter((l) => l.lengthM <= KART_MAX_M).sort((a, b) => named(b) - named(a) || b.lengthM - a.lengthM);
+    // Kart loops first (handling and car circuits often share the site), then longest. A way counts
+    // as kart if it's tagged sport=karting or named like one.
+    const kart = (l: (typeof loops)[number]) =>
+      Number(elements.some((e: any) => e.type === 'way' && l.ways.includes(e.id) && (/karting/.test(e.tags?.sport ?? '') || KARTISH.test(e.tags?.name ?? ''))));
+    loops = loops.filter((l) => l.lengthM <= KART_MAX_M).sort((a, b) => kart(b) - kart(a) || b.lengthM - a.lengthM);
     const loop = loops[p.layout ?? 0];
     if (!loop) throw new Error('no closed kart-length raceway loop found');
     const t = loopToTrack(loop, elements, p.name, p.location);
