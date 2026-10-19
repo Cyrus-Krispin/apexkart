@@ -6,6 +6,11 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+### Changed
+- Anything still loaded from OpenStreetMap (shared links to other tracks, a venue's surroundings) is
+  quicker when a map server is busy. The game asks the next server after a few seconds and uses
+  whichever answers first, instead of waiting each one out in turn.
+
 ## [0.10.0] - 2026-10-20
 
 ### Added
