@@ -6,6 +6,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-10-20
+
 ### Changed
 - Anything still loaded from OpenStreetMap (shared links to other tracks, a venue's surroundings) is
   quicker when a map server is busy. The game asks the next server after a few seconds and uses
@@ -198,7 +200,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 ### Fixed
 - Leaderboard and lap submission on the live site.
 
-[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.7.0...v0.8.0
