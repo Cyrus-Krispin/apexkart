@@ -3,7 +3,7 @@
 // in src/multiplayer.ts; settings, ready and profile changes go straight to the RoomClient.
 import './multiplayer.css';
 import { escapeHtml, formatMs, saveDriver, type Driver } from '../net/api';
-import { CODE_RE, KART_COLORS, LAPS_DEFAULT, LAPS_MAX, LAPS_MIN, isReady, type Dir, type RoomState } from '../shared/room';
+import { CODE_RE, KART_COLORS, LAPS_DEFAULT, LAPS_MAX, LAPS_MIN, isReady, roomTime, type Dir, type RoomState, type RoomTime } from '../shared/room';
 import type { TrackData } from '../track/osm';
 import { analyzeShape, type TrackShape } from '../track/shape';
 import { trackArt } from './trackArt';
@@ -171,6 +171,7 @@ export class Lobby {
     click('[data-act="end"]', () => this.run(() => this.room!.endRace()));
     click('[data-dir]', (b) => this.run(() => this.room!.configure({ dir: b.dataset.dir as Dir })));
     click('[data-laps]', (b) => this.run(() => this.room!.configure({ laps: this.room!.state!.cfg.laps + Number(b.dataset.laps) })));
+    click('[data-time]', (b) => this.run(() => this.room!.configure({ time: b.dataset.time as RoomTime })));
     click('[data-kick]', (b) => {
       const p = this.room?.state?.players.find((x) => x.mid === b.dataset.kick);
       if (p && confirm(`Remove ${p.name} from the room?`)) this.run(() => this.room!.kick(p.mid));
@@ -269,11 +270,16 @@ export class Lobby {
       this.$.outline.innerHTML = art;
     }
     this.$.trackName.textContent = cfg.trackName;
-    this.$.trackMeta.textContent = `${(cfg.lengthM / 1000).toFixed(2)} km · ${cfg.dir === 'rev' ? 'reverse' : 'normal'} · ${cfg.laps} lap${cfg.laps > 1 ? 's' : ''}`;
+    const night = roomTime(cfg) === 'night';
+    this.$.trackMeta.textContent = `${(cfg.lengthM / 1000).toFixed(2)} km · ${cfg.dir === 'rev' ? 'reverse' : 'normal'} · ${cfg.laps} lap${cfg.laps > 1 ? 's' : ''}${night ? ' · night' : ''}`;
     this.$.hostControls.hidden = !host;
     const lobby = cfg.phase === 'lobby';
     this.$.hostControls.querySelectorAll<HTMLButtonElement | HTMLSelectElement>('button, select').forEach((b) => (b.disabled = !lobby));
     this.$.dirs.querySelectorAll<HTMLElement>('[data-dir]').forEach((b) => b.classList.toggle('on', b.dataset.dir === cfg.dir));
+    this.$.times.querySelectorAll<HTMLElement>('[data-time]').forEach((b) => {
+      b.classList.toggle('on', b.dataset.time === roomTime(cfg));
+      b.setAttribute('aria-pressed', String(b.dataset.time === roomTime(cfg)));
+    });
     this.$.laps.textContent = String(cfg.laps);
     (this.root.querySelector('[data-laps="-1"]') as HTMLButtonElement).disabled = !lobby || cfg.laps <= LAPS_MIN;
     (this.root.querySelector('[data-laps="1"]') as HTMLButtonElement).disabled = !lobby || cfg.laps >= LAPS_MAX;
@@ -412,6 +418,10 @@ const LOBBY_HTML = /* html */ `
           <div class="mp-row">
             <div class="mp-seg" data-el="dirs"><button data-dir="fwd">Normal</button><button data-dir="rev">Reverse</button></div>
             <div class="mp-laps"><button data-laps="-1" aria-label="Fewer laps">−</button><b class="mono" data-el="laps"></b><button data-laps="1" aria-label="More laps">+</button><span class="label">laps</span></div>
+          </div>
+          <div class="mp-row">
+            <div class="mp-seg" data-el="times" role="group" aria-label="Time of day for everyone"><button data-time="day">Day</button><button data-time="night">Night</button></div>
+            <span class="label">Everyone races at this time of day</span>
           </div>
         </div>
       </div>

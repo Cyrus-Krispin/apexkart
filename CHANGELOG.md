@@ -6,6 +6,11 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+### Added
+- **Night races with friends**: the host picks Day or Night in the room lobby, next to direction
+  and laps, and everyone in the room races at that time of day. Your own Day/Night choice for solo
+  laps stays as it was.
+
 ## [0.4.0] - 2026-10-20
 
 ### Added

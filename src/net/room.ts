@@ -3,7 +3,7 @@
 // UI-free: the lobby (src/ui/lobby.ts) and the race add-on (src/game/mpRace.ts) subscribe to it.
 import { Mesh, type CtlMsg, type LinkInfo } from './mesh';
 import type { TrackData } from '../track/osm';
-import type { Dir, PollResponse, PoseTuple, RoomState, SignalMsg } from '../shared/room';
+import type { Dir, PollResponse, PoseTuple, RoomState, RoomTime, SignalMsg } from '../shared/room';
 
 export type RoomCloseReason = 'gone' | 'idle' | 'kicked' | 'left';
 
@@ -206,7 +206,7 @@ export class RoomClient {
   setProfile(p: Profile) {
     return this.act('profile', p);
   }
-  configure(c: { track?: TrackData; dir?: Dir; laps?: number }) {
+  configure(c: { track?: TrackData; dir?: Dir; laps?: number; time?: RoomTime }) {
     return this.act('config', { ...c, track: c.track && slimTrack(c.track) });
   }
   start() {

@@ -1,7 +1,7 @@
 # Multiplayer
 
 Players create a room, share a link (`/#/room/K7QX`) or the 4-character code, and race each other
-live on the same track. The host picks track, direction and laps (default 3), everyone readies up,
+live on the same track. The host picks track, direction, laps (default 3) and Day/Night, everyone readies up,
 and a synchronised countdown starts the race for all. Up to 8 players per room.
 
 ## Transport: WebRTC mesh, signaling through Redis
@@ -42,7 +42,7 @@ src/game/raceMode.ts      the narrow hook interface Race exposes to add-ons
 src/game/mpRace.ts        MultiplayerRace add-on: progress, finish, pose streaming, standings
 src/game/remoteKarts.ts   other players' karts: dead reckoning, smoothing, name tags, contact
 src/ui/raceOverlay.ts     in-race HUD: position, lap X/N, standings, countdown, results card
-src/ui/lobby.ts           lobby: create/join, players, track/dir/laps, ready/start, last results
+src/ui/lobby.ts           lobby: create/join, players, track/dir/laps/time, ready/start, last results
 src/ui/multiplayer.css    all multiplayer styles (.mp-* classes, variables with fallbacks)
 src/multiplayer.ts        controller: #/room routing, owns RoomClient + lobby + multiplayer Race
 dev/mp-test.html          dev-only bench: N players side by side in one tab

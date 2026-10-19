@@ -5,7 +5,7 @@ import { MultiplayerRace } from './game/mpRace';
 import { Lobby } from './ui/lobby';
 import { RoomClient, type RoomCloseReason } from './net/room';
 import type { Driver } from './net/api';
-import type { Dir, RoomState } from './shared/room';
+import { roomTime, type Dir, type RoomState } from './shared/room';
 import type { TrackData } from './track/osm';
 import './ui/multiplayer.css';
 
@@ -207,7 +207,7 @@ class MultiplayerController {
       driver: { ...this.host.driver, name: me.name, color: me.color },
       container: this.host.container,
       onExit: () => this.backToLobby(),
-      mode: this.mpRace.mode(),
+      mode: { ...this.mpRace.mode(), time: roomTime(cfg) },
     });
     this.lobby?.hide();
   }

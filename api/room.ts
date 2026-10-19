@@ -14,8 +14,8 @@
 import { getStore, json, bad, publicId, cleanName, cleanColor, isDir, TRACK_RE, type Store } from './_lib/store.js';
 import {
   CODE_ALPHABET, CODE_RE, MID_RE, SECRET_RE, ROOM_MAX, LAPS_MIN, LAPS_MAX, LAPS_DEFAULT, START_DELAY_MS, STALE_MS, IDLE_MS,
-  ROOM_TTL_S, FINISH_GRACE_MS, KART_COLORS, isReady, raceResult, nearestLivery,
-  type RoomCfg, type RoomPlayer, type RoomState, type PollResponse, type SignalMsg,
+  ROOM_TTL_S, FINISH_GRACE_MS, KART_COLORS, isReady, raceResult, nearestLivery, isRoomTime, roomTime,
+  type RoomCfg, type RoomPlayer, type RoomState, type PollResponse, type SignalMsg, type RoomTime,
 } from '../src/shared/room.js';
 
 const TRK_TTL_S = 6 * 3600;
@@ -236,10 +236,11 @@ async function create(db: Store, mid: string, b: any, now: number) {
   if (!(await db.set(K.rate(mid), '1', { ex: 5, nx: true }))) throw new HttpError('slow down', 429);
   const track = cleanTrack(b.track);
   const dir = isDir(b.dir) ? b.dir : 'fwd';
+  const time: RoomTime = isRoomTime(b.time) ? b.time : 'day';
   for (let i = 0; i < 6; i++) {
     const code = Array.from(crypto.getRandomValues(new Uint8Array(4)), (x) => CODE_ALPHABET[x % CODE_ALPHABET.length]).join('');
     const cfg: RoomCfg = {
-      code, host: mid, track: track.id, trackName: track.name, lengthM: track.lengthM, dir, laps: cleanLaps(b.laps), v: 1,
+      code, host: mid, track: track.id, trackName: track.name, lengthM: track.lengthM, dir, laps: cleanLaps(b.laps), time, v: 1,
       phase: 'lobby', race: 0, startAt: 0, grid: [], created: now, active: now, last: null,
     };
     if (!(await db.hsetnx(K.room(code), 'cfg', JSON.stringify(cfg)))) continue; // code in use
@@ -402,6 +403,7 @@ async function mutate(db: Store, code: string, mid: string, b: any, now: number)
         }
         if (b.dir !== undefined) next.dir = isDir(b.dir) ? b.dir : cfg.dir;
         if (b.laps !== undefined) next.laps = cleanLaps(b.laps);
+        if (b.time !== undefined) next.time = isRoomTime(b.time) ? b.time : roomTime(cfg);
         if (!(await writeCfg(db, code, l, next))) continue;
         l.state.cfg = next;
         return done();

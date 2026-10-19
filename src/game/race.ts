@@ -153,7 +153,7 @@ export class Race {
       dir: opts.dir,
       driver: opts.driver,
       pb: this.pb?.ms ?? null,
-      time: initialTimeOfDay(),
+      time: opts.mode?.time ?? initialTimeOfDay(),
       onTime: (t) => this.setTime(t),
       onStart: () => this.begin(),
       onBack: () => opts.onExit(),
@@ -181,7 +181,7 @@ export class Race {
     const s = this.scene;
     this.pipeline.setQuality(this.pipeline.quality);
     // Sky, fog, sun or moon, and the floodlights at night.
-    this.atmos = new Atmosphere(s, this.pipeline, this.kart.root, initialTimeOfDay());
+    this.atmos = new Atmosphere(s, this.pipeline, this.kart.root, this.opts.mode?.time ?? initialTimeOfDay());
 
     this.ground = new THREE.Mesh(new THREE.PlaneGeometry(9000, 9000).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x7da457 }));
     this.ground.position.y = -0.08;
@@ -354,7 +354,7 @@ export class Race {
   }
 
   private setTime(t: TimeOfDay, toast = false) {
-    if (t === this.atmos.time) return;
+    if (t === this.atmos.time || this.opts.mode?.time) return; // a shared session's time is fixed
     saveTimeOfDay(t);
     this.atmos.set(t); // light counts change, so every material recompiles
     if (this.world) this.warmShaders();
@@ -980,6 +980,7 @@ export class Race {
     if (mode.leaderboard === false) q('[data-el="tower"]')!.hidden = true;
     if (mode.restart === false) q('[data-act="restart"]')!.hidden = true;
     if (mode.exitLabel) q('[data-act="exit"]')!.textContent = mode.exitLabel;
+    if (mode.time) q('[data-act="time"]')!.hidden = true;
     if (mode.startAt !== undefined) {
       // A synchronised start can't wait for "press any key": go straight to the grid.
       this.intro.dispose();

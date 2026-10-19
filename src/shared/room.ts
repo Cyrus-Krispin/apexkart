@@ -39,6 +39,10 @@ export function nearestLivery(hex: string): string {
 }
 
 export type Dir = 'fwd' | 'rev';
+/** Time of day for the whole room. Rooms created before this setting existed have none: treat as day. */
+export type RoomTime = 'day' | 'night';
+export const isRoomTime = (t: unknown): t is RoomTime => t === 'day' || t === 'night';
+export const roomTime = (cfg: { time?: RoomTime }): RoomTime => cfg.time ?? 'day';
 
 export interface RaceResult {
   race: number;
@@ -58,6 +62,8 @@ export interface RoomCfg {
   lengthM: number;
   dir: Dir;
   laps: number;
+  /** Day or night for everyone (host setting). Missing on older rooms: use roomTime(). */
+  time?: RoomTime;
   /** Settings version. A player is ready when their ready value equals v. */
   v: number;
   phase: 'lobby' | 'racing';

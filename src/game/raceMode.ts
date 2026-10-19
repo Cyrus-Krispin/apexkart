@@ -17,6 +17,9 @@ export interface RaceMode {
   restart?: boolean;
   /** Label for the pause menu's exit button (default "Back to circuits"). */
   exitLabel?: string;
+  /** Time of day shared by everyone in the session. Overrides (without changing) the player's
+   * own Day/Night preference and hides the pause menu's Time of day toggle. */
+  time?: 'day' | 'night';
   addon?: RaceAddon;
 }
 
