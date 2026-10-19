@@ -4,7 +4,8 @@ import { buildTrackScene, type TrackScene } from './trackMesh';
 import { buildKart, KartPhysics, type KartVisual } from './kart';
 import { Input } from './input';
 import { KartAudio } from './audio';
-import { makeSky, SKY } from './sky';
+import { Atmosphere, initialTimeOfDay, saveTimeOfDay, type TimeOfDay } from './atmosphere';
+import { floodlit } from './floodlights';
 import { RenderPipeline, autoQuality, initialQuality, type Quality, type QualitySetting } from './render';
 import { buildWorld, initialStyle, type World, type WorldStyle } from './world';
 import { Hud, type SectorColor } from './hud';
@@ -62,7 +63,7 @@ export class Race {
   private qualitySetting: QualitySetting = initialQuality();
   private style: WorldStyle = initialStyle();
   private world: World | null = null;
-  private sky!: THREE.Mesh;
+  private atmos!: Atmosphere;
   private frameTimes: number[] = [];
   private camera = new THREE.PerspectiveCamera(62, 1, 0.1, 5000);
   private track: TrackModel;
@@ -71,7 +72,6 @@ export class Race {
   private phys: KartPhysics;
   private input: Input;
   private audio = new KartAudio();
-  private sun = new THREE.DirectionalLight(0xffe2bd, 3.1);
   private ground!: THREE.Mesh;
   private root: HTMLElement;
   private hud: Hud;
@@ -153,11 +153,14 @@ export class Race {
       dir: opts.dir,
       driver: opts.driver,
       pb: this.pb?.ms ?? null,
+      time: initialTimeOfDay(),
+      onTime: (t) => this.setTime(t),
       onStart: () => this.begin(),
       onBack: () => opts.onExit(),
     });
 
     this.buildWorld();
+    this.syncToggles();
     this.buildMinimap();
     this.buildSkids();
     this.resetToGrid();
@@ -176,26 +179,9 @@ export class Race {
 
   private buildWorld() {
     const s = this.scene;
-    // Golden-hour sun from the side for long, readable shadows.
-    const sunDir = new THREE.Vector3(0.55, 0.5, 0.35).normalize();
-    this.sky = makeSky(sunDir);
-    s.add(this.sky);
-    s.fog = new THREE.Fog(SKY.horizon, 340, 1800);
-    s.add(new THREE.HemisphereLight(0xcfe0f2, 0x6a5a42, 0.8));
-    this.sun.userData.dir = sunDir;
-    this.sun.castShadow = true;
-    const hi = this.pipeline.quality !== 'low';
-    this.sun.shadow.mapSize.set(hi ? 2048 : 1024, hi ? 2048 : 1024);
-    const sc = this.sun.shadow.camera;
-    sc.left = sc.bottom = -38;
-    sc.right = sc.top = 38;
-    sc.near = 10;
-    sc.far = 320;
-    this.sun.shadow.bias = -0.0004;
-    this.sun.shadow.normalBias = 0.03;
-    s.add(this.sun, this.sun.target);
     this.pipeline.setQuality(this.pipeline.quality);
-    this.pipeline.bakeEnvironment(this.sky);
+    // Sky, fog, sun or moon, and the floodlights at night.
+    this.atmos = new Atmosphere(s, this.pipeline, this.kart.root, initialTimeOfDay());
 
     this.ground = new THREE.Mesh(new THREE.PlaneGeometry(9000, 9000).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x7da457 }));
     this.ground.position.y = -0.08;
@@ -205,6 +191,8 @@ export class Race {
     const aniso = this.pipeline.renderer.capabilities.getMaxAnisotropy();
     this.trackScene = buildTrackScene(this.track, aniso);
     s.add(this.trackScene.group);
+    floodlit(this.ground);
+    floodlit(this.trackScene.group);
     this.rebuildWorld();
   }
 
@@ -230,8 +218,13 @@ export class Race {
     if (!world || this.disposed) return;
     this.world = world;
     this.scene.add(world.group);
+    this.atmos.setWorld([world.group], world.lamps, world.emissive);
     (this.ground.material as THREE.MeshLambertMaterial).color.copy(world.groundColor);
-    // Compile every shader now (including a ghost kart's) so nothing compiles mid-lap.
+    await this.warmShaders();
+  }
+
+  /** Compile every shader now (including a ghost kart's) so nothing compiles mid-lap. */
+  private async warmShaders() {
     const warm = this.ghostVisual(this.opts.driver.color).root;
     warm.position.set(this.phys.x, -50, this.phys.z);
     this.scene.add(warm);
@@ -356,20 +349,29 @@ export class Race {
       this.hud.toast(this.style === 'stylised' ? 'Stylised world' : 'Satellite world');
       this.rebuildWorld();
     }
+    if (a === 'time') this.setTime(this.atmos.time === 'day' ? 'night' : 'day', true);
+    this.syncToggles();
+  }
+
+  private setTime(t: TimeOfDay, toast = false) {
+    if (t === this.atmos.time) return;
+    saveTimeOfDay(t);
+    this.atmos.set(t); // light counts change, so every material recompiles
+    if (this.world) this.warmShaders();
+    if (toast) this.hud.toast(t === 'night' ? 'Night session · floodlights on' : 'Day session');
     this.syncToggles();
   }
 
   private applyQuality(q: Quality) {
     if (q === this.pipeline.quality) return;
     this.pipeline.setQuality(q);
-    this.sun.shadow.mapSize.set(q === 'low' ? 1024 : 2048, q === 'low' ? 1024 : 2048);
-    this.sun.shadow.map?.dispose();
-    this.sun.shadow.map = null;
+    this.atmos.setQuality(q);
+    if (this.world && this.atmos.time === 'night') this.warmShaders();
   }
 
   private syncToggles() {
     const q = this.qualitySetting === 'auto' ? `Auto · ${this.pipeline.quality}` : this.qualitySetting;
-    this.hud.toggles({ muted: this.audio.muted, ghosts: this.showGhosts, cam: CAMS[this.camMode].label, quality: q, style: this.style === 'stylised' ? 'Stylised' : 'Satellite' });
+    this.hud.toggles({ muted: this.audio.muted, ghosts: this.showGhosts, cam: CAMS[this.camMode].label, quality: q, style: this.style === 'stylised' ? 'Stylised' : 'Satellite', night: this.atmos?.time === 'night' });
   }
 
   private resetToGrid() {
@@ -833,9 +835,7 @@ export class Race {
     }
     k.root.visible = mode !== 'hood' || this.state === 'intro';
 
-    const sd = this.sun.userData.dir as THREE.Vector3;
-    this.sun.position.set(x + sd.x * 100, sd.y * 100, z + sd.z * 100);
-    this.sun.target.position.set(x, 0, z);
+    this.atmos.update(x, z, dt);
 
     // Ghost time matches the interpolated kart (one step behind simT, plus the fraction).
     const lapT = this.lapStart !== null && this.state !== 'grid' ? this.simT - STEP * (1 - a) - this.lapStart : -1;
@@ -1032,6 +1032,7 @@ export class Race {
     this.hud.dispose();
     this.input.dispose();
     this.audio.dispose();
+    this.atmos.dispose();
     disposeTree(this.scene);
     for (const tpl of this.ghostTemplates.values()) disposeTree(tpl);
     this.scene.environment?.dispose();

@@ -32,6 +32,16 @@ kbd.wide { min-width: 52px; }
 .io-rules { list-style: none; margin: 0 0 18px; padding: 0; display: grid; gap: 8px; font-size: 14px; color: rgba(242, 238, 229, 0.85); }
 .io-rules li { display: grid; grid-template-columns: 30px 1fr; }
 .io-rules b { color: var(--signal); font-size: 12px; padding-top: 2px; }
+.io-foot-r { display: flex; align-items: center; gap: 24px; }
+.io-time { display: flex; align-items: center; gap: 12px; }
+.io-time .label { white-space: nowrap; }
+.io-seg { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid rgba(242, 238, 229, 0.2); border-radius: var(--radius); }
+.io-seg button { display: flex; align-items: baseline; justify-content: center; gap: 8px; height: 38px; padding: 0 18px; line-height: 38px; font-weight: 700; font-size: 14px; color: var(--night-muted); transition: background 0.15s, color 0.15s; }
+.io-seg button + button { border-left: 1px solid rgba(242, 238, 229, 0.2); }
+.io-seg button small { font-family: var(--mono); font-size: 10px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.75; }
+.io-seg button:hover { color: var(--night-text); }
+.io-seg button.on { background: var(--night-text); color: var(--ink); }
+.io-seg button:focus-visible { outline-offset: -2px; }
 .io-driver { display: flex; align-items: center; gap: 12px; margin-top: auto; padding-top: 14px; border-top: 1px solid var(--night-rule); }
 .io-driver input { flex: 1; min-width: 0; height: 40px; padding: 0 12px; background: var(--night-2); border: 1px solid rgba(242, 238, 229, 0.2); border-radius: var(--radius); color: var(--night-text); font-weight: 700; font-size: 16px; outline: 0; }
 .io-driver input:focus { border-color: var(--signal); }
@@ -217,6 +227,8 @@ kbd.wide { min-width: 52px; }
   .io-controls { display: none; }
   .io-foot { padding: 12px 20px; flex-direction: column; align-items: stretch; }
   .io-go { justify-content: center; }
+  .io-foot-r { flex-direction: column; align-items: stretch; gap: 12px; }
+  .io-time { justify-content: space-between; }
   .h-lapcard { display: none; }
   .h-banner span { font-size: 22px; padding: 8px 26px; }
   .h-banner.go span { font-size: 42px; padding: 4px 40px; }

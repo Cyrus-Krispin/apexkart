@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { TrackModel } from '../track';
+import type { Lamp } from '../floodlights';
 import type { GroundPainter } from './ground';
 import { hashString, Land, rng } from './common';
 
@@ -46,6 +47,7 @@ const SPONSORS: [string, string, string][] = [
 export interface Trackside {
   group: THREE.Group;
   emissive: THREE.MeshStandardMaterial[]; // floodlight heads (night/bloom)
+  lamps: Lamp[]; // floodlight heads, aimed at the track
 }
 
 export function buildTrackside(track: TrackModel, ground: GroundPainter | null, seed: string, aniso: number): Trackside {
@@ -55,6 +57,7 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
   const hw = t.halfWidth;
   const wallOff = hw + t.runoff + 0.65; // inner face, where the kart body meets the physics barrier
   const emissive: THREE.MeshStandardMaterial[] = [];
+  const lamps: Lamp[] = [];
   const at = (i: number, side: number, off: number): [number, number] => {
     const q = ((i % t.n) + t.n) % t.n;
     const [nx, nz] = t.normal(q);
@@ -233,17 +236,39 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
 
   // ---------------------------------------------------------------- floodlights
   {
+    // One pole roughly every SPACING metres of lap, alternating sides, so the whole lap
+    // is lit at night. Candidates every few metres find room on tight infields: a pole
+    // only has to stand behind every tyre wall and keep clear of the other poles.
     const poles: THREE.Matrix4[] = [];
-    const step = Math.max(18, Math.round(42 / (t.length / t.n)));
-    for (let i = 0, k = 0; i < t.n; i += step, k++) {
-      const side = (k % 2 ? 1 : -1) * (t.curv[i] > 0 ? -1 : 1);
-      for (const sd of [side, -side]) {
-        const [x, z] = at(i, sd, wallOff + 2.2);
-        if (!clearAt(x, z, wallOff + 1.5) || !landOk(x, z)) continue;
-        const [nx, nz] = t.normal(i);
-        const yaw = Math.atan2(-nx * sd, -nz * sd); // face the track
-        poles.push(new THREE.Matrix4().compose(new THREE.Vector3(x, 0, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw), new THREE.Vector3(1, 1, 1)));
-        break;
+    const ds = t.length / t.n;
+    const SPACING = 30;
+    const tryStep = Math.max(1, Math.round(3 / ds));
+    const placed: [number, number][] = [];
+    let lastS = -Infinity;
+    let k = 0;
+    for (let i = 0; i < t.n; i += tryStep) {
+      const s = i * ds;
+      if (s - lastS < SPACING) continue;
+      const pref = (k % 2 ? 1 : -1) * (t.curv[i] > 0 ? -1 : 1);
+      let done = false;
+      for (const off of [wallOff + 2.2, wallOff + 1.2, wallOff + 3.6, wallOff + 5.5]) {
+        for (const sd of [pref, -pref]) {
+          const [x, z] = at(i, sd, off);
+          if (!clearAt(x, z, wallOff + 0.9) || !landOk(x, z)) continue;
+          if (placed.some(([px, pz]) => (px - x) ** 2 + (pz - z) ** 2 < 16 ** 2)) continue;
+          const [nx, nz] = t.normal(i);
+          const yaw = Math.atan2(-nx * sd, -nz * sd); // face the track
+          const pole = new THREE.Matrix4().compose(new THREE.Vector3(x, 0, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw), new THREE.Vector3(1, 1, 1));
+          poles.push(pole);
+          placed.push([x, z]);
+          const head = new THREE.Vector3(0, 8.7, 1.3).applyMatrix4(pole);
+          lamps.push({ pos: head, dir: new THREE.Vector3(t.px[i], 0, t.pz[i]).sub(head).normalize() });
+          lastS = s;
+          k++;
+          done = true;
+          break;
+        }
+        if (done) break;
       }
     }
     if (poles.length) {
@@ -479,5 +504,5 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
   }
 
   void aniso;
-  return { group, emissive };
+  return { group, emissive, lamps };
 }

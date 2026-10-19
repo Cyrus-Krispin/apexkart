@@ -21,10 +21,18 @@ export function autoQuality(): Quality {
   return coarse || innerWidth < 700 ? 'low' : 'medium';
 }
 
+export interface BloomSettings {
+  strength: number;
+  radius: number;
+  threshold: number;
+}
+
 export class RenderPipeline {
   readonly renderer: THREE.WebGLRenderer;
   quality: Quality;
   private composer: EffectComposer | null = null;
+  private bloomPass: UnrealBloomPass | null = null;
+  private bloom: BloomSettings = { strength: 0.32, radius: 0.45, threshold: 0.93 };
   private w = 1;
   private h = 1;
 
@@ -45,6 +53,7 @@ export class RenderPipeline {
     this.quality = q;
     this.composer?.dispose();
     this.composer = null;
+    this.bloomPass = null;
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, q === 'high' ? 1.5 : q === 'medium' ? 1.25 : 1));
     if (q !== 'low') {
       const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
@@ -59,11 +68,22 @@ export class RenderPipeline {
         gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 5, rings: 2, samples: 8 });
         composer.addPass(gtao);
       }
-      composer.addPass(new UnrealBloomPass(new THREE.Vector2(size.x / 2, size.y / 2), 0.32, 0.45, 0.93));
+      const b = this.bloom;
+      this.bloomPass = new UnrealBloomPass(new THREE.Vector2(size.x / 2, size.y / 2), b.strength, b.radius, b.threshold);
+      composer.addPass(this.bloomPass);
       composer.addPass(new OutputPass());
       this.composer = composer;
     }
     this.setSize(this.w, this.h);
+  }
+
+  setBloom(b: BloomSettings) {
+    this.bloom = { ...b };
+    if (this.bloomPass) {
+      this.bloomPass.strength = b.strength;
+      this.bloomPass.radius = b.radius;
+      this.bloomPass.threshold = b.threshold;
+    }
   }
 
   setSize(w: number, h: number) {
@@ -80,13 +100,14 @@ export class RenderPipeline {
   }
 
   /** Bake an environment map from the sky so metal and paint pick up the sky colour. */
-  bakeEnvironment(sky: THREE.Object3D) {
+  bakeEnvironment(sky: THREE.Object3D, intensity = 0.55) {
     const pmrem = new THREE.PMREMGenerator(this.renderer);
     const envScene = new THREE.Scene();
     envScene.add(sky.clone());
     const rt = pmrem.fromScene(envScene, 0.04, 0.1, 5000);
+    this.scene.environment?.dispose();
     this.scene.environment = rt.texture;
-    this.scene.environmentIntensity = 0.55;
+    this.scene.environmentIntensity = intensity;
     pmrem.dispose();
   }
 
