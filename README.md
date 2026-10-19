@@ -23,6 +23,8 @@ Start with **KF1 Karting Circuit, Singapore**, or fly anywhere on the map, hit
   to your PB, track limits and wrong-way detection, and five red lights before the start.
 - **Ghosts**: race against your own PB and the top three drivers on the leaderboard, with
   name tags.
+- **Multiplayer**: create a room, share the link or code, and race friends live (up to 8, N laps,
+  synchronised start, positions and results). Peer-to-peer over WebRTC; see [MULTIPLAYER.md](MULTIPLAYER.md).
 - **Live leaderboard**: per-track top 10, "who's on track now" presence, and a global feed
   of the latest laps.
 - Keyboard, gamepad and touch controls; synthesized engine and tyre audio; skid marks;
@@ -68,6 +70,7 @@ no server to run and nothing to migrate. Sorted sets are a natural fit for leade
 | `GET /api/ghost?track&dir&pid` | a driver's PB ghost |
 | `GET /api/feed` | latest laps, every track record, live counts (CDN-cached 3s) |
 | `GET /api/track?id` | geometry for raced tracks, so shared links don't depend on Overpass |
+| `POST /api/room` | multiplayer rooms: lobby state, WebRTC signaling, pose relay ([MULTIPLAYER.md](MULTIPLAYER.md)) |
 
 Laps go through plausibility checks: top speed, the ghost's duration matching the lap time,
 and the ghost path length matching the track. Submissions are rate-limited too. That

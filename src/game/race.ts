@@ -8,6 +8,7 @@ import { KartAudio } from './audio';
 import { decodeGhost, encodeGhost, sampleGhost, GHOST_DT, type GhostData, type GhostFrame } from '../shared/ghost';
 import type { TrackData } from '../track/osm';
 import { api, escapeHtml, formatMs, type BoardResponse, type Dir, type Driver } from '../net/api';
+import type { RaceContext, RaceMode } from './raceMode';
 
 export interface RaceOptions {
   track: TrackData;
@@ -15,6 +16,8 @@ export interface RaceOptions {
   driver: Driver;
   container: HTMLElement;
   onExit: () => void;
+  /** Multiplayer and other add-ons (src/game/raceMode.ts). Omit for a time trial. */
+  mode?: RaceMode;
 }
 
 interface LocalPB {
@@ -38,6 +41,7 @@ interface Ghost {
 const STEP = 1 / 120;
 const SPLIT = 10;
 const CAMS = ['chase', 'far', 'hood', 'tv'] as const;
+const SYNC_GO = 4.2; // with a synchronised start, lights go out this long into the grid phase
 
 export class Race {
   private renderer: THREE.WebGLRenderer;
@@ -123,7 +127,12 @@ export class Race {
     this.$.dirTag.hidden = opts.dir !== 'rev';
     this.$.best.textContent = formatMs(this.pb?.ms);
     this.bindButtons();
+    const mode = opts.mode;
+    if (mode?.ghosts === false) this.showGhosts = false;
+    if (mode?.leaderboard === false) this.$.boardPanel.hidden = true;
+    if (mode?.restart === false) this.root.querySelector<HTMLElement>('[data-act="restart"]')!.hidden = true;
     this.resetToGrid();
+    mode?.addon?.attach?.(this.context());
 
     addEventListener('resize', this.onResize);
     this.onResize();
@@ -270,11 +279,19 @@ export class Race {
   // ---------- race flow
 
   private resetToGrid() {
-    this.phys.place(this.track.length - 14);
-    this.lastS = this.phys.s = this.track.length - 14;
+    const slot = this.opts.mode?.gridSlot;
+    const gridS = this.track.length - 14 - (slot ?? 0) * 4;
+    this.phys.place(gridS);
+    if (slot !== undefined) {
+      const [nx, nz] = this.track.normal(this.phys.hint);
+      const side = (slot % 2 ? 1 : -1) * Math.min(2, this.track.halfWidth * 0.45);
+      this.phys.x += nx * side;
+      this.phys.z += nz * side;
+    }
+    this.lastS = this.phys.s = gridS;
     this.state = 'grid';
     this.gridT = 0;
-    this.goAt = 3.4 + 0.4 + Math.random() * 0.9;
+    this.goAt = this.opts.mode?.startAt !== undefined ? SYNC_GO : 3.4 + 0.4 + Math.random() * 0.9;
     this.lightsLit = 0;
     this.lapStart = null;
     this.lapNo = 0;
@@ -334,7 +351,8 @@ export class Race {
   private tick(dt: number) {
     const c = this.autopilot ? this.autoControls() : this.input.read(dt);
     if (this.state === 'grid') {
-      this.gridT += dt;
+      const syncAt = this.opts.mode?.startAt;
+      this.gridT = syncAt !== undefined ? this.goAt - (syncAt - performance.now()) / 1000 : this.gridT + dt;
       const lit = Math.min(5, Math.floor((this.gridT - 0.8) / 0.65) + 1);
       if (lit > this.lightsLit && this.gridT >= 0.8) {
         this.lightsLit = lit;
@@ -357,6 +375,7 @@ export class Race {
     if (this.state === 'racing') this.timing(dt);
     this.updateSkids(c.drift);
     this.throttle = c.throttle;
+    this.opts.mode?.addon?.tick?.(dt);
   }
   private throttle = 0;
   autopilot = false;
@@ -518,6 +537,7 @@ export class Race {
 
   private async refreshBoard() {
     this.boardTimer = 4;
+    if (this.opts.mode?.leaderboard === false) return;
     const d = this.opts.driver;
     try {
       const b = await api.board(this.opts.track.id, this.opts.dir, { pid: d.pid, name: d.name, color: d.color });
@@ -683,6 +703,7 @@ export class Race {
       } else g.tag.style.display = 'none';
     }
 
+    this.opts.mode?.addon?.frame?.(dt);
     this.renderer.render(this.scene, this.camera);
     this.drawHud(lapT);
   }
@@ -723,6 +744,7 @@ export class Race {
       }
     };
     for (const gh of this.ghosts) if (gh.visual?.root.visible) dot(gh.visual.root.position.x, gh.visual.root.position.z, gh.color + 'aa', 7);
+    this.opts.mode?.addon?.minimap?.(dot);
     dot(p.x, p.z, this.opts.driver.color, 9, true);
   }
 
@@ -817,13 +839,37 @@ export class Race {
     }
   }
 
+  /** What add-ons get to see and do (src/game/raceMode.ts). */
+  private context(): RaceContext {
+    const race = this;
+    return {
+      scene: this.scene,
+      camera: this.camera,
+      track: this.track,
+      phys: this.phys,
+      hud: this.root,
+      get state() {
+        return race.state;
+      },
+      get simT() {
+        return race.simT;
+      },
+      toast: (text, kind) => this.toast(text, kind),
+      centerMsg: (text, secs, kind) => this.centerMsg(text, secs, kind),
+      setAutopilot: (on) => (this.autopilot = on),
+      exit: () => this.opts.onExit(),
+    };
+  }
+
   dispose() {
+    this.opts.mode?.addon?.dispose?.();
     this.disposed = true;
     cancelAnimationFrame(this.raf);
     removeEventListener('resize', this.onResize);
     this.input.dispose();
     this.audio.dispose();
     this.renderer.dispose();
+    this.renderer.forceContextLoss(); // free the GL context now; multiplayer starts a race every round
     this.scene.traverse((o) => {
       const m = o as THREE.Mesh;
       m.geometry?.dispose();

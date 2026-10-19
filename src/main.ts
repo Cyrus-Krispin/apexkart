@@ -2,6 +2,7 @@ import './styles.css';
 import { Picker } from './ui/picker';
 import { Race } from './game/race';
 import { loadDriver } from './net/api';
+import { initMultiplayer } from './multiplayer';
 
 const driver = await loadDriver();
 const pickerRoot = document.getElementById('picker')!;
@@ -26,4 +27,17 @@ const picker = new Picker({
       },
     });
   },
+});
+
+// Multiplayer rooms (#/room/CODE). See MULTIPLAYER.md.
+initMultiplayer({
+  driver,
+  container: gameRoot,
+  entryParent: pickerRoot,
+  enter: () => {
+    race?.dispose();
+    race = null;
+    picker.hide();
+  },
+  leave: () => picker.show(),
 });
