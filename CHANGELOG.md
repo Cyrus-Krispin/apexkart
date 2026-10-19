@@ -6,6 +6,26 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+### Added
+- **16 new featured circuits**, for 22 on five continents. Each comes with its 3D surroundings
+  built in:
+  - Italy: Adria Karting Raceway, Kartodromo Franciacorta
+  - Spain: Circuito Internacional de Zuera, Kartódromo Lucas Guerrero (Valencia)
+  - Britain: Buckmore Park, Rye House
+  - Elsewhere in Europe: Kartbahn Ampfing (Germany), Paul Ricard Karting (France)
+  - Asia and the Gulf: Sepang International Kart Circuit, Dubai Kartdrome, Bahrain International
+    Karting Circuit
+  - Australia: Eastern Creek (Sydney)
+  - The Americas: Kartódromo Granja Viana (Brazil), New Castle Motorsports Park and Orlando Kart
+    Center (USA), SH Karting (Canada)
+
+### Changed
+- Races on tracks outside the featured set start straight away. The surrounding buildings and trees
+  fill in when they arrive, instead of holding up the start.
+
+### Fixed
+- Opening the site from a link to a circuit no longer leaves the bottom dock empty.
+
 ## [0.6.0] - 2026-10-20
 
 ### Added

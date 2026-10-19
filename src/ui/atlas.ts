@@ -2,7 +2,8 @@
 // "Race now", country filters and a rail of circuits, and a sheet for the selected track.
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { discoverTracks, layoutsNear, loopToTrack, trackFromId, type LatLon, type TrackData } from '../track/osm';
+import { centroid, discoverTracks, layoutsNear, loopToTrack, trackFromId, waysFromId, type LatLon, type TrackData } from '../track/osm';
+import { cellOf, unpackPoints, venueKey, type VenueCell } from '../shared/venues';
 import { analyzeShape, type TrackShape } from '../track/shape';
 import { ProfileMenu } from './profile';
 import { LayoutEditor } from './layoutEditor';
@@ -116,6 +117,7 @@ export class Atlas {
   private railTotal = 0;
   private hits: V.SearchHit[] = [];
   private hitSel = 0;
+  private cells = new Map<string, Promise<VenueCell | null>>(); // pre-stitched layouts per 5° cell
 
   constructor(private o: AtlasOptions) {
     o.root.innerHTML = ATLAS_HTML;
@@ -236,6 +238,7 @@ export class Atlas {
       const m = L.circleMarker(v.at, { renderer: this.dotRenderer, radius: 3, stroke: true, weight: 1, color: '#0b0b0a', fillColor: '#ff4d00', fillOpacity: 0.9, bubblingMouseEvents: false });
       m.on('click', () => this.openVenue(v));
       m.on('mouseover', () => {
+        this.venueCell(v); // likely next: start fetching its layouts now
         this.venueTip.setLatLng(v.at).setContent(`<b>${V.esc(v.name || 'Unnamed kart track')}</b>${v.cc ? `<span>${V.esc(w.countries.get(v.cc)?.name ?? v.cc)}</span>` : ''}`);
         this.venueTip.addTo(this.map);
       });
@@ -313,7 +316,35 @@ export class Atlas {
     this.focusRing.setLatLng(v.at).addTo(this.map);
   }
 
-  /** A venue dot becomes a track: fetch its raceways, stitch the layouts, open the longest. */
+  /** The pre-stitched layouts file for a venue's cell (fetched once, then cached). */
+  private venueCell(v: Venue): Promise<VenueCell | null> {
+    const key = cellOf(v.at[0], v.at[1]);
+    let p = this.cells.get(key);
+    if (!p) {
+      p = fetch(`/tracks/venues/${key}.json`)
+        .then((r) => (r.ok && r.headers.get('content-type')?.includes('json') ? (r.json() as Promise<VenueCell>) : null))
+        .catch(() => null);
+      this.cells.set(key, p);
+      p.then((c) => c || this.cells.delete(key)); // let a failed fetch be retried
+    }
+    return p;
+  }
+
+  /** A venue's layouts: pre-stitched from the CDN, or (if it isn't baked yet) live from Overpass. */
+  private async venueLayouts(v: Venue): Promise<TrackData[]> {
+    const packed = (await this.venueCell(v))?.[venueKey(v.at[0], v.at[1])];
+    if (packed?.length) {
+      return packed.map(([id, name, width, lengthM, pts]) => {
+        const points = unpackPoints(pts);
+        return { id, name, location: '', center: centroid(points), points, width, lengthM, osmWays: waysFromId(id) ?? [], source: 'OpenStreetMap', country: v.cc || undefined };
+      });
+    }
+    this.toast(`Loading ${v.name || 'this track'} from OpenStreetMap…`, 'busy');
+    const { loops, elements } = await layoutsNear(v.at, 500);
+    return loops.map((l) => ({ ...loopToTrack(l, elements, v.name || 'Unnamed kart track'), country: v.cc || undefined }));
+  }
+
+  /** A venue dot becomes a track: get its layouts and open the longest. */
   private async openVenue(v: Venue) {
     const known = this.trackNear(v.at, SAME_VENUE_M);
     if (known) return this.open(known.id);
@@ -321,11 +352,9 @@ export class Atlas {
     this.loadingVenue = v.i;
     this.focusVenue(v);
     this.map.flyTo(v.at, 16, { duration: 1.1 });
-    this.toast(`Loading ${v.name || 'this track'} from OpenStreetMap…`, 'busy');
     try {
-      const { loops, elements } = await layoutsNear(v.at, 500);
+      const found = await this.venueLayouts(v);
       if (this.loadingVenue !== v.i) return;
-      const found = loops.map((l) => ({ ...loopToTrack(l, elements, v.name || 'Unnamed kart track'), country: v.cc || undefined }));
       if (!found.length) {
         this.emptyVenues.add(v.i);
         this.refreshVenues();
@@ -471,6 +500,8 @@ export class Atlas {
     }
     this.el.rail.innerHTML = '';
     this.moreRail();
+    // The first venues on the rail are the likely next taps: fetch their layouts ahead.
+    for (const it of items.slice(0, 8)) if (it.kind === 'venue') this.venueCell(it.v);
     if (keep) {
       while (this.railShown < Math.min(shown, items.length)) this.moreRail();
       this.el.rail.scrollLeft = scrollLeft;
@@ -519,7 +550,10 @@ export class Atlas {
     if (key.startsWith('t:')) this.hotPin(key.slice(2));
     else {
       const v = this.world?.venues[Number(key.slice(2))];
-      if (v) this.focusVenue(v);
+      if (v) {
+        this.focusVenue(v);
+        this.venueCell(v);
+      }
     }
   }
 
@@ -849,7 +883,8 @@ export class Atlas {
       this.drawDots();
     }
     this.nameTracks([...this.tracks.values()].filter((t) => !t.preset && !t.location));
-    if (!this.route()) this.applyFilter({ kind: 'featured' }, false);
+    // A country route fills the dock itself; otherwise (no route, or a circuit link) fill it here.
+    if (!this.route() || location.hash.startsWith('#/t/')) this.applyFilter(this.filter, false);
     this.renderNow();
     this.pollFeed();
     window.setInterval(() => !this.o.root.hidden && this.pollFeed(), 6000);

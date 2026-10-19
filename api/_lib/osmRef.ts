@@ -2,6 +2,7 @@
 // lap or layout, or (for an OpenStreetMap id nobody has raced) straight from Overpass.
 import { centroid, distM, findLoops, waysFromId, type LatLon } from '../../src/track/osm.js';
 import { K, type Store } from './store.js';
+import { FEATURED_IDS } from './featured.js';
 
 export interface TrackRef {
   center: LatLon;
@@ -9,14 +10,7 @@ export interface TrackRef {
 }
 
 /** Featured circuits (public/tracks/presets.json) are curated: their layouts aren't open to edits. */
-export const FEATURED = new Set([
-  'osm-736818473',
-  'osm-75490872',
-  'osm-67660672',
-  'osm-240643724_517085040_1208588288_1208588289_1208588290',
-  'osm-91850736',
-  'osm-157769792_157769810_157769814_157769827_157769828_157769847_157769849_157769861_157769876_157769882_363049742',
-]);
+export const FEATURED = new Set(FEATURED_IDS);
 
 const MIRRORS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter'];
 

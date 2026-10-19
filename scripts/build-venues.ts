@@ -3,15 +3,17 @@
 // click time. It also rewrites public/tracks/world.json to keep only venues with a raceable loop,
 // each dot moved onto its longest layout.
 //
-// A few hundred Overpass queries (one per 5° cell that has venues), so it runs on CI:
+// A few hundred Overpass queries (one per 5° cell that has venues, covering only the ground around
+// each venue), so it runs on CI:
 // .github/workflows/bake-venues.yml. Locally: npm run venues [-- --cells 9_20,10_20]
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { findLoops, loopToTrack, centroid } from '../src/track/osm.ts';
-import { CELL_DEG, cellOf, packPoints, unpackPoints, venueKey, type PackedLayout, type VenueCell } from '../src/shared/venues.ts';
+import { cellOf, packPoints, unpackPoints, venueKey, type PackedLayout, type VenueCell } from '../src/shared/venues.ts';
 
 const UA = 'ApexKart venue baker (github.com/Cyrus-Krispin/apexkart)';
 const MIRRORS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
-const KART_M: [number, number] = [150, 2600]; // a loop outside this is a pit lane or the big circuit next door
+const KART_M: [number, number] = [150, 2100]; // a loop outside this is a pit lane or the big circuit next door
+const KARTISH = /kart|go.?kart|carting/i;
 const NEAR_DEG = 0.008; // raceways within ~900 m of a venue belong to it
 const MAX_LAYOUTS = 3;
 const WORKERS = 2; // Overpass gives each address two slots
@@ -21,32 +23,57 @@ const world: { venues: Venue[]; countries: Record<string, unknown>; source: stri
 const onlyCells = process.argv.includes('--cells') ? new Set(process.argv[process.argv.indexOf('--cells') + 1].split(',')) : null;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function raceways(cell: string, worker: number): Promise<any[]> {
-  const [cy, cx] = cell.split('_').map(Number);
-  const pad = 0.02;
-  const bbox = [cy * CELL_DEG - pad, cx * CELL_DEG - pad, (cy + 1) * CELL_DEG + pad, (cx + 1) * CELL_DEG + pad].map((v) => v.toFixed(3)).join(',');
-  const q = `[out:json][timeout:240][maxsize:536870912];way["highway"="raceway"](${bbox});out body geom;`;
-  for (let attempt = 0; attempt < 8; attempt++) {
+/** Overpass, with mirrors and backoff; null after `attempts` failures. */
+async function query(q: string, label: string, worker: number, attempts: number): Promise<any[] | null> {
+  for (let attempt = 0; attempt < attempts; attempt++) {
     const url = MIRRORS[(worker + attempt) % MIRRORS.length];
     try {
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'User-Agent': UA, Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
         body: 'data=' + encodeURIComponent(q),
-        signal: AbortSignal.timeout(300_000),
+        signal: AbortSignal.timeout(150_000),
       });
       const text = await res.text();
       if (res.ok && text.trimStart().startsWith('{')) {
         const data = JSON.parse(text);
         if (!(typeof data.remark === 'string' && /error|timed out/i.test(data.remark))) return data.elements ?? [];
       }
-      console.log(`  ${cell}: ${url.split('/')[2]} ${res.status}`);
+      console.log(`  ${label}: ${url.split('/')[2]} ${res.status}`);
     } catch (e) {
-      console.log(`  ${cell}: ${url.split('/')[2]} ${(e as Error).message}`);
+      console.log(`  ${label}: ${url.split('/')[2]} ${(e as Error).message}`);
     }
-    await sleep(5000 * (attempt + 1));
+    await sleep(3000 * (attempt + 1));
   }
-  throw new Error(`cell ${cell}: Overpass unavailable`);
+  return null;
+}
+
+/**
+ * Raceways around a set of venues: one query that unions a small box around each venue, so only the
+ * raceways that matter come back (a whole 5° box is mostly motocross and big circuits). A batch that
+ * keeps failing is split in half rather than retried as-is.
+ */
+async function racewaysNear(venues: Venue[], label: string, worker: number, depth = 0): Promise<any[]> {
+  const d = NEAR_DEG + 0.002;
+  const boxes = venues
+    .map(([la, lo]) => {
+      const dl = d / Math.cos((la * Math.PI) / 180);
+      return `way["highway"="raceway"](${(la - d).toFixed(4)},${(lo - dl).toFixed(4)},${(la + d).toFixed(4)},${(lo + dl).toFixed(4)});`;
+    })
+    .join('');
+  const els = await query(`[out:json][timeout:120];(${boxes});out body geom;`, label, worker, venues.length > 1 && depth < 4 ? 3 : 6);
+  if (els) return els;
+  if (venues.length === 1 || depth >= 4) throw new Error(`${label}: Overpass unavailable`);
+  console.log(`  ${label}: splitting ${venues.length} venues in half`);
+  const half = Math.ceil(venues.length / 2);
+  const out = new Map<number, any>();
+  for (const [i, part] of [venues.slice(0, half), venues.slice(half)].entries())
+    for (const el of await racewaysNear(part, `${label}.${i}`, worker, depth + 1)) out.set(el.id, el);
+  return [...out.values()];
+}
+
+async function raceways(cell: string, worker: number): Promise<any[]> {
+  return racewaysNear(byCell.get(cell)!, cell, worker);
 }
 
 /** The layouts at one venue from the raceways around it, longest first. */
@@ -54,12 +81,15 @@ function layoutsAt(v: Venue, ways: { el: any; bb: [number, number, number, numbe
   const dLon = NEAR_DEG / Math.cos((v[0] * Math.PI) / 180);
   const near = ways.filter(({ bb }) => bb[2] >= v[0] - NEAR_DEG && bb[0] <= v[0] + NEAR_DEG && bb[3] >= v[1] - dLon && bb[1] <= v[1] + dLon).map((w) => w.el);
   if (!near.length) return [];
-  const loops = findLoops(near, 10)
+  // Kart loops first (venues often share a site with handling or car circuits), then longest. A way
+  // counts as kart if it's tagged sport=karting or named like one.
+  const kart = (ways: number[]) => near.some((e) => ways.includes(e.id) && (/karting/.test(e.tags?.sport ?? '') || KARTISH.test(e.tags?.name ?? '')));
+  const tracks = findLoops(near, 10)
     .filter((l) => l.lengthM >= KART_M[0] && l.lengthM <= KART_M[1])
-    .sort((a, b) => b.lengthM - a.lengthM);
+    .sort((a, b) => Number(kart(b.ways)) - Number(kart(a.ways)) || b.lengthM - a.lengthM)
+    .map((l) => loopToTrack(l, near, v[3] || 'Unnamed kart track'));
   const out: PackedLayout[] = [];
-  for (const l of loops) {
-    const t = loopToTrack(l, near, v[3] || 'Unnamed kart track');
+  for (const t of tracks) {
     if (taken.has(t.id) || out.some((o) => o[0] === t.id)) continue;
     out.push([t.id, t.name, t.width, t.lengthM, packPoints(t.points)]);
     if (out.length === MAX_LAYOUTS) break;
@@ -130,13 +160,15 @@ await Promise.all(
         failed.push(cell);
         console.log(`✗ ${(e as Error).message}`);
       }
-      await sleep(1500);
+      await sleep(1000);
     }
   }),
 );
 
 if (failed.length) {
-  // Never publish a half-baked map: a missing cell would drop every venue in it.
+  // Never publish a half-baked map: a missing cell would drop every venue in it. The cell files that
+  // did bake are kept (and uploaded), so a re-run only needs the failed ones.
+  writeFileSync('public/tracks/venues/failed-cells.txt', failed.join(',') + '\n');
   console.log(`\n${failed.length} cells failed (${failed.join(',')}); not rewriting world.json. Re-run with --cells ${failed.join(',')}.`);
   process.exit(1);
 }
