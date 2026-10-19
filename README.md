@@ -19,8 +19,18 @@ broadcast-style timing panels with F1 sector colours. Tokens live in `src/styles
 - **Real tracks, anywhere**: raceway ways from OpenStreetMap are split at junctions and
   turned into closed loops (`src/track/osm.ts`), then spline-smoothed and resampled every
   metre (`src/game/track.ts`). The start/finish line is auto-placed on the longest straight.
-- **Satellite world**: Esri World Imagery tiles are stitched into one ground texture and
-  aligned to the track in metres (`src/game/satellite.ts`).
+- **The real place in 3D** (`src/game/world/`): OpenStreetMap buildings are extruded to their
+  real height, land use is painted into a crisp stylised ground, and trees fill the mapped woods
+  and parks. The circuit gets raised kerbs, a branded tyre wall on the physics barrier,
+  floodlights, hoardings, a grandstand, a pit building and marshal posts. Featured circuits ship
+  with baked surroundings in `public/tracks/env/`. A satellite-imagery ground is available as the
+  "World" setting.
+- **Renderer** (`src/game/render.ts`): golden-hour light, GTAO ambient occlusion, bloom, sky
+  reflections, and quality levels that step down automatically if the frame rate drops.
+- **Correct layouts**: the loop finder rejects routes that U-turn at a junction, so pit lanes and
+  links can't sneak into a lap. When OpenStreetMap itself is wrong, **Fix the layout** on a circuit
+  page opens an editor over the satellite imagery. Corrections are shared through `/api/layout`
+  and get their own leaderboard.
 - **Seven featured circuits** baked into `public/tracks/presets.json`: KF1 (Singapore),
   Racing Underdog Medini, South Garda (Lonato), Genk, PF International, Kerpen and the
   Algarve.
@@ -57,7 +67,7 @@ broadcast-style timing panels with F1 sector colours. Tokens live in `src/styles
 npm install
 npm run dev        # http://localhost:5173 (the /api routes run inside Vite too)
 npm run build      # typecheck + production build
-npm run tracks     # re-bake preset tracks from OpenStreetMap (npm run tracks -- KF1 for one)
+npm run tracks     # re-bake preset tracks + surroundings (falls back to the OSM API if Overpass is down)
 ```
 
 In dev, the leaderboard lives in memory and resets when the server restarts.
@@ -79,6 +89,7 @@ no server to run and nothing to migrate. Sorted sets are a natural fit for leade
 | `GET /api/ghost?track&dir&pid` | a driver's PB ghost |
 | `GET /api/feed` | latest laps, every track record, live counts (CDN-cached 3s) |
 | `GET /api/track?id` | geometry for raced tracks, so shared links don't depend on Overpass |
+| `GET/POST /api/layout` | community-corrected layouts (list / save) |
 
 Laps go through plausibility checks: top speed, the ghost's duration matching the lap time,
 and the ghost path length matching the track. Submissions are rate-limited too. That

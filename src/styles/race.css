@@ -191,6 +191,7 @@ kbd.wide { min-width: 52px; }
 .btn.ghost-btn { border-color: rgba(242, 238, 229, 0.25); color: var(--night-text); }
 .btn.ghost-btn:hover { background: var(--night-text); color: var(--ink); border-color: var(--night-text); }
 .hp-toggles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 16px; }
+.hp-toggles button span { white-space: nowrap; }
 .hp-toggles button { display: flex; align-items: center; gap: 8px; height: 42px; padding: 0 12px; border: 1px solid var(--night-rule); color: var(--night-text); font-size: 13px; }
 .hp-toggles button b { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--signal); text-transform: uppercase; }
 .hp-toggles button:hover { border-color: var(--night-text); }

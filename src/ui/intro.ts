@@ -64,7 +64,7 @@ export class RaceIntro {
         <p class="io-pad">Gamepad works too: right trigger, left trigger, stick. On a phone you get on-screen pedals.</p>
       </aside>
       <footer class="io-foot">
-        <div class="io-load"><span class="label">Satellite imagery</span><div class="io-bar"><i data-el="bar"></i></div><span class="mono" data-el="count">…</span></div>
+        <div class="io-load"><span class="label">Building the world</span><div class="io-bar"><i data-el="bar"></i></div><span class="mono" data-el="count">…</span></div>
         <button class="io-go" data-el="go" disabled><span class="io-go-key">Press any key</span><span class="io-go-sub">or tap to start</span></button>
       </footer>`;
     o.container.appendChild(this.el);
@@ -97,10 +97,10 @@ export class RaceIntro {
     setTimeout(() => this.ready(), 5000);
   }
 
-  progress(done: number, total: number) {
-    this.bar.style.width = `${(done / Math.max(1, total)) * 100}%`;
-    this.count.textContent = `${done} / ${total}`;
-    if (done >= total) this.ready();
+  stage(label: string, frac: number) {
+    this.bar.style.width = `${Math.round(frac * 100)}%`;
+    this.count.textContent = label;
+    if (frac >= 1) this.ready();
   }
 
   failed() {

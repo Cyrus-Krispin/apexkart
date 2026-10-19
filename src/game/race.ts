@@ -1,11 +1,12 @@
 import * as THREE from 'three';
 import { TrackModel } from './track';
 import { buildTrackScene, type TrackScene } from './trackMesh';
-import { buildSatelliteGround } from './satellite';
 import { buildKart, KartPhysics, type KartVisual } from './kart';
 import { Input } from './input';
 import { KartAudio } from './audio';
 import { makeSky, SKY } from './sky';
+import { RenderPipeline, autoQuality, initialQuality, type Quality, type QualitySetting } from './render';
+import { buildWorld, initialStyle, type World, type WorldStyle } from './world';
 import { Hud, type SectorColor } from './hud';
 import { RaceIntro } from '../ui/intro';
 import { rotationLabel } from '../ui/trackArt';
@@ -52,8 +53,13 @@ const CAMS = [
 type State = 'intro' | 'grid' | 'racing' | 'paused';
 
 export class Race {
-  private renderer: THREE.WebGLRenderer;
+  private pipeline: RenderPipeline;
   private scene = new THREE.Scene();
+  private qualitySetting: QualitySetting = initialQuality();
+  private style: WorldStyle = initialStyle();
+  private world: World | null = null;
+  private sky!: THREE.Mesh;
+  private frameTimes: number[] = [];
   private camera = new THREE.PerspectiveCamera(62, 1, 0.1, 5000);
   private track: TrackModel;
   private trackScene!: TrackScene;
@@ -61,7 +67,7 @@ export class Race {
   private phys: KartPhysics;
   private input: Input;
   private audio = new KartAudio();
-  private sun = new THREE.DirectionalLight(0xfff1dc, 2.6);
+  private sun = new THREE.DirectionalLight(0xffe2bd, 3.1);
   private ground!: THREE.Mesh;
   private root: HTMLElement;
   private hud: Hud;
@@ -122,13 +128,8 @@ export class Race {
     this.root.className = 'race';
     opts.container.appendChild(this.root);
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.0;
-    this.root.appendChild(this.renderer.domElement);
+    this.pipeline = new RenderPipeline(this.scene, this.camera, this.qualitySetting === 'auto' ? autoQuality() : this.qualitySetting);
+    this.root.appendChild(this.pipeline.renderer.domElement);
 
     this.hud = new Hud(this.root, { trackName: opts.track.name, dirLabel: rot.label, dirIcon: rot.icon, color: opts.driver.color }, (a) => this.action(a));
     this.hud.setVisible(false);
@@ -169,39 +170,61 @@ export class Race {
 
   private buildWorld() {
     const s = this.scene;
-    const sunDir = new THREE.Vector3(0.45, 0.8, 0.3).normalize();
-    s.add(makeSky(sunDir));
-    s.fog = new THREE.Fog(SKY.horizon, 260, 1500);
-    s.add(new THREE.HemisphereLight(0xdfe8f2, 0x5a5040, 1.05));
+    // Golden-hour sun from the side for long, readable shadows.
+    const sunDir = new THREE.Vector3(0.55, 0.5, 0.35).normalize();
+    this.sky = makeSky(sunDir);
+    s.add(this.sky);
+    s.fog = new THREE.Fog(SKY.horizon, 340, 1800);
+    s.add(new THREE.HemisphereLight(0xcfe0f2, 0x6a5a42, 0.8));
     this.sun.userData.dir = sunDir;
     this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(2048, 2048);
+    const hi = this.pipeline.quality !== 'low';
+    this.sun.shadow.mapSize.set(hi ? 2048 : 1024, hi ? 2048 : 1024);
     const sc = this.sun.shadow.camera;
-    sc.left = sc.bottom = -30;
-    sc.right = sc.top = 30;
+    sc.left = sc.bottom = -38;
+    sc.right = sc.top = 38;
     sc.near = 10;
-    sc.far = 300;
+    sc.far = 320;
     this.sun.shadow.bias = -0.0004;
+    this.sun.shadow.normalBias = 0.03;
     s.add(this.sun, this.sun.target);
+    this.pipeline.setQuality(this.pipeline.quality);
+    this.pipeline.bakeEnvironment(this.sky);
 
-    this.ground = new THREE.Mesh(new THREE.PlaneGeometry(9000, 9000).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x5a6b45 }));
+    this.ground = new THREE.Mesh(new THREE.PlaneGeometry(9000, 9000).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x7da457 }));
     this.ground.position.y = -0.08;
     this.ground.receiveShadow = true;
     s.add(this.ground);
 
-    const aniso = this.renderer.capabilities.getMaxAnisotropy();
+    const aniso = this.pipeline.renderer.capabilities.getMaxAnisotropy();
     this.trackScene = buildTrackScene(this.track, aniso);
     s.add(this.trackScene.group);
+    this.rebuildWorld();
+  }
 
-    buildSatelliteGround(this.track, aniso, (d, t) => this.intro.progress(d, t))
-      .then((sat) => {
-        if (this.disposed) return;
-        if (!sat) return this.intro.failed();
-        sat.mesh.position.y = -0.02;
-        s.add(sat.mesh);
-        (this.ground.material as THREE.MeshLambertMaterial).color.copy(sat.edgeColor);
-      })
-      .catch(() => this.intro.failed());
+  private async rebuildWorld() {
+    if (this.world) {
+      this.scene.remove(this.world.group);
+      disposeTree(this.world.group);
+      this.world = null;
+    }
+    const world = await buildWorld({
+      track: this.track,
+      data: this.opts.track,
+      style: this.style,
+      quality: this.pipeline.quality,
+      aniso: this.pipeline.renderer.capabilities.getMaxAnisotropy(),
+      onStage: (label, f) => this.intro.stage(label, f),
+      isDisposed: () => this.disposed,
+    }).catch((e) => {
+      console.error(e);
+      this.intro.failed();
+      return null;
+    });
+    if (!world || this.disposed) return;
+    this.world = world;
+    this.scene.add(world.group);
+    (this.ground.material as THREE.MeshLambertMaterial).color.copy(world.groundColor);
   }
 
   private buildMinimap() {
@@ -305,11 +328,32 @@ export class Race {
     if (a === 'mute') this.audio.toggleMute();
     if (a === 'ghosts') this.toggleGhosts();
     if (a === 'cam') this.camMode = (this.camMode + 1) % CAMS.length;
+    if (a === 'quality') {
+      const order: QualitySetting[] = ['auto', 'high', 'medium', 'low'];
+      this.qualitySetting = order[(order.indexOf(this.qualitySetting) + 1) % order.length];
+      localStorage.setItem('ak:quality', this.qualitySetting);
+      this.applyQuality(this.qualitySetting === 'auto' ? autoQuality() : this.qualitySetting);
+    }
+    if (a === 'style') {
+      this.style = this.style === 'stylised' ? 'satellite' : 'stylised';
+      localStorage.setItem('ak:style', this.style);
+      this.hud.toast(this.style === 'stylised' ? 'Stylised world' : 'Satellite world');
+      this.rebuildWorld();
+    }
     this.syncToggles();
   }
 
+  private applyQuality(q: Quality) {
+    if (q === this.pipeline.quality) return;
+    this.pipeline.setQuality(q);
+    this.sun.shadow.mapSize.set(q === 'low' ? 1024 : 2048, q === 'low' ? 1024 : 2048);
+    this.sun.shadow.map?.dispose();
+    this.sun.shadow.map = null;
+  }
+
   private syncToggles() {
-    this.hud.toggles({ muted: this.audio.muted, ghosts: this.showGhosts, cam: CAMS[this.camMode].label });
+    const q = this.qualitySetting === 'auto' ? `Auto · ${this.pipeline.quality}` : this.qualitySetting;
+    this.hud.toggles({ muted: this.audio.muted, ghosts: this.showGhosts, cam: CAMS[this.camMode].label, quality: q, style: this.style === 'stylised' ? 'Stylised' : 'Satellite' });
   }
 
   private resetToGrid() {
@@ -389,7 +433,22 @@ export class Race {
     this.boardTimer -= dt;
     if (this.boardTimer <= 0) this.refreshBoard();
     this.render(dt);
+    this.adaptQuality(dt);
   };
+
+  /** In auto mode, step quality down if the frame rate can't keep up. */
+  private adaptQuality(dt: number) {
+    if (this.qualitySetting !== 'auto' || this.state !== 'racing' || document.hidden) return;
+    this.frameTimes.push(dt);
+    if (this.frameTimes.length < 150) return;
+    const sorted = [...this.frameTimes].sort((a, b) => a - b);
+    const p50 = sorted[Math.floor(sorted.length / 2)];
+    this.frameTimes = [];
+    if (p50 > 1 / 40 && this.pipeline.quality !== 'low') {
+      this.applyQuality(this.pipeline.quality === 'high' ? 'medium' : 'low');
+      this.syncToggles();
+    }
+  }
 
   private tick(dt: number) {
     const c = this.autopilot ? this.autoControls() : this.input.read(dt);
@@ -734,7 +793,7 @@ export class Race {
       } else g.tag.style.display = 'none';
     }
 
-    this.renderer.render(this.scene, this.camera);
+    this.pipeline.render();
     this.drawHud(lapT);
   }
 
@@ -809,7 +868,7 @@ export class Race {
   private onResize = () => {
     const w = this.root.clientWidth || innerWidth;
     const h = this.root.clientHeight || innerHeight;
-    this.renderer.setSize(w, h);
+    this.pipeline.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   };
@@ -840,18 +899,23 @@ export class Race {
     this.hud.dispose();
     this.input.dispose();
     this.audio.dispose();
-    this.renderer.dispose();
-    this.scene.traverse((o) => {
-      const m = o as THREE.Mesh;
-      m.geometry?.dispose();
-      const mats = Array.isArray(m.material) ? m.material : m.material ? [m.material] : [];
-      mats.forEach((x) => {
-        (x as THREE.MeshStandardMaterial).map?.dispose();
-        x.dispose();
-      });
-    });
+    disposeTree(this.scene);
+    this.scene.environment?.dispose();
+    this.pipeline.dispose();
     this.root.remove();
   }
+}
+
+function disposeTree(root: THREE.Object3D) {
+  root.traverse((o) => {
+    const m = o as THREE.Mesh;
+    m.geometry?.dispose();
+    const mats = Array.isArray(m.material) ? m.material : m.material ? [m.material] : [];
+    mats.forEach((x) => {
+      (x as THREE.MeshStandardMaterial).map?.dispose();
+      x.dispose();
+    });
+  });
 }
 
 /** Local personal best for a track (used by the atlas). */

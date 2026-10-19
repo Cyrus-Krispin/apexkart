@@ -4,7 +4,8 @@ import { discoverTracks, trackFromId, type LatLon, type TrackData } from '../tra
 import { analyzeShape, type TrackShape } from '../track/shape';
 import { trackArt, rotationLabel } from './trackArt';
 import { ProfileMenu } from './profile';
-import { api, escapeHtml, formatMs, timeAgo, type BoardResponse, type Dir, type Driver, type FeedResponse } from '../net/api';
+import { LayoutEditor } from './layoutEditor';
+import { api, escapeHtml, formatMs, timeAgo, type BoardResponse, type CommunityLayout, type Dir, type Driver, type FeedResponse } from '../net/api';
 import { localPB } from '../game/race';
 
 const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services';
@@ -53,6 +54,16 @@ function pointAtFrac(pts: LatLon[], frac: number): LatLon {
   return pts[0];
 }
 
+function loopLengthKm(pts: LatLon[]) {
+  let L = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i];
+    const b = pts[(i + 1) % pts.length];
+    L += Math.hypot((b[0] - a[0]) * 110540, (b[1] - a[1]) * 111320 * Math.cos((a[0] * Math.PI) / 180));
+  }
+  return L / 1000;
+}
+
 function coords(c: LatLon) {
   const la = `${Math.abs(c[0]).toFixed(4)}°${c[0] >= 0 ? 'N' : 'S'}`;
   const lo = `${Math.abs(c[1]).toFixed(4)}°${c[1] >= 0 ? 'E' : 'W'}`;
@@ -78,6 +89,9 @@ export class Atlas {
   private profile: ProfileMenu;
   private timers: number[] = [];
   private toastTimer = 0;
+  private aliases = new Map<string, string>(); // OSM id -> community layout id
+  private pendingLayouts = new Map<string, CommunityLayout>();
+  private editor: LayoutEditor | null = null;
 
   constructor(private o: AtlasOptions) {
     o.root.innerHTML = ATLAS_HTML;
@@ -89,6 +103,7 @@ export class Atlas {
     this.initMap();
     this.bind();
     this.load();
+    if (import.meta.env.DEV) Object.assign(window as any, { __atlas: this, __L: L });
   }
 
   // ------------------------------------------------------------------ map
@@ -130,7 +145,7 @@ export class Atlas {
 
   private drawOutlines() {
     this.outlines.clearLayers();
-    if (this.map.getZoom() < 12) return;
+    if (this.map.getZoom() < 12 || this.editor) return;
     const view = this.map.getBounds().pad(0.4);
     for (const t of this.tracks.values()) {
       if (!view.contains(t.center)) continue;
@@ -197,6 +212,8 @@ export class Atlas {
       if (t.closest('[data-act=back]')) location.hash = '';
       if (t.closest('[data-act=race]') && this.selected) this.o.onRace(this.selected, this.dir);
       if (t.closest('[data-act=geosearch]')) this.submitSearch(true);
+      const act = t.closest<HTMLElement>('[data-act^=edit]')?.dataset.act;
+      if (act) this.editAction(act);
       const d = t.closest<HTMLElement>('[data-dir]')?.dataset.dir as Dir | undefined;
       if (d && this.selected && d !== this.dir) location.hash = `#/t/${this.selected.id}/${d}`;
     });
@@ -267,6 +284,11 @@ export class Atlas {
     } catch {
       /* ignore */
     }
+    try {
+      this.applyLayouts(await api.layouts());
+    } catch {
+      /* layouts are optional */
+    }
     this.renderList();
     this.nameTracks([...this.tracks.values()].filter((t) => !t.preset && !t.location));
     if (!this.route()) this.fitAll(false);
@@ -286,8 +308,39 @@ export class Atlas {
   }
 
   private addTrack(t: TrackData) {
+    const lay = this.pendingLayouts.get(t.id);
+    if (lay) {
+      this.pendingLayouts.delete(t.id);
+      t = this.withLayout(t, lay);
+    }
     this.tracks.set(t.id, t);
     this.addPin(t);
+  }
+
+  /** Swap a track's OSM trace for a community-corrected layout (new id, new leaderboard). */
+  private withLayout(t: TrackData, lay: CommunityLayout): TrackData {
+    const baseId = t.corrected?.baseId ?? t.id;
+    const osmPoints = t.corrected?.osmPoints ?? t.points;
+    this.aliases.set(baseId, lay.id);
+    return { ...t, id: lay.id, points: lay.points, lengthM: lay.lengthM, corrected: { by: lay.by, at: lay.at, baseId, osmPoints } };
+  }
+
+  private applyLayouts(all: Record<string, CommunityLayout>) {
+    for (const [base, lay] of Object.entries(all)) {
+      const current = this.tracks.get(base) ?? [...this.tracks.values()].find((x) => x.corrected?.baseId === base);
+      if (!current) {
+        this.pendingLayouts.set(base, lay);
+        continue;
+      }
+      if (current.id === lay.id) continue;
+      const fixed = this.withLayout(current, lay);
+      this.tracks.delete(current.id);
+      this.pins.get(current.id)?.remove();
+      this.pins.delete(current.id);
+      this.tracks.set(fixed.id, fixed);
+      this.addPin(fixed);
+      if (this.selected?.id === current.id) this.selected = fixed;
+    }
   }
 
   private persist() {
@@ -385,7 +438,12 @@ export class Atlas {
       return false;
     }
     this.dir = (m[2] as Dir) || 'fwd';
-    this.select(decodeURIComponent(m[1]));
+    const id = decodeURIComponent(m[1]);
+    const alias = this.aliases.get(id);
+    if (alias) {
+      history.replaceState(null, '', `#/t/${alias}/${this.dir}`);
+      this.select(alias);
+    } else this.select(id);
     return true;
   }
 
@@ -431,6 +489,7 @@ export class Atlas {
   }
 
   private closeDetail() {
+    this.stopEditing();
     this.selected = null;
     this.board = null;
     this.o.root.classList.remove('detail-open');
@@ -453,6 +512,96 @@ export class Atlas {
     }).addTo(this.map);
   }
 
+  // ------------------------------------------------------------------ layout editor
+
+  private editAction(act: string) {
+    if (act === 'edit-start') return this.startEditing();
+    if (!this.editor || !this.selected) return;
+    if (act === 'edit-cancel') this.stopEditing(true);
+    if (act === 'edit-restart') this.editor.startOver();
+    if (act === 'edit-reverse') this.editor.reverse();
+    if (act === 'edit-reset') this.editor.reset(this.selected.corrected?.osmPoints ?? this.selected.points);
+    if (act === 'edit-save') this.saveLayout();
+  }
+
+  private startEditing() {
+    const t = this.selected;
+    if (!t || this.editor) return;
+    this.sfMarker?.remove();
+    this.o.root.classList.add('editing');
+    const original = t.corrected?.osmPoints ?? t.points;
+    this.el.detail.innerHTML = `
+      <div class="d-top"><button class="back" data-act="edit-cancel"><span class="mono">←</span> Cancel</button><span class="label">Layout editor</span></div>
+      <h1 class="display d-name">Fix the layout</h1>
+      <p class="ed-lede">Line the orange route up with the <b>middle of the asphalt</b>, in race direction. Your version replaces the OpenStreetMap trace for everyone and starts a fresh leaderboard.</p>
+      <ol class="ed-steps">
+        <li><b class="mono">01</b><span>Drag the white points onto the centre of the track.</span></li>
+        <li><b class="mono">02</b><span>Click a small dot on the line to add a point. Right-click (or long-press) a point to remove it.</span></li>
+        <li><b class="mono">03</b><span>Way off? <b>Start over</b> and click your way round, then click the first point to close the loop.</span></li>
+      </ol>
+      <dl class="d-stats ed-stats">
+        <div><dt class="label">Length</dt><dd class="mono" data-el="edLen">–</dd></div>
+        <div><dt class="label">Points</dt><dd class="mono" data-el="edPts">–</dd></div>
+        <div><dt class="label">OSM trace</dt><dd class="mono">${(loopLengthKm(original)).toFixed(2)}<small>km</small></dd></div>
+      </dl>
+      <div class="ed-tools">
+        <button class="btn" data-act="edit-restart">Start over</button>
+        <button class="btn" data-act="edit-reverse">Reverse</button>
+        <button class="btn" data-act="edit-reset">Reset to OSM</button>
+      </div>
+      <p class="ed-status" data-el="edStatus"></p>
+      <button class="btn primary lg block" data-act="edit-save">Save layout <span class="arrow">→</span></button>`;
+    this.el.detail.querySelectorAll<HTMLElement>('[data-el]').forEach((e) => (this.el[e.dataset.el!] = e));
+    this.drawOutlines();
+    this.map.flyToBounds(L.latLngBounds(t.points.map((p) => L.latLng(p[0], p[1]))), { maxZoom: 19, duration: 0.8, ...this.mapPadding() });
+    this.editor = new LayoutEditor(this.map, t.points, {
+      onChange: (i) => {
+        this.el.edLen.innerHTML = `${(i.lengthM / 1000).toFixed(2)}<small>km</small>`;
+        this.el.edPts.textContent = String(i.points);
+        this.el.edStatus.textContent = i.drawing ? (i.points < 4 ? 'Click along the track in race direction…' : 'Click the first point to close the loop.') : '';
+      },
+    });
+    this.el.edPts.textContent = String(this.editor.points.length);
+    this.el.edLen.innerHTML = `${(loopLengthKm(this.editor.points)).toFixed(2)}<small>km</small>`;
+  }
+
+  private stopEditing(rerender = false) {
+    if (!this.editor) return;
+    this.editor.destroy();
+    this.editor = null;
+    this.o.root.classList.remove('editing');
+    if (rerender && this.selected) {
+      this.renderDetail();
+      this.placeStartMarker();
+      this.drawOutlines();
+      this.pollBoard();
+    }
+  }
+
+  private async saveLayout() {
+    const t = this.selected;
+    const ed = this.editor;
+    if (!t || !ed) return;
+    if (!ed.valid) {
+      this.el.edStatus.textContent = 'Close the loop first: click the first point.';
+      return;
+    }
+    this.el.edStatus.textContent = 'Saving…';
+    try {
+      const base = t.corrected?.baseId ?? t.id;
+      const res = await api.saveLayout({ base, points: ed.points, center: t.center, trackName: t.name, width: t.width, name: this.o.driver.name, driverId: this.o.driver.id });
+      const lay: CommunityLayout = { id: res.id, points: ed.points, lengthM: res.lengthM, by: this.o.driver.name, pid: this.o.driver.pid, at: Date.now() };
+      this.stopEditing();
+      this.applyLayouts({ [base]: lay });
+      this.persist();
+      this.toast('Layout saved. It now has its own leaderboard.');
+      location.hash = `#/t/${res.id}/fwd`;
+      this.renderList();
+    } catch (e) {
+      this.el.edStatus.textContent = `Couldn't save: ${(e as Error).message}`;
+    }
+  }
+
   // ------------------------------------------------------------------ rendering
 
   private card(t: TrackData, idx: number) {
@@ -462,7 +611,7 @@ export class Atlas {
     const pb = localPB(t.id, 'fwd');
     const where = t.location ? t.location.split(',')[0] : coords(t.center);
     return `<button class="card" data-track="${escapeHtml(t.id)}">
-      <div class="card-top"><span class="label">${t.preset ? String(idx + 1).padStart(2, '0') : 'OSM'}${t.country ? ` · ${t.country}` : ''}</span>${live ? `<span class="card-live"><i class="live-dot"></i>${live} live</span>` : ''}</div>
+      <div class="card-top"><span class="label">${t.preset ? String(idx + 1).padStart(2, '0') : 'OSM'}${t.country ? ` · ${t.country}` : ''}</span>${t.needsFix && !t.corrected ? '<span class="card-warn">Trace off</span>' : live ? `<span class="card-live"><i class="live-dot"></i>${live} live</span>` : ''}</div>
       <div class="card-art graph-paper">${trackArt(shape, { w: 240, h: 130, pad: 14, arrows: false })}</div>
       <h3 class="display">${escapeHtml(t.name)}</h3>
       <p class="card-sub">${escapeHtml(where)} · ${(t.lengthM / 1000).toFixed(2)} km · ${shape.corners.length} turns</p>
@@ -537,12 +686,25 @@ export class Atlas {
         <button data-dir="${this.dir}" class="on" role="radio" aria-checked="true"><span>${rot.icon}</span>${rot.label}</button>
         <button data-dir="${rev ? 'fwd' : 'rev'}" role="radio" aria-checked="false"><span>${other.icon}</span>${other.label}</button>
       </div>
+      ${t.needsFix && !t.corrected ? '<button class="d-warn-top" data-act="edit-start"><b>Trace doesn’t match the asphalt.</b> Fix the layout →</button>' : ''}
       <button class="btn primary lg block" data-act="race">Start engine <span class="arrow">→</span></button>
       <p class="d-pb">${pb ? `Your best here <b class="mono">${formatMs(pb)}</b>` : 'No lap yet. Your first clean lap goes straight onto the board.'}</p>
       <div class="sec-head"><h2 class="label">Live leaderboard · ${rot.label.toLowerCase()}</h2><span class="label" data-el="dCount"></span></div>
       <div class="d-live" data-el="dLive"></div>
       <div data-el="dBoard"><p class="empty">Loading leaderboard…</p></div>
-      <p class="d-src label">Geometry · <a target="_blank" rel="noopener" href="https://www.openstreetmap.org/way/${t.osmWays[0]}">OSM way ${t.osmWays[0]}${t.osmWays.length > 1 ? ` +${t.osmWays.length - 1}` : ''}</a></p>`;
+      <div class="d-layout">
+        ${
+          t.needsFix && !t.corrected
+            ? `<p class="d-warn"><b>This layout is off.</b> The OpenStreetMap trace for this circuit doesn't follow the real asphalt, so the lap you drive won't match the satellite view. If you know the track, fix it below for everyone.</p>`
+            : ''
+        }
+        ${
+          t.corrected
+            ? `<p><span class="cc mono">FIXED</span> Layout corrected by <b>${escapeHtml(t.corrected.by)}</b> ${timeAgo(t.corrected.at)}. Times on the old OSM trace are on a separate board.</p>`
+            : `<p>Traced from OpenStreetMap${t.osmWays.length ? ` (<a target="_blank" rel="noopener" href="https://www.openstreetmap.org/way/${t.osmWays[0]}">way ${t.osmWays[0]}${t.osmWays.length > 1 ? ` +${t.osmWays.length - 1}` : ''}</a>)` : ''}. If the line doesn't sit on the asphalt, you can fix it.</p>`
+        }
+        <button class="btn block" data-act="edit-start">Fix the layout <span class="arrow">→</span></button>
+      </div>`;
     this.el.detail.querySelectorAll<HTMLElement>('[data-el]').forEach((e) => (this.el[e.dataset.el!] = e));
     if (this.board) this.renderBoard();
   }
