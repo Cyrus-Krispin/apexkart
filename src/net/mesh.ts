@@ -172,6 +172,8 @@ class Peer {
     try {
       if (msg.k === 'offer' && !this.initiator) {
         this.attempt = msg.id;
+        // The initiator is past its fast attempts: it's using the relay already, so should we.
+        if (msg.id > MAX_FAST_ATTEMPTS && this.state === 'connecting') this.setState('relay');
         const pc = this.newPc();
         await pc.setRemoteDescription({ type: 'offer', sdp: msg.sdp });
         await pc.setLocalDescription(await pc.createAnswer());
