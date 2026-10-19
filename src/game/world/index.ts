@@ -27,29 +27,43 @@ export interface World {
 }
 
 const envCache = new Map<string, EnvData | null>();
+const baked = new Map<string, Promise<EnvData | null>>();
 
+/** Surroundings shipped with the site (featured circuits), if any. */
+function bakedEnv(data: TrackData): Promise<EnvData | null> {
+  let p = baked.get(data.id);
+  if (!p) {
+    p = fetch(`/tracks/env/${data.id}.json`)
+      .then((r) => (r.ok && r.headers.get('content-type')?.includes('json') ? (r.json() as Promise<EnvData>) : null))
+      .catch(() => null);
+    baked.set(data.id, p);
+  }
+  return p;
+}
+
+/** Surroundings we already have: baked, or fetched live earlier this session. Never waits on Overpass. */
 async function loadEnv(data: TrackData): Promise<EnvData | null> {
   if (envCache.has(data.id)) return envCache.get(data.id)!;
-  let env: EnvData | null = null;
+  return bakedEnv(data);
+}
+
+/**
+ * Fetch a track's surroundings live from Overpass (for tracks without baked ones). Races don't
+ * wait for this: the world is built without them and rebuilt once they arrive. True if it got them.
+ */
+export async function fetchLiveEnv(data: TrackData): Promise<boolean> {
+  if (envCache.get(data.id) || (await bakedEnv(data))) return false; // nothing new to add
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 30000);
   try {
-    const r = await fetch(`/tracks/env/${data.id}.json`);
-    if (r.ok && r.headers.get('content-type')?.includes('json')) env = await r.json();
+    const env = await fetchEnv(data, ctl.signal);
+    envCache.set(data.id, env);
+    return true;
   } catch {
-    /* fall through to a live fetch */
+    return false; // the procedural world still works without it
+  } finally {
+    clearTimeout(timer);
   }
-  if (!env) {
-    const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), 15000);
-    try {
-      env = await fetchEnv(data, ctl.signal);
-    } catch {
-      env = null; // the procedural world still works without it
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-  envCache.set(data.id, env);
-  return env;
 }
 
 // Yield between heavy steps so the intro stays responsive (rAF would stall in background tabs).

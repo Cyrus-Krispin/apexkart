@@ -7,7 +7,7 @@ import { KartAudio } from './audio';
 import { Atmosphere, resolveTime, saveTimePref, timePref, type TimePref } from './atmosphere';
 import { floodlit } from './floodlights';
 import { RenderPipeline, autoQuality, initialQuality, type Quality, type QualitySetting } from './render';
-import { buildWorld, initialStyle, type World, type WorldStyle } from './world';
+import { buildWorld, fetchLiveEnv, initialStyle, type World, type WorldStyle } from './world';
 import { Hud, type SectorColor } from './hud';
 import { RaceIntro } from '../ui/intro';
 import { rotationLabel } from '../ui/trackArt';
@@ -67,6 +67,7 @@ export class Race {
   /** Live, Day or Night; a shared session (multiplayer room) fixes it for everyone. */
   private timeSetting: TimePref;
   private worldBuild = 0; // world style toggles can overlap; only the newest build is kept
+  private liveEnvAsked = false;
   private frameTimes: number[] = [];
   private camera = new THREE.PerspectiveCamera(62, 1, 0.1, 5000);
   private track: TrackModel;
@@ -226,6 +227,13 @@ export class Race {
     if (!world || this.disposed || build !== this.worldBuild) return;
     this.world = world;
     this.scene.add(world.group);
+    // No baked surroundings: race now, and add the buildings and trees when Overpass delivers them.
+    if (!world.stats.env && !this.liveEnvAsked) {
+      this.liveEnvAsked = true;
+      fetchLiveEnv(this.opts.track).then((got) => {
+        if (got && !this.disposed) this.rebuildWorld();
+      });
+    }
     this.atmos.setWorld([world.group], world.lamps, world.emissive);
     (this.ground.material as THREE.MeshLambertMaterial).color.copy(world.groundColor);
     await this.warmShaders();
