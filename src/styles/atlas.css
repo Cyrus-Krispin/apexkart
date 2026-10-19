@@ -69,6 +69,11 @@
 .pp-swatches { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; }
 .pp-swatches button { aspect-ratio: 1; background: var(--c); border: 1px solid var(--rule-strong); border-radius: var(--radius); }
 .pp-swatches button.on { outline: 2px solid var(--ink); outline-offset: 2px; }
+.pp-medals { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--rule); }
+.pp-medals span { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 0; }
+.pp-medals span + span { border-left: 1px solid var(--rule); }
+.pp-medals b { font-size: 13px; }
+.pp-none { margin: 0; font-size: 13px; color: var(--ink-3); }
 
 /* ---------- Map */
 .map { position: absolute; inset: 0; background: #1a1a19; }
