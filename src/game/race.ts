@@ -679,7 +679,9 @@ export class Race {
     if (this.opts.mode?.leaderboard === false) return;
     const d = this.opts.driver;
     try {
-      const presence = this.state === 'intro' ? undefined : { pid: d.pid, name: d.name, color: d.color };
+      const t = this.opts.track;
+      const presence =
+        this.state === 'intro' ? undefined : { pid: d.pid, name: d.name, color: d.color, tn: t.name, c: `${t.center[0].toFixed(5)},${t.center[1].toFixed(5)}` };
       const b = await api.board(this.opts.track.id, this.opts.dir, presence);
       if (this.disposed) return;
       this.board = b;

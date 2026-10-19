@@ -244,6 +244,8 @@ export const K = {
   live: (t: string, d: string) => `ak:live:${t}:${d}`,
   liveAll: 'ak:live:all',
   names: 'ak:names',
+  /** track id -> {name, center}: lets the live feed say where drivers are, even before a lap. */
+  trackInfo: 'ak:trackinfo',
   records: 'ak:records',
   feed: 'ak:feed',
   rate: (pid: string) => `ak:rl:${pid}`,
@@ -281,6 +283,19 @@ export function cleanName(s: unknown): string {
       .trim()
       .slice(0, 16) || 'Driver'
   );
+}
+
+export function cleanTrackName(s: unknown): string {
+  return String(s ?? '')
+    .replace(/[\p{C}<>]/gu, '')
+    .trim()
+    .slice(0, 80);
+}
+
+/** "lat,lon" -> [lat, lon], or null if it isn't a plausible coordinate. */
+export function parseCenter(s: unknown): [number, number] | null {
+  const [la, lo] = String(s ?? '').split(',').map(Number);
+  return Number.isFinite(la) && Number.isFinite(lo) && Math.abs(la) <= 90 && Math.abs(lo) <= 180 ? [+la.toFixed(5), +lo.toFixed(5)] : null;
 }
 
 export function cleanColor(s: unknown): string {

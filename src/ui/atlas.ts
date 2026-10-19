@@ -1,23 +1,34 @@
+// The home screen: a dark world map with every kart venue on OpenStreetMap, a dock with
+// "Race now", country filters and a rail of circuits, and a sheet for the selected track.
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { discoverTracks, trackFromId, type LatLon, type TrackData } from '../track/osm';
+import { discoverTracks, layoutsNear, loopToTrack, trackFromId, type LatLon, type TrackData } from '../track/osm';
 import { analyzeShape, type TrackShape } from '../track/shape';
-import { trackArt, rotationLabel } from './trackArt';
 import { ProfileMenu } from './profile';
 import { LayoutEditor } from './layoutEditor';
-import { api, escapeHtml, formatMs, timeAgo, type BoardResponse, type CommunityLayout, type Dir, type Driver, type FeedResponse } from '../net/api';
+import { api, type BoardResponse, type CommunityLayout, type Dir, type Driver, type FeedResponse } from '../net/api';
 import { localPB } from '../game/race';
+import { coreBounds, distM, loadWorld, localeCountry, type Venue, type WorldIndex } from './world';
+import * as V from './atlasViews';
 
 const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services';
-const LIGHT = `${ESRI}/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}`;
-const LIGHT_LABELS = `${ESRI}/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}`;
+const DARK = `${ESRI}/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}`;
+const DARK_LABELS = `${ESRI}/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}`;
 const SAT = `${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`;
+const LAST_KEY = 'ak:last'; // {id, dir} of the last circuit raced: what "Race now" offers
+const SAME_VENUE_M = 700; // a venue dot this close to a known track is that track
+const RAIL_BATCH = 36;
+const TOP_COUNTRIES = 14;
+const SAT_ZOOM = 14;
 
 export interface AtlasOptions {
   root: HTMLElement;
   driver: Driver;
   onRace: (track: TrackData, dir: Dir) => void;
 }
+
+type Filter = { kind: 'featured' } | { kind: 'country'; cc: string } | { kind: 'near'; at: LatLon } | { kind: 'view'; bounds: L.LatLngBounds };
+type RailItem = { kind: 'track'; t: TrackData } | { kind: 'venue'; v: Venue };
 
 const shapes = new Map<string, TrackShape>();
 export function shapeOf(t: TrackData): TrackShape {
@@ -64,15 +75,12 @@ function loopLengthKm(pts: LatLon[]) {
   return L / 1000;
 }
 
-function coords(c: LatLon) {
-  const la = `${Math.abs(c[0]).toFixed(4)}°${c[0] >= 0 ? 'N' : 'S'}`;
-  const lo = `${Math.abs(c[1]).toFixed(4)}°${c[1] >= 0 ? 'E' : 'W'}`;
-  return `${la} ${lo}`;
-}
+const isTyping = (e: Event) => /^(INPUT|TEXTAREA|SELECT)$/.test((e.target as HTMLElement)?.tagName ?? '');
+const small = () => innerWidth <= 760;
 
 export class Atlas {
   private map!: L.Map;
-  private light!: L.Layer;
+  private base!: L.Layer;
   private sat!: L.TileLayer;
   private tracks = new Map<string, TrackData>();
   private pins = new Map<string, L.Marker>();
@@ -84,24 +92,40 @@ export class Atlas {
   private board: BoardResponse | null = null;
   private el: Record<string, HTMLElement> = {};
   private scanning: AbortController | null = null;
-  private lastScan: L.LatLngBounds | null = null;
-  private query = '';
   private profile: ProfileMenu;
-  private timers: number[] = [];
   private toastTimer = 0;
   private aliases = new Map<string, string>(); // OSM id -> community layout id
   private pendingLayouts = new Map<string, CommunityLayout>();
   private editor: LayoutEditor | null = null;
 
+  private world: WorldIndex | null = null;
+  private dots: L.CircleMarker[] = [];
+  private dotRenderer = L.canvas({ padding: 0.4 });
+  private venueTip = L.tooltip({ direction: 'top', offset: [0, -6], className: 'venue-tip', opacity: 1 });
+  private focusRing: L.CircleMarker | null = null;
+  private hiddenVenues = new Set<number>(); // a known track already covers them
+  private emptyVenues = new Set<number>(); // loaded, but OSM has no racing line there
+  private loadingVenue: number | null = null;
+  private dotBucket = -1;
+  private localCC: string | null = null;
+  private filter: Filter = { kind: 'featured' };
+  private rail: RailItem[] = [];
+  private railShown = 0;
+  private railTotal = 0;
+  private hits: V.SearchHit[] = [];
+  private hitSel = 0;
+
   constructor(private o: AtlasOptions) {
     o.root.innerHTML = ATLAS_HTML;
     o.root.querySelectorAll<HTMLElement>('[data-el]').forEach((e) => (this.el[e.dataset.el!] = e));
     this.profile = new ProfileMenu(this.el.profileBtn, o.driver, () => {
-      this.renderList();
+      this.renderRail(true);
       if (this.board) this.renderBoard();
     });
     this.initMap();
     this.bind();
+    this.fitPlaceholder();
+    this.renderNow();
     this.load();
     if (import.meta.env.DEV) Object.assign(window as any, { __atlas: this, __L: L });
   }
@@ -109,38 +133,52 @@ export class Atlas {
   // ------------------------------------------------------------------ map
 
   private initMap() {
-    this.map = L.map(this.el.map, { zoomControl: false, worldCopyJump: true, attributionControl: false, maxZoom: 19, minZoom: 2 }).setView([25, 30], 2);
-    L.control.zoom({ position: 'topright' }).addTo(this.map);
+    this.map = L.map(this.el.map, { zoomControl: false, worldCopyJump: true, attributionControl: false, maxZoom: 19, minZoom: 2, zoomSnap: 0.25 }).setView(
+      [30, 12],
+      small() ? 1.5 : 2.5,
+    );
+    L.control.zoom({ position: 'bottomright' }).addTo(this.map);
     L.control.attribution({ position: 'bottomleft', prefix: false }).addTo(this.map);
-    this.light = L.layerGroup([
-      L.tileLayer(LIGHT, { attribution: 'Esri · OpenStreetMap contributors', maxZoom: 16, className: 'tiles-paper' }),
-      L.tileLayer(LIGHT_LABELS, { maxZoom: 16, className: 'tiles-paper' }),
+    this.base = L.layerGroup([
+      L.tileLayer(DARK, { attribution: 'Esri · OpenStreetMap contributors', maxZoom: 16, className: 'tiles-dark' }),
+      L.tileLayer(DARK_LABELS, { maxZoom: 16, className: 'tiles-dark' }),
     ]).addTo(this.map);
     this.sat = L.tileLayer(SAT, { attribution: 'Imagery © Esri, Maxar, Earthstar Geographics', maxZoom: 19, maxNativeZoom: 19 });
     this.outlines.addTo(this.map);
     this.map.on('zoomend moveend', () => this.onView());
+    this.map.on('zoomend', () => this.sizeDots());
   }
 
   private onView() {
     const z = this.map.getZoom();
-    const sat = z >= 14;
+    const sat = z >= SAT_ZOOM;
     if (sat && !this.map.hasLayer(this.sat)) {
       this.map.addLayer(this.sat);
-      this.map.removeLayer(this.light);
+      this.map.removeLayer(this.base);
     } else if (!sat && this.map.hasLayer(this.sat)) {
-      this.map.addLayer(this.light);
+      this.map.addLayer(this.base);
       this.map.removeLayer(this.sat);
     }
     const c = this.map.getContainer();
-    c.classList.toggle('z-far', z < 5);
+    c.classList.toggle('z-far', z < 4);
+    c.classList.toggle('z-mid', z >= 4.5);
     c.classList.toggle('z-near', z >= 9);
     c.classList.toggle('z-sat', sat);
-    // "Scan this area" appears once you're close enough and haven't scanned this view.
-    const b = this.map.getBounds();
-    const canScan = z >= 10 && !(this.lastScan && this.lastScan.pad(0.05).contains(b));
-    this.el.scan.classList.toggle('show', canScan && !this.scanning && !this.selected);
-    this.el.zoomHint.classList.toggle('show', z >= 5 && z < 10 && !this.selected);
+    this.updateHere();
     this.drawOutlines();
+  }
+
+  /** "List tracks here" once you've zoomed into a region; "Scan" where the index has nothing. */
+  private updateHere() {
+    const z = this.map.getZoom();
+    const btn = this.el.here;
+    if (z < 6 || this.selected || this.editor || this.loadingVenue !== null) return btn.classList.remove('show');
+    const b = this.map.getBounds();
+    const n = this.inBounds(b).length;
+    const viewing = this.filter.kind === 'view' && this.filter.bounds.pad(0.05).contains(b);
+    btn.dataset.mode = n ? 'list' : 'scan';
+    btn.querySelector('span')!.textContent = n ? `List ${n} track${n > 1 ? 's' : ''} here` : 'Scan this area for tracks';
+    btn.classList.toggle('show', (n > 0 && !viewing) || (!n && z >= 11 && !this.scanning));
   }
 
   private drawOutlines() {
@@ -163,12 +201,21 @@ export class Atlas {
     if (this.pins.has(t.id)) return;
     const icon = L.divIcon({
       className: 'pin-wrap',
-      html: `<div class="pin${t.preset ? ' feat' : ''}"><i></i><span>${escapeHtml(t.name)}</span></div>`,
+      html: `<div class="pin${t.preset ? ' feat' : ''}"><i></i><span>${V.esc(t.name)}</span><b class="pin-live mono"></b></div>`,
       iconSize: [0, 0],
     });
-    const m = L.marker(t.center, { icon, riseOnHover: true, keyboard: false, zIndexOffset: t.preset ? 500 : 0 }).on('click', () => this.open(t.id));
+    const m = L.marker(t.center, { icon, riseOnHover: true, keyboard: false, zIndexOffset: t.preset ? 500 : 100 }).on('click', () => this.open(t.id));
     m.addTo(this.map);
     this.pins.set(t.id, m);
+    this.markLive(t.id);
+  }
+
+  private markLive(id: string) {
+    const el = this.pins.get(id)?.getElement()?.querySelector<HTMLElement>('.pin');
+    if (!el) return;
+    const n = (this.feed?.live[`${id}|fwd`] ?? 0) + (this.feed?.live[`${id}|rev`] ?? 0);
+    el.classList.toggle('is-live', n > 0);
+    el.querySelector('.pin-live')!.textContent = n ? String(n) : '';
   }
 
   private hotPin(id: string | null) {
@@ -179,105 +226,608 @@ export class Atlas {
     for (const [pid, m] of this.pins) m.getElement()?.classList.toggle('sel', pid === this.selected?.id);
   }
 
+  // ------------------------------------------------------------------ world venues
+
+  private drawDots() {
+    const w = this.world!;
+    this.dots = w.venues.map((v) => {
+      const m = L.circleMarker(v.at, { renderer: this.dotRenderer, radius: 3, stroke: true, weight: 1, color: '#0b0b0a', fillColor: '#ff4d00', fillOpacity: 0.9, bubblingMouseEvents: false });
+      m.on('click', () => this.openVenue(v));
+      m.on('mouseover', () => {
+        this.venueTip.setLatLng(v.at).setContent(`<b>${V.esc(v.name || 'Unnamed kart track')}</b>${v.cc ? `<span>${V.esc(w.countries.get(v.cc)?.name ?? v.cc)}</span>` : ''}`);
+        this.venueTip.addTo(this.map);
+      });
+      m.on('mouseout', () => this.venueTip.remove());
+      return m;
+    });
+    this.refreshVenues();
+    this.sizeDots();
+  }
+
+  /** Hide dots that a known track already covers; dim the ones outside the country filter. */
+  private refreshVenues() {
+    if (!this.world) return;
+    const known = [...this.tracks.values()];
+    this.hiddenVenues.clear();
+    for (const v of this.world.venues) if (known.some((t) => Math.abs(t.center[0] - v.at[0]) < 0.02 && distM(t.center, v.at) < SAME_VENUE_M)) this.hiddenVenues.add(v.i);
+    const cc = this.filter.kind === 'country' ? this.filter.cc : null;
+    for (const v of this.world.venues) {
+      const m = this.dots[v.i];
+      if (this.hiddenVenues.has(v.i)) {
+        m.remove();
+        continue;
+      }
+      const dim = cc !== null && v.cc !== cc;
+      const empty = this.emptyVenues.has(v.i);
+      m.setStyle({ fillColor: empty ? '#75716a' : '#ff4d00', fillOpacity: dim ? 0.16 : empty ? 0.6 : 0.9, opacity: dim ? 0.2 : 1 });
+      if (!this.map.hasLayer(m)) m.addTo(this.map);
+    }
+    // Known tracks pick up their country from the venue they replaced.
+    for (const t of known) if (!t.country) t.country = this.nearestVenue(t.center, 3000)?.cc || undefined;
+  }
+
+  private sizeDots() {
+    const z = this.map.getZoom();
+    const bucket = z < 3.5 ? 0 : z < 5.5 ? 1 : z < 8 ? 2 : 3;
+    if (bucket === this.dotBucket) return;
+    this.dotBucket = bucket;
+    const r = [2.4, 3.2, 4.5, 6.5][bucket];
+    for (const m of this.dots) m.setRadius(r);
+  }
+
+  private nearestVenue(at: LatLon, maxM: number): Venue | null {
+    let best: Venue | null = null;
+    let bestD = maxM;
+    for (const v of this.world?.venues ?? []) {
+      if (Math.abs(v.at[0] - at[0]) > 0.05) continue;
+      const d = distM(v.at, at);
+      if (d < bestD) {
+        bestD = d;
+        best = v;
+      }
+    }
+    return best;
+  }
+
+  private trackNear(at: LatLon, maxM: number): TrackData | null {
+    let best: TrackData | null = null;
+    let bestD = maxM;
+    for (const t of this.tracks.values()) {
+      const d = distM(t.center, at);
+      if (d < bestD) {
+        bestD = d;
+        best = t;
+      }
+    }
+    return best;
+  }
+
+  private focusVenue(v: Venue | null) {
+    if (!v) {
+      this.focusRing?.remove();
+      return;
+    }
+    this.focusRing ??= L.circleMarker(v.at, { radius: 11, color: '#f2eee5', weight: 2, fill: false, interactive: false, className: 'focus-ring' });
+    this.focusRing.setLatLng(v.at).addTo(this.map);
+  }
+
+  /** A venue dot becomes a track: fetch its raceways, stitch the layouts, open the longest. */
+  private async openVenue(v: Venue) {
+    const known = this.trackNear(v.at, SAME_VENUE_M);
+    if (known) return this.open(known.id);
+    if (this.loadingVenue === v.i) return;
+    this.loadingVenue = v.i;
+    this.focusVenue(v);
+    this.map.flyTo(v.at, 16, { duration: 1.1 });
+    this.toast(`Loading ${v.name || 'this track'} from OpenStreetMap…`, 'busy');
+    try {
+      const { loops, elements } = await layoutsNear(v.at, 500);
+      if (this.loadingVenue !== v.i) return;
+      const found = loops.map((l) => ({ ...loopToTrack(l, elements, v.name || 'Unnamed kart track'), country: v.cc || undefined }));
+      if (!found.length) {
+        this.emptyVenues.add(v.i);
+        this.refreshVenues();
+        this.renderRail(true);
+        this.toast('No racing line is mapped at this venue yet. Try another dot.', 'warn');
+        return;
+      }
+      const fresh = found.filter((t) => !this.tracks.has(t.id));
+      fresh.forEach((t) => this.addTrack(t));
+      this.persist();
+      this.refreshVenues();
+      this.nameTracks(fresh);
+      this.toast(found.length > 1 ? `${found.length} layouts at this venue` : '');
+      this.open(found.sort((a, b) => b.lengthM - a.lengthM)[0].id);
+    } catch {
+      this.toast('OpenStreetMap is busy. Try again in a few seconds.', 'warn');
+    } finally {
+      if (this.loadingVenue === v.i) this.loadingVenue = null;
+      this.focusVenue(null);
+    }
+  }
+
+  // ------------------------------------------------------------------ filters and the rail
+
+  private countryCounts(): Map<string, number> {
+    const n = new Map<string, number>();
+    for (const v of this.world?.venues ?? []) if (v.cc && !this.hiddenVenues.has(v.i)) n.set(v.cc, (n.get(v.cc) ?? 0) + 1);
+    for (const t of this.tracks.values()) if (t.country) n.set(t.country, (n.get(t.country) ?? 0) + 1);
+    return n;
+  }
+
+  private renderChips() {
+    const counts = this.countryCounts();
+    const f = this.filter;
+    const activeCC = f.kind === 'country' ? f.cc : null;
+    const top = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([cc]) => cc);
+    const order = [...new Set([this.localCC, activeCC, ...top.slice(0, TOP_COUNTRIES)].filter((c): c is string => !!c && counts.has(c)))];
+    const featured = [...this.tracks.values()].filter((t) => t.preset).length;
+    const list: V.FilterChip[] = [
+      { key: 'featured', label: 'Featured', n: featured, on: f.kind === 'featured' },
+      { key: 'near', label: 'Near me', on: f.kind === 'near' },
+      ...(f.kind === 'view' ? [{ key: 'view', label: 'This area', n: this.railTotal, on: true }] : []),
+      ...order.map((cc) => ({ key: `cc:${cc}`, label: this.countryName(cc), cc, n: counts.get(cc), on: cc === activeCC })),
+    ];
+    this.el.chips.innerHTML = V.chips(list);
+    this.el.allBtn.querySelector('b')!.textContent = String(counts.size);
+    this.el.chips.querySelector('.on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+
+  private countryName(cc: string) {
+    return this.world?.countries.get(cc)?.name ?? cc;
+  }
+
+  /** What the rail lists for a filter. */
+  private railFor(f: Filter): RailItem[] {
+    const tracks = [...this.tracks.values()];
+    const venues = (this.world?.venues ?? []).filter((v) => !this.hiddenVenues.has(v.i));
+    const byName = (a: Venue, b: Venue) => (a.name ? 0 : 1) - (b.name ? 0 : 1) || a.name.localeCompare(b.name);
+    const T = (t: TrackData): RailItem => ({ kind: 'track', t });
+    const Vn = (v: Venue): RailItem => ({ kind: 'venue', v });
+    if (f.kind === 'featured') {
+      const found = tracks.filter((t) => !t.preset).reverse();
+      return [...tracks.filter((t) => t.preset), ...found].map(T);
+    }
+    if (f.kind === 'country') {
+      const ts = tracks.filter((t) => t.country === f.cc).sort((a, b) => Number(!!b.preset) - Number(!!a.preset));
+      return [...ts.map(T), ...venues.filter((v) => v.cc === f.cc).sort(byName).map(Vn)];
+    }
+    const at: LatLon = f.kind === 'near' ? f.at : [f.bounds.getCenter().lat, f.bounds.getCenter().lng];
+    const inside = (p: LatLon) => (f.kind === 'near' ? distM(at, p) < 400_000 : f.bounds.contains(p));
+    const items: [number, RailItem][] = [
+      ...tracks.filter((t) => inside(t.center)).map((t) => [distM(at, t.center), T(t)] as [number, RailItem]),
+      ...venues.filter((v) => inside(v.at)).map((v) => [distM(at, v.at), Vn(v)] as [number, RailItem]),
+    ];
+    return items.sort((a, b) => a[0] - b[0]).map(([, it]) => it);
+  }
+
+  private inBounds(b: L.LatLngBounds) {
+    return this.railFor({ kind: 'view', bounds: b });
+  }
+
+  private applyFilter(f: Filter, fly = true) {
+    this.filter = f;
+    this.refreshVenues();
+    this.renderRail();
+    this.renderChips();
+    this.updateHere();
+    if (!fly) return;
+    const pad = this.mapPadding();
+    if (f.kind === 'featured') this.map.flyTo([30, 12], small() ? 1.5 : 2.5, { duration: 1.2 });
+    else if (f.kind === 'near') this.map.flyTo(f.at, 8, { duration: 1.4 });
+    else if (f.kind === 'country') {
+      const pts = [...(this.world?.venues ?? []).filter((v) => v.cc === f.cc).map((v) => v.at), ...[...this.tracks.values()].filter((t) => t.country === f.cc).map((t) => t.center)];
+      const b = coreBounds(pts);
+      if (b) this.map.flyToBounds(L.latLngBounds(b).pad(0.1), { maxZoom: 9, duration: 1.4, ...pad });
+    }
+  }
+
+  private filterHash() {
+    return this.filter.kind === 'country' ? `#/c/${this.filter.cc}` : '';
+  }
+
+  private pickFilter(key: string) {
+    this.closeCountries();
+    if (key === 'near') return this.nearMe();
+    if (key === 'view') return;
+    const hash = key.startsWith('cc:') ? `#/c/${key.slice(3)}` : '';
+    if (location.hash.replace(/^#$/, '') === hash) {
+      // Same route: re-apply (e.g. back to Featured from "Near me", which has no route).
+      this.applyFilter(key === 'featured' ? { kind: 'featured' } : { kind: 'country', cc: key.slice(3) });
+    } else location.hash = hash;
+  }
+
+  private nearMe() {
+    if (!navigator.geolocation) return this.toast('Location isn’t available here. Pick a country instead.', 'warn');
+    this.toast('Finding tracks near you…', 'busy');
+    navigator.geolocation.getCurrentPosition(
+      (p) => {
+        this.toast('');
+        if (location.hash.startsWith('#/c/')) history.replaceState(null, '', location.pathname + location.search);
+        this.applyFilter({ kind: 'near', at: [p.coords.latitude, p.coords.longitude] });
+      },
+      () => this.toast('Location is off. Pick a country instead.', 'warn'),
+      { timeout: 10000, maximumAge: 600000 },
+    );
+  }
+
+  /** Rebuild the rail for the current filter; `keep` holds your place (for background refreshes). */
+  private renderRail(keep = false) {
+    const items = this.railFor(this.filter);
+    const { scrollLeft } = this.el.rail;
+    const shown = this.railShown;
+    this.rail = items;
+    this.railTotal = items.length;
+    this.railShown = 0;
+    this.el.rail.scrollLeft = 0;
+    if (!items.length) {
+      const f = this.filter;
+      this.el.rail.innerHTML = V.emptyRail(
+        f.kind === 'near' ? 'No kart tracks mapped within 400 km of you yet.' : f.kind === 'view' ? 'No tracks in this area.' : 'Loading tracks…',
+      );
+      return;
+    }
+    this.el.rail.innerHTML = '';
+    this.moreRail();
+    if (keep) {
+      while (this.railShown < Math.min(shown, items.length)) this.moreRail();
+      this.el.rail.scrollLeft = scrollLeft;
+    }
+    this.renderNow();
+  }
+
+  /** Cards render in batches as you scroll along the rail. */
+  private moreRail() {
+    const next = this.rail.slice(this.railShown, this.railShown + RAIL_BATCH);
+    if (!next.length) return;
+    this.railShown += next.length;
+    const featured = [...this.tracks.values()].filter((t) => t.preset);
+    const html = next
+      .map((it) => {
+        if (it.kind === 'venue') return V.venueCard(it.v, this.emptyVenues.has(it.v.i));
+        const t = it.t;
+        const rec = this.feed?.records[`${t.id}|fwd`];
+        const idx = featured.indexOf(t);
+        return V.trackCard({
+          t,
+          shape: shapeOf(t),
+          num: idx >= 0 ? idx + 1 : undefined,
+          record: rec?.ms,
+          live: (this.feed?.live[`${t.id}|fwd`] ?? 0) + (this.feed?.live[`${t.id}|rev`] ?? 0),
+          pb: localPB(t.id, 'fwd'),
+        });
+      })
+      .join('');
+    this.el.rail.querySelector('.card.more')?.remove();
+    this.el.rail.insertAdjacentHTML('beforeend', html);
+  }
+
+  private onRailScroll() {
+    const r = this.el.rail;
+    if (r.scrollLeft + r.clientWidth > r.scrollWidth - 600) this.moreRail();
+  }
+
+  /** Light up a rail item on the map (pin for tracks, ring for venues). */
+  private hoverItem(key: string | null) {
+    if (!key) {
+      this.hotPin(null);
+      this.focusVenue(null);
+      return;
+    }
+    if (key.startsWith('t:')) this.hotPin(key.slice(2));
+    else {
+      const v = this.world?.venues[Number(key.slice(2))];
+      if (v) this.focusVenue(v);
+    }
+  }
+
+  // ------------------------------------------------------------------ race now
+
+  private nowPick(): { t: TrackData; dir: Dir; why: string } | null {
+    try {
+      const last = JSON.parse(localStorage.getItem(LAST_KEY) || 'null') as { id: string; dir: Dir } | null;
+      const t = last && this.tracks.get(this.aliases.get(last.id) ?? last.id);
+      if (t) return { t, dir: last!.dir === 'rev' ? 'rev' : 'fwd', why: 'Last raced' };
+    } catch {
+      /* fall through */
+    }
+    const featured = [...this.tracks.values()].filter((t) => t.preset);
+    const live = (t: TrackData) => (this.feed?.live[`${t.id}|fwd`] ?? 0) + (this.feed?.live[`${t.id}|rev`] ?? 0);
+    const busiest = featured.slice().sort((a, b) => live(b) - live(a))[0];
+    if (busiest && live(busiest)) return { t: busiest, dir: 'fwd', why: `${live(busiest)} on track` };
+    return featured[0] ? { t: featured[0], dir: 'fwd', why: 'Featured' } : null;
+  }
+
+  private renderNow() {
+    const p = this.nowPick();
+    this.el.now.innerHTML = V.nowTile(p ? { ...p, shape: shapeOf(p.t), pb: localPB(p.t.id, p.dir) } : null);
+  }
+
+  private raceNow() {
+    const p = this.nowPick();
+    if (p) this.race(p.t, p.dir);
+  }
+
+  private race(t: TrackData, dir: Dir) {
+    try {
+      localStorage.setItem(LAST_KEY, JSON.stringify({ id: t.id, dir }));
+    } catch {
+      /* private mode */
+    }
+    this.closeSearch();
+    this.o.onRace(t, dir);
+  }
+
   // ------------------------------------------------------------------ events
 
   private bind() {
     const search = this.el.search as HTMLInputElement;
-    search.addEventListener('input', () => {
-      this.query = search.value.trim();
-      if (this.selected && this.query) location.hash = '';
-      this.renderList();
+    search.addEventListener('input', () => this.renderSearch());
+    search.addEventListener('focus', () => search.value && this.renderSearch());
+    search.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        this.hitSel = (this.hitSel + (e.key === 'ArrowDown' ? 1 : -1) + this.hits.length) % Math.max(1, this.hits.length);
+        this.el.searchPop.querySelectorAll('.sr').forEach((b, i) => b.classList.toggle('on', i === this.hitSel));
+      } else if (e.key === 'Escape') {
+        this.closeSearch();
+        search.blur();
+      }
     });
     (this.el.searchForm as HTMLFormElement).addEventListener('submit', (e) => {
       e.preventDefault();
-      this.submitSearch();
+      const h = this.hits[this.hitSel];
+      if (h) this.pickHit(h.key);
     });
+    this.el.searchPop.addEventListener('mousedown', (e) => e.preventDefault()); // keep focus in the input
+    this.el.searchPop.addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLElement>('[data-hit]');
+      if (b) this.pickHit(b.dataset.hit!);
+    });
+    document.addEventListener('click', (e) => {
+      const t = e.target as Node;
+      if (!this.el.searchWrap.contains(t)) this.closeSearch();
+      if (!this.el.ccPop.contains(t) && !this.el.allBtn.contains(t)) this.closeCountries();
+    });
+
     addEventListener('keydown', (e) => {
-      if (this.o.root.hidden) return;
-      const typing = (e.target as HTMLElement)?.tagName === 'INPUT';
+      if (this.o.root.hidden || e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (document.querySelector('.cl-page, .mp-lobby:not([hidden]), .profile-pop:not([hidden])')) return;
+      const typing = isTyping(e);
       if (e.key === '/' && !typing) {
         e.preventDefault();
         search.focus();
         search.select();
-      } else if (e.key === 'Escape') {
-        if (typing) (e.target as HTMLInputElement).blur();
-        else if (this.selected) location.hash = '';
+      } else if (e.key === 'Escape' && !typing) {
+        if (!this.el.ccPop.hidden) this.closeCountries();
+        else if (this.editor) this.stopEditing(true);
+        else if (this.selected) location.hash = this.filterHash();
+      } else if (e.key === 'Enter' && !typing && !(e.target as HTMLElement)?.closest?.('button, a')) {
+        e.preventDefault();
+        if (this.selected && !this.editor) this.race(this.selected, this.dir);
+        else if (!this.selected) this.raceNow();
+      } else if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && (e.target as HTMLElement)?.closest?.('.rail')) {
+        e.preventDefault();
+        const hits = [...this.el.rail.querySelectorAll<HTMLElement>('.card-hit')];
+        const i = hits.indexOf(document.activeElement as HTMLElement);
+        hits[Math.max(0, Math.min(hits.length - 1, i + (e.key === 'ArrowRight' ? 1 : -1)))]?.focus();
       }
     });
 
-    this.el.panel.addEventListener('click', (e) => {
+    this.el.now.addEventListener('click', () => this.raceNow());
+
+    this.el.chips.addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLElement>('[data-filter]');
+      if (b) this.pickFilter(b.dataset.filter!);
+    });
+    this.el.allBtn.addEventListener('click', () => (this.el.ccPop.hidden ? this.openCountries() : this.closeCountries()));
+    this.el.ccPop.addEventListener('input', () => this.renderCountries());
+    this.el.ccPop.addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLElement>('[data-filter]');
+      if (b) this.pickFilter(b.dataset.filter!);
+    });
+
+    const rail = this.el.rail;
+    rail.addEventListener('scroll', () => this.onRailScroll(), { passive: true });
+    rail.addEventListener(
+      'wheel',
+      (e) => {
+        // A mouse wheel scrolls the rail sideways; trackpads already scroll in both axes.
+        if (Math.abs(e.deltaY) > Math.abs(e.deltaX) && rail.scrollWidth > rail.clientWidth) {
+          rail.scrollLeft += e.deltaY;
+          e.preventDefault();
+        }
+      },
+      { passive: false },
+    );
+    rail.addEventListener('click', (e) => {
       const t = e.target as HTMLElement;
+      const go = t.closest<HTMLElement>('[data-go]');
+      if (go) {
+        const tr = this.tracks.get(go.dataset.go!);
+        if (tr) this.race(tr, 'fwd');
+        return;
+      }
       const card = t.closest<HTMLElement>('[data-track]');
       if (card) return this.open(card.dataset.track!);
-      if (t.closest('[data-act=back]')) location.hash = '';
-      if (t.closest('[data-act=race]') && this.selected) this.o.onRace(this.selected, this.dir);
-      if (t.closest('[data-act=geosearch]')) this.submitSearch(true);
+      const ven = t.closest<HTMLElement>('[data-venue]');
+      const v = ven && this.world?.venues[Number(ven.dataset.venue)];
+      if (v) this.openVenue(v);
+    });
+    rail.addEventListener('mouseover', (e) => this.hoverItem((e.target as HTMLElement).closest<HTMLElement>('[data-card]')?.dataset.card ?? null));
+    rail.addEventListener('mouseleave', () => this.hoverItem(null));
+    rail.addEventListener('focusin', (e) => {
+      const card = (e.target as HTMLElement).closest<HTMLElement>('[data-card]');
+      this.hoverItem(card?.dataset.card ?? null);
+      card?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+    });
+
+    this.el.sheet.addEventListener('click', (e) => {
+      const t = e.target as HTMLElement;
+      if (t.closest('[data-act=back]')) location.hash = this.filterHash();
+      if (t.closest('[data-act=race]') && this.selected) this.race(this.selected, this.dir);
+      const sib = t.closest<HTMLElement>('.sib[data-track]');
+      if (sib && sib.dataset.track !== this.selected?.id) this.open(sib.dataset.track!);
       const act = t.closest<HTMLElement>('[data-act^=edit]')?.dataset.act;
       if (act) this.editAction(act);
       const d = t.closest<HTMLElement>('[data-dir]')?.dataset.dir as Dir | undefined;
       if (d && this.selected && d !== this.dir) location.hash = `#/t/${this.selected.id}/${d}`;
     });
-    this.el.panel.addEventListener('mouseover', (e) => {
-      const card = (e.target as HTMLElement).closest<HTMLElement>('[data-track]');
-      this.hotPin(card?.dataset.track ?? null);
-    });
-    this.el.panel.addEventListener('mouseleave', () => this.hotPin(null));
 
-    this.el.scan.addEventListener('click', () => this.scan());
-    this.el.ticker.addEventListener('click', (e) => {
-      const row = (e.target as HTMLElement).closest<HTMLElement>('[data-feed]');
-      if (row) location.hash = `#/t/${row.dataset.feed}/${row.dataset.dir}`;
-      if ((e.target as HTMLElement).closest('[data-act=collapse]')) this.el.ticker.classList.toggle('collapsed');
+    this.el.here.addEventListener('click', () => {
+      if (this.el.here.dataset.mode === 'scan') return this.scan();
+      if (location.hash.startsWith('#/c/')) history.replaceState(null, '', location.pathname + location.search);
+      this.applyFilter({ kind: 'view', bounds: this.map.getBounds() }, false);
     });
-    this.el.livePill.addEventListener('click', () => this.el.ticker.classList.remove('collapsed'));
+
+    this.el.live.addEventListener('click', (e) => {
+      const t = e.target as HTMLElement;
+      if (t.closest('[data-act=live-toggle]')) return this.el.live.classList.toggle('collapsed');
+      const row = t.closest<HTMLElement>('[data-feed]');
+      if (row) {
+        this.el.live.classList.remove('open');
+        location.hash = `#/t/${row.dataset.feed}/${row.dataset.dir}`;
+      }
+    });
+    this.el.livePill.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (small()) this.el.live.classList.toggle('open');
+      else this.el.live.classList.remove('collapsed');
+    });
     addEventListener('hashchange', () => this.route());
+    addEventListener('resize', () => {
+      this.map.invalidateSize();
+      this.fitPlaceholder();
+    });
   }
 
-  private async submitSearch(forceGeo = false) {
+  private fitPlaceholder() {
+    (this.el.search as HTMLInputElement).placeholder = small() ? 'Search tracks & places' : 'Search circuits, countries or any city';
+  }
+
+  // ------------------------------------------------------------------ search
+
+  private renderSearch() {
     const q = (this.el.search as HTMLInputElement).value.trim();
+    if (!q) return this.closeSearch();
+    const s = q.toLowerCase();
+    const has = (x: string) => x.toLowerCase().includes(s);
+    // Prefix matches first, then word starts ("ger" -> Germany before Rogers).
+    const rank = (x: string) => {
+      const l = x.toLowerCase();
+      return l.startsWith(s) ? 0 : new RegExp(`\\b${s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'u').test(l) ? 1 : 2;
+    };
+    const counts = this.countryCounts();
+    const trackHits = [...this.tracks.values()]
+      .filter((t) => has(`${t.name} ${t.location}`))
+      .sort((a, b) => rank(a.name) - rank(b.name))
+      .slice(0, 5)
+      .map((t) => ({ key: `t:${t.id}`, title: t.name, sub: `${t.location || V.coords(t.center)} · ${(t.lengthM / 1000).toFixed(2)} km`, tag: t.country ?? 'OSM' }));
+    const countryHits = [...(this.world?.countries.values() ?? [])]
+      .filter((c) => counts.has(c.cc) && (has(c.name) || c.cc.toLowerCase() === s || c.cc2.toLowerCase() === s))
+      .sort((a, b) => rank(a.name) - rank(b.name) || (counts.get(b.cc) ?? 0) - (counts.get(a.cc) ?? 0))
+      .slice(0, 4)
+      .map((c) => ({ key: `c:${c.cc}`, title: c.name, sub: `${counts.get(c.cc)} kart tracks`, tag: c.cc }));
+    const venueHits =
+      q.length < 2
+        ? []
+        : (this.world?.venues ?? [])
+            .filter((v) => v.name && !this.hiddenVenues.has(v.i) && has(v.name))
+            .sort((a, b) => rank(a.name) - rank(b.name))
+            .slice(0, 5)
+            .map((v) => ({ key: `v:${v.i}`, title: v.name, sub: `${this.countryName(v.cc)} · ${V.coords(v.at)}`, tag: v.cc || '—' }));
+    const place = [{ key: 'place', title: `Find “${q}” on the map`, sub: 'Any city or region · scans it for tracks', tag: '↵' }];
+    this.hits = [...trackHits, ...countryHits, ...venueHits, ...place];
+    this.hitSel = 0;
+    this.el.searchPop.innerHTML = V.searchResults(
+      [
+        { label: 'Circuits', hits: trackHits },
+        { label: 'Countries', hits: countryHits },
+        { label: 'Venues', hits: venueHits },
+        { label: 'Places', hits: place },
+      ],
+      this.hitSel,
+    );
+    this.el.searchPop.hidden = false;
+  }
+
+  private closeSearch() {
+    this.el.searchPop.hidden = true;
+  }
+
+  private pickHit(key: string) {
+    const input = this.el.search as HTMLInputElement;
+    const q = input.value.trim();
+    this.closeSearch();
+    input.blur();
+    if (key === 'place') return this.findPlace(q);
+    input.value = '';
+    if (key.startsWith('t:')) this.open(key.slice(2));
+    else if (key.startsWith('c:')) this.pickFilter(`cc:${key.slice(2)}`);
+    else if (key.startsWith('v:')) {
+      const v = this.world?.venues[Number(key.slice(2))];
+      if (v) this.openVenue(v);
+    }
+  }
+
+  private async findPlace(q: string) {
     if (!q) return;
-    const local = this.matches(q);
-    if (!forceGeo && local.length === 1) return this.open(local[0].id);
-    this.toast(`Finding ${q}…`);
+    this.toast(`Finding ${q}…`, 'busy');
     try {
       const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`);
       const [hit] = await res.json();
       if (!hit) return this.toast(`Couldn't find “${q}”. Try a city name.`, 'warn');
-      location.hash = '';
+      this.toast('');
+      if (this.selected) location.hash = this.filterHash();
       const bb = hit.boundingbox.map(Number);
       const bounds = L.latLngBounds([bb[0], bb[2]], [bb[1], bb[3]]);
       this.map.flyToBounds(bounds, { maxZoom: 11, duration: 1.4, ...this.mapPadding() });
-      // Scan for tracks automatically once the camera lands.
       this.map.once('moveend', () => {
-        if (this.map.getZoom() < 10) this.map.setZoom(10, { animate: false });
-        this.scan(hit.display_name.split(',')[0]);
+        const here = this.inBounds(this.map.getBounds().pad(0.3));
+        if (here.length) {
+          if (location.hash.startsWith('#/c/')) history.replaceState(null, '', location.pathname + location.search);
+          this.applyFilter({ kind: 'view', bounds: this.map.getBounds().pad(0.3) }, false);
+        } else {
+          if (this.map.getZoom() < 10) this.map.setZoom(10, { animate: false });
+          this.scan(hit.display_name.split(',')[0]);
+        }
       });
     } catch {
       this.toast('Search is unavailable right now', 'warn');
     }
   }
 
-  private matches(q: string) {
-    const s = q.toLowerCase();
-    return [...this.tracks.values()].filter((t) => `${t.name} ${t.location}`.toLowerCase().includes(s));
+  // ------------------------------------------------------------------ countries
+
+  private openCountries() {
+    this.el.ccPop.hidden = false;
+    this.el.allBtn.classList.add('open');
+    const input = this.el.ccPop.querySelector('input')!;
+    input.value = '';
+    this.renderCountries();
+    if (!small()) input.focus();
   }
 
-  private mapPadding(): { paddingTopLeft: L.PointExpression; paddingBottomRight: L.PointExpression } {
-    // The panel overlays the map on small screens; on desktop the map has its own column.
-    return innerWidth <= 900
-      ? { paddingTopLeft: [24, 24], paddingBottomRight: [24, Math.round(innerHeight * (this.selected ? 0.78 : 0.52))] }
-      : { paddingTopLeft: [40, 40], paddingBottomRight: [40, 120] };
+  private closeCountries() {
+    this.el.ccPop.hidden = true;
+    this.el.allBtn.classList.remove('open');
+  }
+
+  private renderCountries() {
+    const q = this.el.ccPop.querySelector('input')!.value.trim().toLowerCase();
+    const counts = this.countryCounts();
+    const list = [...counts.entries()]
+      .map(([cc, n]) => ({ cc, n, name: this.countryName(cc) }))
+      .filter((c) => !q || c.name.toLowerCase().includes(q) || c.cc.toLowerCase().includes(q))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    this.el.ccList.innerHTML = V.countryList(list, this.filter.kind === 'country' ? this.filter.cc : null);
   }
 
   // ------------------------------------------------------------------ data
 
   private async load() {
-    try {
-      const presets: TrackData[] = await fetch('/tracks/presets.json').then((r) => r.json());
-      presets.forEach((t) => this.addTrack({ ...t, preset: true }));
-    } catch {
-      /* discovery still works */
-    }
+    const [presets, world] = await Promise.allSettled([fetch('/tracks/presets.json').then((r) => r.json() as Promise<TrackData[]>), loadWorld()]);
+    if (presets.status === 'fulfilled') presets.value.forEach((t) => this.addTrack({ ...t, preset: true }));
     try {
       const saved: TrackData[] = JSON.parse(localStorage.getItem('ak:tracks') || '[]');
       saved.forEach((t) => this.tracks.has(t.id) || this.addTrack(t));
@@ -289,22 +839,17 @@ export class Atlas {
     } catch {
       /* layouts are optional */
     }
-    this.renderList();
+    if (world.status === 'fulfilled') {
+      this.world = world.value;
+      this.localCC = localeCountry(this.world);
+      this.drawDots();
+    }
     this.nameTracks([...this.tracks.values()].filter((t) => !t.preset && !t.location));
-    if (!this.route()) this.fitAll(false);
+    if (!this.route()) this.applyFilter({ kind: 'featured' }, false);
+    this.renderNow();
     this.pollFeed();
-    this.timers.push(window.setInterval(() => this.pollFeed(), 6000));
-    this.timers.push(window.setInterval(() => this.selected && !this.o.root.hidden && this.pollBoard(), 5000));
-  }
-
-  private fitAll(animate = true) {
-    const all = [...this.tracks.values()];
-    if (!all.length) return;
-    const b = L.latLngBounds(all.map((t) => t.center)).pad(0.2);
-    // Keep pins clear of the live timing card in the bottom-right corner on desktop.
-    const pad = innerWidth > 900 ? { paddingTopLeft: [60, 60] as L.PointExpression, paddingBottomRight: [380, 80] as L.PointExpression } : this.mapPadding();
-    if (animate) this.map.flyToBounds(b, { maxZoom: 4, duration: 1.2, ...pad });
-    else this.map.fitBounds(b, { maxZoom: 4, ...pad });
+    window.setInterval(() => !this.o.root.hidden && this.pollFeed(), 6000);
+    window.setInterval(() => this.selected && !this.o.root.hidden && this.pollBoard(), 5000);
   }
 
   private addTrack(t: TrackData) {
@@ -356,9 +901,8 @@ export class Atlas {
     try {
       this.feed = await api.feed();
       this.renderFeed();
-      this.renderList(true);
     } catch {
-      this.el.tickerBody.innerHTML = '<p class="tk-empty">Live timing is offline.</p>';
+      this.el.liveBody.innerHTML = '<p class="lv-empty">Live timing is offline.</p>';
     }
   }
 
@@ -371,7 +915,7 @@ export class Atlas {
       this.board = b;
       this.renderBoard();
     } catch {
-      this.el.dBoard.innerHTML = '<p class="empty">Leaderboard is offline. You can still race; laps are saved on this device.</p>';
+      if (this.el.dBoard) this.el.dBoard.innerHTML = '<p class="empty">Leaderboard is offline. You can still race; laps are saved on this device.</p>';
     }
   }
 
@@ -379,22 +923,24 @@ export class Atlas {
     const b = this.map.getBounds();
     this.scanning?.abort();
     this.scanning = new AbortController();
-    this.el.scan.classList.remove('show');
+    this.el.here.classList.remove('show');
     this.toast(placeName ? `Scanning ${placeName} for kart tracks…` : 'Scanning this area for kart tracks…', 'busy');
     try {
       const found = await discoverTracks([b.getSouth(), b.getWest(), b.getNorth(), b.getEast()], this.scanning.signal);
-      this.lastScan = b;
       const fresh = found.filter((t) => !this.tracks.has(t.id));
       fresh.forEach((t) => this.addTrack(t));
       this.persist();
+      this.refreshVenues();
       this.nameTracks(fresh);
-      this.renderList();
       this.drawOutlines();
       if (!found.length) this.toast('No kart tracks mapped here yet. Try another area.', 'warn');
       else {
         this.toast(`Found ${found.length} track${found.length > 1 ? 's' : ''}${fresh.length && fresh.length < found.length ? `, ${fresh.length} new` : ''}`);
         if (found.length === 1) this.open(found[0].id);
-        else this.map.flyToBounds(L.latLngBounds(found.map((t) => t.center)).pad(0.3), { maxZoom: 13, ...this.mapPadding() });
+        else {
+          this.map.flyToBounds(L.latLngBounds(found.map((t) => t.center)).pad(0.3), { maxZoom: 13, ...this.mapPadding() });
+          this.applyFilter({ kind: 'view', bounds: L.latLngBounds(found.map((t) => t.center)).pad(0.3) }, false);
+        }
       }
     } catch (e) {
       if ((e as Error).name !== 'AbortError') this.toast('OpenStreetMap is busy. Try again in a few seconds.', 'warn');
@@ -420,7 +966,8 @@ export class Atlas {
           this.pins.delete(t.id);
           this.addPin(t);
           this.persist();
-          this.renderList();
+          this.renderRail(true);
+          if (this.selected?.id === t.id) this.renderDetail();
         }
       } catch {
         /* keep the coordinates */
@@ -432,19 +979,30 @@ export class Atlas {
   // ------------------------------------------------------------------ routing
 
   private route(): boolean {
-    const m = /^#\/t\/([^/]+)\/?(fwd|rev)?/.exec(location.hash);
-    if (!m) {
-      if (this.selected) this.closeDetail();
-      return false;
+    const h = location.hash;
+    const m = /^#\/t\/([^/]+)\/?(fwd|rev)?/.exec(h);
+    if (m) {
+      this.dir = (m[2] as Dir) || 'fwd';
+      const id = decodeURIComponent(m[1]);
+      const alias = this.aliases.get(id);
+      if (alias) {
+        history.replaceState(null, '', `#/t/${alias}/${this.dir}`);
+        this.select(alias);
+      } else this.select(id);
+      return true;
     }
-    this.dir = (m[2] as Dir) || 'fwd';
-    const id = decodeURIComponent(m[1]);
-    const alias = this.aliases.get(id);
-    if (alias) {
-      history.replaceState(null, '', `#/t/${alias}/${this.dir}`);
-      this.select(alias);
-    } else this.select(id);
-    return true;
+    const wasOpen = !!this.selected;
+    if (this.selected) this.closeDetail();
+    const c = /^#\/c\/([A-Za-z]{3})$/.exec(h);
+    if (c) {
+      const cc = c[1].toUpperCase();
+      const same = this.filter.kind === 'country' && this.filter.cc === cc;
+      if (!same) this.applyFilter({ kind: 'country', cc });
+      else if (wasOpen) this.applyFilter(this.filter); // back from a track: show the country again
+      return true;
+    }
+    if (this.filter.kind === 'country') this.applyFilter({ kind: 'featured' });
+    return false;
   }
 
   private open(id: string) {
@@ -460,10 +1018,12 @@ export class Atlas {
       try {
         const fetched = (await api.track(id).catch(() => null)) ?? (await trackFromId(id));
         if (!fetched) throw new Error('not found');
-        const fromFeed = this.feed?.laps.find((l) => l.track === id);
-        if (fromFeed) fetched.name = fromFeed.trackName;
+        const fromFeed = this.feed?.laps.find((l) => l.track === id) ?? this.feed?.onTrack?.find((l) => l.track === id && l.trackName);
+        const name = fromFeed && ('trackName' in fromFeed ? fromFeed.trackName : null);
+        if (name) fetched.name = name;
         this.addTrack(fetched);
         this.persist();
+        this.refreshVenues();
         t = fetched;
         this.toast('');
       } catch {
@@ -474,14 +1034,15 @@ export class Atlas {
     const changed = this.selected?.id !== t.id;
     this.selected = t;
     this.o.root.classList.add('detail-open');
+    this.closeSearch();
     this.renderDetail();
     this.markSelectedPin();
+    this.el.here.classList.remove('show');
     if (changed) {
       const bounds = L.latLngBounds(t.points.map((p) => L.latLng(p[0], p[1])));
-      this.map.flyToBounds(bounds, { maxZoom: 18, duration: 1.5, ...this.mapPadding() });
+      this.map.flyToBounds(bounds, { maxZoom: 18, duration: 1.4, ...this.mapPadding() });
       this.board = null;
-      this.el.dBoard.innerHTML = '<p class="empty">Loading leaderboard…</p>';
-      this.el.panelScroll.scrollTop = 0;
+      this.el.sheetScroll.scrollTop = 0;
     }
     this.placeStartMarker();
     this.drawOutlines();
@@ -497,8 +1058,8 @@ export class Atlas {
     this.sfMarker = null;
     this.markSelectedPin();
     this.drawOutlines();
-    this.renderList();
     if (this.map.getZoom() > 12) this.map.flyTo(this.map.getCenter(), 10, { duration: 1 });
+    this.updateHere();
   }
 
   private placeStartMarker() {
@@ -510,6 +1071,18 @@ export class Atlas {
       icon: L.divIcon({ className: 'sf-wrap', html: '<div class="sf-flag"><i></i><span>Start / finish</span></div>', iconSize: [0, 0] }),
       interactive: false,
     }).addTo(this.map);
+  }
+
+  private mapPadding(): { paddingTopLeft: L.PointExpression; paddingBottomRight: L.PointExpression } {
+    if (small()) {
+      // The sheet covers the dock and the lower part of the map on phones.
+      const mapH = this.el.map.clientHeight || innerHeight * 0.6;
+      const cover = this.selected ? Math.max(0, innerHeight * 0.74 - (innerHeight - this.el.map.getBoundingClientRect().bottom)) : 0;
+      return { paddingTopLeft: [20, 20], paddingBottomRight: [20, Math.min(mapH - 80, cover + 20)] };
+    }
+    const sheet = this.selected || location.hash.startsWith('#/t/') ? 440 : 40;
+    const live = this.el.live.classList.contains('collapsed') ? 40 : 330;
+    return { paddingTopLeft: [sheet, 40], paddingBottomRight: [live, 40] };
   }
 
   // ------------------------------------------------------------------ layout editor
@@ -542,7 +1115,7 @@ export class Atlas {
       <dl class="d-stats ed-stats">
         <div><dt class="label">Length</dt><dd class="mono" data-el="edLen">–</dd></div>
         <div><dt class="label">Points</dt><dd class="mono" data-el="edPts">–</dd></div>
-        <div><dt class="label">OSM trace</dt><dd class="mono">${(loopLengthKm(original)).toFixed(2)}<small>km</small></dd></div>
+        <div><dt class="label">OSM trace</dt><dd class="mono">${loopLengthKm(original).toFixed(2)}<small>km</small></dd></div>
       </dl>
       <div class="ed-tools">
         <button class="btn" data-act="edit-restart">Start over</button>
@@ -562,7 +1135,7 @@ export class Atlas {
       },
     });
     this.el.edPts.textContent = String(this.editor.points.length);
-    this.el.edLen.innerHTML = `${(loopLengthKm(this.editor.points)).toFixed(2)}<small>km</small>`;
+    this.el.edLen.innerHTML = `${loopLengthKm(this.editor.points).toFixed(2)}<small>km</small>`;
   }
 
   private stopEditing(rerender = false) {
@@ -596,7 +1169,7 @@ export class Atlas {
       this.persist();
       this.toast('Layout saved. It now has its own leaderboard.');
       location.hash = `#/t/${res.id}/fwd`;
-      this.renderList();
+      this.renderRail();
     } catch (e) {
       this.el.edStatus.textContent = `Couldn't save: ${(e as Error).message}`;
     }
@@ -604,157 +1177,72 @@ export class Atlas {
 
   // ------------------------------------------------------------------ rendering
 
-  private card(t: TrackData, idx: number) {
-    const shape = shapeOf(t);
-    const rec = this.feed?.records[`${t.id}|fwd`] as { ms: number; name: string } | undefined;
-    const live = (this.feed?.live[`${t.id}|fwd`] ?? 0) + (this.feed?.live[`${t.id}|rev`] ?? 0);
-    const pb = localPB(t.id, 'fwd');
-    const where = t.location ? t.location.split(',')[0] : coords(t.center);
-    return `<button class="card" data-track="${escapeHtml(t.id)}">
-      <div class="card-top"><span class="label">${t.preset ? String(idx + 1).padStart(2, '0') : 'OSM'}${t.country ? ` · ${t.country}` : ''}</span>${t.needsFix && !t.corrected ? '<span class="card-warn">Trace off</span>' : live ? `<span class="card-live"><i class="live-dot"></i>${live} live</span>` : ''}</div>
-      <div class="card-art graph-paper">${trackArt(shape, { w: 240, h: 130, pad: 14, arrows: false })}</div>
-      <h3 class="display">${escapeHtml(t.name)}</h3>
-      <p class="card-sub">${escapeHtml(where)} · ${(t.lengthM / 1000).toFixed(2)} km · ${shape.corners.length} turns</p>
-      <div class="card-foot">
-        ${rec ? `<span class="label">Record</span><span class="mono strong">${formatMs(rec.ms)}</span>` : `<span class="label">Record</span><span class="muted">Open</span>`}
-        ${pb ? `<span class="card-pb mono">You ${formatMs(pb)}</span>` : ''}
-      </div>
-    </button>`;
-  }
-
-  private renderList(soft = false) {
-    if (soft && (this.selected || this.query)) return; // don't fight the user while they type or browse a track
-    const all = [...this.tracks.values()];
-    const q = this.query.toLowerCase();
-    const filt = (t: TrackData) => !q || `${t.name} ${t.location}`.toLowerCase().includes(q);
-    const presets = all.filter((t) => t.preset);
-    const found = all.filter((t) => !t.preset).reverse();
-    const fp = presets.filter(filt);
-    const ff = found.filter(filt);
-    const scrollTop = this.el.panelScroll.scrollTop;
-
-    let html = '';
-    if (!q) {
-      html += `<section class="intro">
-        <p class="label">Real circuits · Satellite worlds · Live timing</p>
-        <h1 class="display">Race the world's real kart tracks</h1>
-        <p class="lede">Every layout is traced from OpenStreetMap and dropped onto satellite imagery of the real place. Pick a circuit, or search any city to scan it for tracks.</p>
-        <ol class="steps"><li><b class="mono">01</b>Pick a circuit</li><li><b class="mono">02</b>Set flying laps</li><li><b class="mono">03</b>Climb the live board</li></ol>
-      </section>`;
-    } else {
-      html += `<div class="search-head"><p class="label">${fp.length + ff.length} match${fp.length + ff.length === 1 ? '' : 'es'} for “${escapeHtml(this.query)}”</p>
-        <button class="btn block" data-act="geosearch">Scan “${escapeHtml(this.query)}” on the map <span class="arrow">↵</span></button></div>`;
-    }
-    if (fp.length) {
-      html += `<div class="sec-head"><h2 class="label">Featured circuits</h2><span class="label">${String(fp.length).padStart(2, '0')}</span></div>
-        <div class="grid">${fp.map((t) => this.card(t, presets.indexOf(t))).join('')}</div>`;
-    }
-    if (ff.length) {
-      html += `<div class="sec-head"><h2 class="label">Discovered on the map</h2><span class="label">${String(ff.length).padStart(2, '0')}</span></div>
-        <div class="grid">${ff.map((t, i) => this.card(t, i)).join('')}</div>`;
-    } else if (!q) {
-      html += `<div class="tip graph-paper"><p class="label">Find more tracks</p><p>Search a city above, or zoom into the map and press <b>Scan this area</b>. Any kart track mapped on OpenStreetMap becomes raceable.</p></div>`;
-    }
-    this.el.list.innerHTML = html;
-    this.el.panelScroll.scrollTop = scrollTop;
-  }
-
   private renderDetail() {
     const t = this.selected!;
-    const shape = shapeOf(t);
-    const rev = this.dir === 'rev';
-    const rot = rotationLabel(shape, rev);
-    const other = rotationLabel(shape, !rev);
-    const presets = [...this.tracks.values()].filter((x) => x.preset);
-    const idx = presets.indexOf(t);
-    const pb = localPB(t.id, this.dir);
-    this.el.detail.innerHTML = `
-      <div class="d-top">
-        <button class="back" data-act="back"><span class="mono">←</span> All circuits</button>
-        <span class="label">${idx >= 0 ? `${String(idx + 1).padStart(2, '0')} / ${String(presets.length).padStart(2, '0')}` : 'Discovered'}</span>
-      </div>
-      <h1 class="display d-name">${escapeHtml(t.name)}</h1>
-      <p class="d-loc">${t.country ? `<span class="cc mono">${t.country}</span>` : ''}${escapeHtml(t.location || 'Mapped on OpenStreetMap')}<span class="label">${coords(t.center)}</span></p>
-      <div class="d-art graph-paper">${trackArt(shape, { w: 440, h: 300, pad: 30, reverse: rev, turns: true, arrows: true, road: true })}
-        <span class="d-art-tag label">${rot.icon} ${rot.label}</span></div>
-      <dl class="d-stats">
-        <div><dt class="label">Length</dt><dd class="mono">${(t.lengthM / 1000).toFixed(2)}<small>km</small></dd></div>
-        <div><dt class="label">Turns</dt><dd class="mono">${shape.corners.length}</dd></div>
-        <div><dt class="label">Width</dt><dd class="mono">${Math.max(t.width, 8.5).toFixed(1)}<small>m</small></dd></div>
-      </dl>
-      <div class="seg" role="radiogroup" aria-label="Direction">
-        <button data-dir="${this.dir}" class="on" role="radio" aria-checked="true"><span>${rot.icon}</span>${rot.label}</button>
-        <button data-dir="${rev ? 'fwd' : 'rev'}" role="radio" aria-checked="false"><span>${other.icon}</span>${other.label}</button>
-      </div>
-      ${t.needsFix && !t.corrected ? '<button class="d-warn-top" data-act="edit-start"><b>Trace doesn’t match the asphalt.</b> Fix the layout →</button>' : ''}
-      <button class="btn primary lg block" data-act="race">Start engine <span class="arrow">→</span></button>
-      <p class="d-pb">${pb ? `Your best here <b class="mono">${formatMs(pb)}</b>` : 'No lap yet. Your first clean lap goes straight onto the board.'}</p>
-      <div class="sec-head"><h2 class="label">Live leaderboard · ${rot.label.toLowerCase()}</h2><span class="label" data-el="dCount"></span></div>
-      <div class="d-live" data-el="dLive"></div>
-      <div data-el="dBoard"><p class="empty">Loading leaderboard…</p></div>
-      <div class="d-layout">
-        ${
-          t.needsFix && !t.corrected
-            ? `<p class="d-warn"><b>This layout is off.</b> The OpenStreetMap trace for this circuit doesn't follow the real asphalt, so the lap you drive won't match the satellite view. If you know the track, fix it below for everyone.</p>`
-            : ''
-        }
-        ${
-          t.corrected
-            ? `<p><span class="cc mono">FIXED</span> Layout corrected by <b>${escapeHtml(t.corrected.by)}</b> ${timeAgo(t.corrected.at)}. Times on the old OSM trace are on a separate board.</p>`
-            : `<p>Traced from OpenStreetMap${t.osmWays.length ? ` (<a target="_blank" rel="noopener" href="https://www.openstreetmap.org/way/${t.osmWays[0]}">way ${t.osmWays[0]}${t.osmWays.length > 1 ? ` +${t.osmWays.length - 1}` : ''}</a>)` : ''}. If the line doesn't sit on the asphalt, you can fix it.</p>`
-        }
-        <button class="btn block" data-act="edit-start">Fix the layout <span class="arrow">→</span></button>
-      </div>`;
+    const featured = [...this.tracks.values()].filter((x) => x.preset);
+    const idx = featured.indexOf(t);
+    const siblings = [...this.tracks.values()].filter((x) => x.id !== t.id && distM(x.center, t.center) < 800);
+    this.el.detail.innerHTML = V.sheet({
+      t,
+      shape: shapeOf(t),
+      dir: this.dir,
+      num: idx >= 0 ? idx + 1 : undefined,
+      total: featured.length,
+      pb: localPB(t.id, this.dir),
+      siblings,
+      shapeOf,
+      countryName: t.country ? this.countryName(t.country) : undefined,
+    });
     this.el.detail.querySelectorAll<HTMLElement>('[data-el]').forEach((e) => (this.el[e.dataset.el!] = e));
     if (this.board) this.renderBoard();
   }
 
   private renderBoard() {
-    const b = this.board!;
-    const me = this.o.driver.pid;
-    const lead = b.entries[0]?.ms;
-    this.el.dCount.textContent = b.total ? `${b.total} driver${b.total > 1 ? 's' : ''}` : '';
-    this.el.dLive.innerHTML = b.onTrack.length
-      ? `<i class="live-dot"></i>On track now: ${b.onTrack.map((o) => `<span class="chip"><i style="background:${escapeHtml(o.color)}"></i>${escapeHtml(o.name)}</span>`).join('')}`
-      : '';
-    this.el.dBoard.innerHTML = b.entries.length
-      ? `<ol class="board">${b.entries
-          .map(
-            (e) => `<li class="${e.pid === me ? 'me' : ''}">
-              <span class="pos mono">${String(e.rank).padStart(2, '0')}</span>
-              <span class="bar" style="background:${escapeHtml(e.color)}"></span>
-              <span class="nm">${escapeHtml(e.name)}${e.pid === me ? ' <em>you</em>' : ''}</span>
-              <span class="tm mono">${e.rank === 1 ? formatMs(e.ms) : `+${((e.ms - lead) / 1000).toFixed(3)}`}</span>
-            </li>`,
-          )
-          .join('')}</ol>`
-      : '<p class="empty">No times yet. Set the benchmark.</p>';
+    if (!this.el.dBoard?.isConnected) return;
+    const b = V.board(this.board!, this.o.driver.pid);
+    this.el.dCount.textContent = b.count;
+    this.el.dLive.innerHTML = b.live;
+    this.el.dBoard.innerHTML = b.list;
   }
 
   private renderFeed() {
     const f = this.feed!;
     const live = Object.values(f.live).reduce((a, n) => a + n, 0);
     this.el.liveCount.textContent = String(live);
+    this.el.liveCount2.textContent = String(live);
     this.el.livePill.classList.toggle('idle', !live);
-    this.el.tickerBody.innerHTML = f.laps.length
-      ? f.laps
-          .slice(0, 4)
-          .map(
-            (l) => `<button class="tk-row" data-feed="${escapeHtml(l.track)}" data-dir="${l.dir}">
-              <span class="bar" style="background:${escapeHtml(l.color)}"></span>
-              <span class="tk-main"><b>${escapeHtml(l.name)}</b><small>${escapeHtml(l.trackName)}${l.dir === 'rev' ? ' · rev' : ''}</small></span>
-              <span class="tk-time"><span class="mono">${formatMs(l.ms)}</span><small class="${l.rank === 1 ? 'p1' : ''}">P${l.rank} · ${timeAgo(l.at)}</small></span>
-            </button>`,
-          )
-          .join('')
-      : '<p class="tk-empty">No laps yet. Times appear here the moment anyone finishes a lap.</p>';
-    for (const l of f.laps) {
-      if (this.tracks.has(l.track) || this.pins.has(l.track) || !l.center) continue;
-      const icon = L.divIcon({ className: 'pin-wrap', html: `<div class="pin remote"><i></i><span>${escapeHtml(l.trackName)}</span></div>`, iconSize: [0, 0] });
-      const m = L.marker(l.center, { icon }).on('click', () => (location.hash = `#/t/${l.track}/${l.dir}`));
+    this.el.live.classList.toggle('idle', !live);
+    const rows: V.LiveRow[] = (f.onTrack ?? []).map((o) => ({
+      track: o.track,
+      dir: o.dir,
+      name: o.name,
+      color: o.color,
+      where: this.tracks.get(o.track)?.name ?? o.trackName ?? f.laps.find((l) => l.track === o.track)?.trackName ?? 'A kart track',
+    }));
+    this.el.liveBody.innerHTML = V.liveBody(rows, f.laps);
+    for (const id of this.pins.keys()) this.markLive(id);
+    // Tracks other drivers are using that this browser hasn't seen yet.
+    const remote = [
+      ...f.laps.map((l) => ({ id: l.track, name: l.trackName, center: l.center })),
+      ...(f.onTrack ?? []).map((o) => ({ id: o.track, name: o.trackName ?? 'Kart track', center: o.center ?? undefined })),
+    ];
+    for (const r of remote) {
+      if (this.tracks.has(r.id) || this.pins.has(r.id) || !r.center) continue;
+      const icon = L.divIcon({ className: 'pin-wrap', html: `<div class="pin remote"><i></i><span>${V.esc(r.name)}</span><b class="pin-live mono"></b></div>`, iconSize: [0, 0] });
+      const m = L.marker(r.center, { icon }).on('click', () => (location.hash = `#/t/${r.id}/fwd`));
       m.addTo(this.map);
-      this.pins.set(l.track, m);
+      this.pins.set(r.id, m);
+      this.markLive(r.id);
     }
+    // Refresh live badges and records on the cards without re-rendering the rail.
+    for (const card of this.el.rail.querySelectorAll<HTMLElement>('[data-card^="t:"]')) {
+      const id = card.dataset.card!.slice(2);
+      const n = (f.live[`${id}|fwd`] ?? 0) + (f.live[`${id}|rev`] ?? 0);
+      const top = card.querySelector('.card-top')!;
+      top.querySelector('.card-live')?.remove();
+      if (n) top.insertAdjacentHTML('beforeend', `<span class="card-live"><i class="live-dot"></i>${n} live</span>`);
+    }
+    if (!this.selected) this.renderNow();
   }
 
   private toast(msg: string, kind: '' | 'warn' | 'busy' = '') {
@@ -771,45 +1259,57 @@ export class Atlas {
       this.renderDetail();
       this.pollBoard();
     }
-    this.renderList();
+    this.renderRail(true);
+    this.pollFeed();
   }
 
   hide() {
     this.o.root.hidden = true;
     this.profile.close();
+    this.closeSearch();
+    this.closeCountries();
   }
 }
-
-const SEARCH_ICON = `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.5 15.5L21 21" stroke="currentColor" stroke-width="2" stroke-linecap="square"/></svg>`;
 
 const ATLAS_HTML = /* html */ `
 <header class="topbar">
   <a class="wordmark" href="#" aria-label="ApexKart home"><span class="wm-chk"></span><span class="display">Apex<b>Kart</b></span></a>
-  <form class="search" data-el="searchForm" role="search">
-    ${SEARCH_ICON}
-    <input data-el="search" type="search" placeholder="Search circuits or any city" autocomplete="off" spellcheck="false" aria-label="Search circuits or any city" />
-    <kbd>/</kbd>
-  </form>
+  <div class="search-wrap" data-el="searchWrap">
+    <form class="search" data-el="searchForm" role="search">
+      ${V.SEARCH_ICON}
+      <input data-el="search" type="search" placeholder="Search circuits, countries or any city" autocomplete="off" spellcheck="false" aria-label="Search circuits, countries or any city" />
+      <kbd>/</kbd>
+    </form>
+    <div class="search-pop" data-el="searchPop" hidden></div>
+  </div>
   <div class="top-right">
     <button class="live-pill idle" data-el="livePill" title="Drivers on track right now"><i class="live-dot"></i><b class="mono" data-el="liveCount">0</b><span>on track</span></button>
     <button class="profile-btn" data-el="profileBtn" aria-haspopup="dialog"></button>
   </div>
 </header>
 <main class="atlas">
-  <section class="panel" data-el="panel">
-    <div class="panel-scroll" data-el="panelScroll">
-      <div class="view-list" data-el="list"></div>
-      <div class="view-detail" data-el="detail"></div>
-    </div>
+  <div class="map" data-el="map"></div>
+  <button class="here-btn" data-el="here">${V.SEARCH_ICON}<span>List tracks here</span></button>
+  <div class="map-toast" data-el="toast"></div>
+  <aside class="live idle" data-el="live" aria-label="Live timing">
+    <header><span><i class="live-dot"></i><b class="mono" data-el="liveCount2">0</b> on track now</span><button data-act="live-toggle" aria-label="Collapse live timing">–</button></header>
+    <div class="live-body" data-el="liveBody"><p class="lv-empty">Connecting…</p></div>
+  </aside>
+  <section class="sheet" data-el="sheet" aria-label="Circuit">
+    <div class="sheet-scroll" data-el="sheetScroll"><div class="view-detail" data-el="detail"></div></div>
   </section>
-  <section class="mapwrap">
-    <div class="map" data-el="map"></div>
-    <button class="scan-btn" data-el="scan">${SEARCH_ICON}<span>Scan this area for kart tracks</span></button>
-    <div class="zoom-hint label" data-el="zoomHint">Zoom in to scan for kart tracks</div>
-    <div class="map-toast" data-el="toast"></div>
-    <aside class="ticker" data-el="ticker">
-      <header><span><i class="live-dot"></i>Live timing</span><button data-act="collapse" aria-label="Collapse live timing">–</button></header>
-      <div data-el="tickerBody"><p class="tk-empty">Connecting…</p></div>
-    </aside>
-  </section>
-</main>`;
+</main>
+<footer class="dock">
+  <div class="dock-bar">
+    <div class="chips" data-el="chips" role="group" aria-label="Show tracks"></div>
+    <button class="all-btn" data-el="allBtn" aria-haspopup="dialog"><b class="mono">0</b> countries <span class="mono">▾</span></button>
+  </div>
+  <div class="dock-main">
+    <div class="now-slot" data-el="now"></div>
+    <div class="rail-wrap"><div class="rail" data-el="rail" aria-label="Circuits"></div></div>
+  </div>
+  <div class="cc-pop" data-el="ccPop" role="dialog" aria-label="All countries" hidden>
+    <input type="search" placeholder="Filter countries" aria-label="Filter countries" autocomplete="off" spellcheck="false" />
+    <div class="cc-list" data-el="ccList"></div>
+  </div>
+</footer>`;

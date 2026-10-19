@@ -32,10 +32,20 @@ export interface FeedItem {
   center?: LatLon;
 }
 
+export interface OnTrackItem {
+  track: string;
+  dir: Dir;
+  name: string;
+  color: string;
+  trackName: string | null;
+  center: LatLon | null;
+}
+
 export interface FeedResponse {
   laps: FeedItem[];
   records: Record<string, { name: string; ms: number; color: string }>;
   live: Record<string, number>; // "track|dir" -> drivers on track now
+  onTrack?: OnTrackItem[]; // newest first; missing from servers older than v0.5
 }
 
 export interface LapSubmission {
@@ -76,9 +86,9 @@ async function json<T>(res: Response): Promise<T> {
 }
 
 export const api = {
-  board: (track: string, dir: Dir, me?: { pid: string; name: string; color: string }) => {
+  board: (track: string, dir: Dir, me?: { pid: string; name: string; color: string; tn?: string; c?: string }) => {
     const q = new URLSearchParams({ track, dir, limit: '10' });
-    if (me) Object.entries(me).forEach(([k, v]) => q.set(k, v));
+    if (me) Object.entries(me).forEach(([k, v]) => v !== undefined && q.set(k, v));
     return fetch(`/api/board?${q}`).then((r) => json<BoardResponse>(r));
   },
   feed: () => fetch('/api/feed').then((r) => json<FeedResponse>(r)),
