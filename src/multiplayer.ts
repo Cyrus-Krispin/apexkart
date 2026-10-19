@@ -214,10 +214,9 @@ class MultiplayerController {
 
   /** Leave the race view (retiring if we hadn't finished) and show the lobby. */
   private backToLobby() {
-    if (this.mpRace && this.mpRace.finishMs === undefined) {
-      this.mpRace.retire();
-      this.declined.add(this.raceId);
-    }
+    if (this.mpRace && this.mpRace.finishMs === undefined) this.mpRace.retire();
+    // Never drop you back into a race you left, even if the server hasn't seen your finish yet.
+    if (this.raceId) this.declined.add(this.raceId);
     this.disposeRace();
     if (this.room) this.lobby?.show();
     else this.lobby?.showHome();

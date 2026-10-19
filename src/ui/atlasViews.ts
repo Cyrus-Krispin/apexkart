@@ -11,6 +11,8 @@ export { esc };
 export const SEARCH_ICON = `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.5 15.5L21 21" stroke="currentColor" stroke-width="2" stroke-linecap="square"/></svg>`;
 const PLAY = `<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 2.5v11L13.5 8z" fill="currentColor"/></svg>`;
 const LOOP = `<svg viewBox="0 0 120 56" width="120" height="56" aria-hidden="true"><path d="M18 40c-8-4-9-18 2-22 9-3 18 6 30 4s16-14 30-12 24 12 20 24-18 12-30 8-26 6-36 4-10-3-16-6z" fill="none" stroke="currentColor" stroke-width="2.5" stroke-dasharray="5 5" stroke-linejoin="round"/><circle cx="18" cy="40" r="4" fill="currentColor"/></svg>`;
+const SUN = `<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><circle cx="8" cy="8" r="3.2" fill="currentColor"/><path d="M8 1v2.2M8 12.8V15M1 8h2.2M12.8 8H15M3 3l1.6 1.6M11.4 11.4L13 13M13 3l-1.6 1.6M4.6 11.4L3 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
+const MOON = `<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M10.8 1.6A6.6 6.6 0 1 0 14.4 11 5.4 5.4 0 0 1 10.8 1.6z" fill="currentColor"/></svg>`;
 const NEAR_ICON = `<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="8" cy="8" r="2" fill="currentColor"/></svg>`;
 
 export function coords(c: LatLon) {
@@ -127,6 +129,7 @@ export interface SheetData {
   siblings: TrackData[]; // other layouts at the same venue
   shapeOf: (t: TrackData) => TrackShape;
   countryName?: string;
+  nightNow: boolean; // the sun is down at the circuit right now
 }
 
 export function sheet(d: SheetData): string {
@@ -135,13 +138,14 @@ export function sheet(d: SheetData): string {
   const rot = rotationLabel(shape, rev);
   const other = rotationLabel(shape, !rev);
   const off = t.needsFix && !t.corrected;
+  const canFix = !t.preset; // featured circuits are curated (the server refuses edits to them)
   return `
     <div class="d-top">
       <button class="back" data-act="back" aria-label="Close"><span class="mono">←</span> Back</button>
       <span class="label">${d.num ? `${String(d.num).padStart(2, '0')} / ${String(d.total).padStart(2, '0')} featured` : t.corrected ? 'Community layout' : 'From OpenStreetMap'}</span>
     </div>
     <h1 class="display d-name">${esc(t.name)}</h1>
-    <p class="d-loc">${t.country ? `<span class="cc mono">${esc(t.country)}</span>` : ''}<span>${esc(t.location || d.countryName || coords(t.center))}</span></p>
+    <p class="d-loc">${t.country ? `<span class="cc mono">${esc(t.country)}</span>` : ''}<span>${esc(t.location || d.countryName || coords(t.center))}</span><span class="d-now${d.nightNow ? ' night' : ''}" title="Race on Live time of day to match it">${d.nightNow ? MOON : SUN}${d.nightNow ? 'Night' : 'Day'} there now</span></p>
     <div class="d-art graph-paper">${trackArt(shape, { w: 400, h: 200, pad: 24, reverse: rev, turns: true, arrows: true, road: true })}</div>
     <dl class="d-stats">
       <div><dt class="label">Length</dt><dd class="mono">${km(t.lengthM)}<small>km</small></dd></div>
@@ -163,7 +167,7 @@ export function sheet(d: SheetData): string {
       <button data-dir="${dir}" class="on" role="radio" aria-checked="true"><span>${rot.icon}</span>${rot.label}</button>
       <button data-dir="${rev ? 'fwd' : 'rev'}" role="radio" aria-checked="false"><span>${other.icon}</span>${other.label}</button>
     </div>
-    ${off ? '<button class="d-warn-top" data-act="edit-start"><b>This trace is off the asphalt.</b> Fix the layout →</button>' : ''}
+    ${off && canFix ? '<button class="d-warn-top" data-act="edit-start"><b>This trace is off the asphalt.</b> Fix the layout →</button>' : ''}
     <button class="btn primary lg block" data-act="race">Race <span class="arrow">→</span></button>
     <p class="d-pb">${d.pb ? `Your best <b class="mono">${formatMs(d.pb)}</b>` : 'Your first clean lap goes straight onto the board.'}</p>
     <div class="sec-head"><h2 class="label">Leaderboard · ${rot.label.toLowerCase()}</h2><span class="label" data-el="dCount"></span></div>
@@ -175,7 +179,7 @@ export function sheet(d: SheetData): string {
           ? `<span class="cc mono fixed">Fixed</span> Layout corrected by <b>${esc(t.corrected.by)}</b> ${timeAgo(t.corrected.at)}. Times on the old trace are on a separate board.`
           : `Traced from OpenStreetMap${t.osmWays.length ? ` (<a target="_blank" rel="noopener" href="https://www.openstreetmap.org/way/${t.osmWays[0]}">way ${t.osmWays[0]}${t.osmWays.length > 1 ? ` +${t.osmWays.length - 1}` : ''}</a>)` : ''}.`
       }</p>
-      <button class="link" data-act="edit-start">${off ? 'Fix the layout' : 'Line off the asphalt? Fix it'} →</button>
+      ${canFix ? `<button class="link" data-act="edit-start">${off ? 'Fix the layout' : 'Line off the asphalt? Fix it'} →</button>` : ''}
     </div>`;
 }
 

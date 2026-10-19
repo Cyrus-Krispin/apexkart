@@ -2,7 +2,8 @@
 // GET  /api/layout          -> { [baseTrackId]: { id, points, lengthM, by, at } }
 // POST /api/layout          -> save a corrected centreline for a track (new id, fresh leaderboard)
 import { getStore, K, json, bad, TRACK_RE, cleanName, publicId } from './_lib/store.js';
-import { loopLength, type LatLon } from '../src/track/osm.js';
+import { clientIp, FEATURED, osmGeometry, sameCircuit, storedGeometry } from './_lib/osmRef.js';
+import { centroid, loopLength, type LatLon } from '../src/track/osm.js';
 
 const LAYOUTS = 'ak:layouts';
 const hist = (base: string) => `ak:layout-hist:${base}`;
@@ -37,6 +38,7 @@ export async function POST(req: Request) {
   }
   const base = String(b?.base ?? '');
   if (!TRACK_RE.test(base) || base.includes('-l')) return bad('bad track');
+  if (FEATURED.has(base)) return bad('featured circuits are curated, so their layout can’t be replaced', 403);
   if (typeof b.driverId !== 'string' || b.driverId.length < 16 || b.driverId.length > 64) return bad('bad driver');
   const center = Array.isArray(b.center) && b.center.length === 2 && b.center.every((x: unknown) => typeof x === 'number') ? (b.center as LatLon) : null;
   if (!center) return bad('bad center');
@@ -55,6 +57,15 @@ export async function POST(req: Request) {
   const db = getStore();
   const pid = await publicId(b.driverId);
   if (!(await db.set(K.rate(pid) + ':layout', '1', { ex: 10, nx: true }))) return bad('slow down', 429);
+  // Driver ids are free to mint, so also limit by network.
+  if (!(await db.set(`ak:rl:ip:${clientIp(req)}:layout`, '1', { ex: 30, nx: true }))) return bad('slow down', 429);
+
+  // A correction has to be the same circuit: where the server (or OpenStreetMap) says it is, about
+  // the same size. The client's own claim about the centre doesn't count.
+  const ref = (await storedGeometry(db, base)) ?? (await osmGeometry(base));
+  if (ref === 'unavailable') return bad('can’t check this circuit against OpenStreetMap right now, try again in a minute', 503);
+  if (!ref) return bad('unknown circuit');
+  if (!sameCircuit(ref, centroid(points), lengthM, { m: 400, ratio: [0.4, 2.5] })) return bad('that layout isn’t at this circuit', 422);
 
   const id = `${base}-l${hash6(points)}`;
   const name = String(b.trackName ?? '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 60) || 'Kart track';
@@ -64,7 +75,7 @@ export async function POST(req: Request) {
     db.hset(LAYOUTS, base, JSON.stringify(entry)),
     db.lpush(hist(base), JSON.stringify(entry), 10),
     // Geometry for /api/track so shared links and the live feed resolve the new id.
-    db.set(K.track(id), JSON.stringify({ name, lengthM, center, points, width })),
+    db.set(K.track(id), JSON.stringify({ name, lengthM, center: centroid(points), points, width })),
   ]);
   return json({ id, lengthM });
 }

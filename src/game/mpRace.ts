@@ -122,7 +122,7 @@ export class MultiplayerRace implements RaceAddon {
       const crossPerf = ctx.physTime - (ctx.simT - this.crossSimT) * 1000;
       this.finishMs = Math.max(1, Math.round(crossPerf - this.o.startAt));
       this.crossSimT = null;
-      room.finish(this.o.race, this.finishMs).catch((e) => this.ctx.toast(`Couldn’t record finish: ${e.message}`, 'warn'));
+      this.sendFinish(this.finishMs);
       this.ctx.setAutopilot(true); // cool-down lap
     }
 
@@ -173,7 +173,15 @@ export class MultiplayerRace implements RaceAddon {
   retire() {
     if (this.finishMs !== undefined) return;
     this.finishMs = null;
-    this.o.room.finish(this.o.race, null).catch(() => undefined);
+    this.sendFinish(null);
+  }
+
+  /** Report the finish (or retirement), retrying: a lost request would otherwise read as a DNF. */
+  private sendFinish(ms: number | null, attempt = 0) {
+    this.o.room.finish(this.o.race, ms).catch((e) => {
+      if (attempt < 4) setTimeout(() => this.sendFinish(ms, attempt + 1), 1500 * (attempt + 1));
+      else if (ms !== null) this.ctx.toast(`Couldn’t record finish: ${e.message}`, 'warn');
+    });
   }
 
   standings(): StandingRow[] {

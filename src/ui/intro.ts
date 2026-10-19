@@ -1,6 +1,6 @@
 import { escapeHtml, formatMs, saveDriver, type Dir, type Driver } from '../net/api';
 import type { TrackData } from '../track/osm';
-import type { TimeOfDay } from '../game/atmosphere';
+import type { TimeOfDay, TimePref } from '../game/atmosphere';
 import type { TrackShape } from '../track/shape';
 import { cleanDriverName } from './profile';
 import { rotationLabel, trackArt } from './trackArt';
@@ -12,8 +12,9 @@ export interface IntroOptions {
   dir: Dir;
   driver: Driver;
   pb: number | null;
-  time: TimeOfDay;
-  onTime: (t: TimeOfDay) => void;
+  time: TimePref;
+  liveNow: TimeOfDay; // what "Live" means at this circuit right now
+  onTime: (t: TimePref) => void;
   onStart: () => void;
   onBack: () => void;
 }
@@ -73,6 +74,7 @@ export class RaceIntro {
           <div class="io-time" role="radiogroup" aria-label="Time of day">
             <span class="label">Time of day</span>
             <div class="io-seg">
+              <button type="button" role="radio" data-time="live" title="The real time of day at this circuit">Live<small>${o.liveNow === 'night' ? 'Night now' : 'Day now'}</small></button>
               <button type="button" role="radio" data-time="day">Day</button>
               <button type="button" role="radio" data-time="night">Night<small>Floodlit</small></button>
             </div>
@@ -97,7 +99,7 @@ export class RaceIntro {
       e.stopPropagation();
     });
     const seg = [...this.el.querySelectorAll<HTMLButtonElement>('[data-time]')];
-    const mark = (t: TimeOfDay) =>
+    const mark = (t: TimePref) =>
       seg.forEach((b) => {
         const on = b.dataset.time === t;
         b.classList.toggle('on', on);
@@ -108,7 +110,7 @@ export class RaceIntro {
       b.addEventListener('click', (e) => {
         e.stopPropagation();
         if (e.detail > 0) b.blur(); // after a pointer click, the next key press starts the race again
-        const t = b.dataset.time as TimeOfDay;
+        const t = b.dataset.time as TimePref;
         if (b.classList.contains('on')) return;
         mark(t);
         o.onTime(t);

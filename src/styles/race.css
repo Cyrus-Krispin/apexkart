@@ -35,7 +35,7 @@ kbd.wide { min-width: 52px; }
 .io-foot-r { display: flex; align-items: center; gap: 24px; }
 .io-time { display: flex; align-items: center; gap: 12px; }
 .io-time .label { white-space: nowrap; }
-.io-seg { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid rgba(242, 238, 229, 0.2); border-radius: var(--radius); }
+.io-seg { display: grid; grid-template-columns: repeat(3, auto); border: 1px solid rgba(242, 238, 229, 0.2); border-radius: var(--radius); }
 .io-seg button { display: flex; align-items: baseline; justify-content: center; gap: 8px; height: 38px; padding: 0 18px; line-height: 38px; font-weight: 700; font-size: 14px; color: var(--night-muted); transition: background 0.15s, color 0.15s; }
 .io-seg button + button { border-left: 1px solid rgba(242, 238, 229, 0.2); }
 .io-seg button small { font-family: var(--mono); font-size: 10px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.75; }
@@ -229,6 +229,7 @@ kbd.wide { min-width: 52px; }
   .io-go { justify-content: center; }
   .io-foot-r { flex-direction: column; align-items: stretch; gap: 12px; }
   .io-time { justify-content: space-between; }
+  .io-seg button { padding: 0 10px; gap: 5px; }
   .h-lapcard { display: none; }
   .h-banner span { font-size: 22px; padding: 8px 26px; }
   .h-banner.go span { font-size: 42px; padding: 4px 40px; }

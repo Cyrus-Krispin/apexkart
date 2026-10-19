@@ -144,7 +144,8 @@ async function load(db: Store, code: string, now: number): Promise<Loaded | { cl
     if (!l) return { closed: 'gone' };
     const { cfg, players } = l.state;
 
-    if (now - cfg.active > IDLE_MS) {
+    // A race in progress is never idle; it ends on its own (maybeEndRace's hard cap).
+    if (cfg.phase !== 'racing' && now - cfg.active > IDLE_MS) {
       await destroy(db, code, players.map((p) => p.mid));
       return { closed: 'idle' };
     }

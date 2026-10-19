@@ -1,7 +1,9 @@
 // POST /api/lap: submit a lap. Keeps each driver's personal best per track/direction,
 // stores its ghost, and posts to the global live feed.
 import { getStore, K, json, bad, TRACK_RE, isDir, cleanName, cleanColor, publicId } from './_lib/store.js';
+import { osmGeometry, sameCircuit, storedGeometry } from './_lib/osmRef.js';
 import { decodeGhost, ghostPathLength, GHOST_DT } from '../src/shared/ghost.js';
+import { centroid, distM, loopLength, type LatLon } from '../src/track/osm.js';
 
 const KART_TOP_SPEED = 30; // m/s, a bit above the game's real top speed
 
@@ -28,28 +30,44 @@ export async function POST(req: Request) {
   const pid = await publicId(driverId);
   if (!(await db.set(K.rate(pid), '1', { ex: 3, nx: true }))) return bad('slow down', 429);
 
-  // First submission for a track defines its metadata; later ones can't change it.
+  // The lap's own circuit geometry: it has to hang together before anything is checked or kept.
   const lengthIn = Number(b.trackLength);
-  const center = Array.isArray(b.center) && b.center.length === 2 && b.center.every((x: unknown) => typeof x === 'number') ? b.center : null;
+  const center = Array.isArray(b.center) && b.center.length === 2 && b.center.every((x: unknown) => typeof x === 'number' && isFinite(x)) ? (b.center as LatLon) : null;
   if (!(lengthIn >= 150 && lengthIn <= 8000) || !center) return bad('bad track meta');
-  const trackName = String(b.trackName ?? '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 60) || 'Kart track';
-  // Keep the geometry so the track can be served without OpenStreetMap later.
-  const points =
+  const points: LatLon[] | null =
     Array.isArray(b.points) && b.points.length >= 6 && b.points.length <= 3000 &&
-    b.points.every((p: unknown) => Array.isArray(p) && p.length === 2 && Math.abs(p[0] - center[0]) < 0.05 && Math.abs(p[1] - center[1]) < 0.05)
-      ? b.points.map((p: number[]) => [+p[0].toFixed(7), +p[1].toFixed(7)])
+    b.points.every((p: unknown) => Array.isArray(p) && p.length === 2 && isFinite(p[0]) && isFinite(p[1]) && Math.abs(p[0] - center[0]) < 0.05 && Math.abs(p[1] - center[1]) < 0.05)
+      ? b.points.map((p: number[]) => [+p[0].toFixed(7), +p[1].toFixed(7)] as LatLon)
       : null;
+  if (!points) return bad('bad track geometry');
+  const lengthM = Math.round(loopLength(points));
+  // The game's length is the smoothed racing line, a little shorter than the raw polyline.
+  if (Math.abs(lengthM - lengthIn) > Math.max(40, lengthM * 0.2) || distM(centroid(points), center) > 300) return bad('track meta does not match its geometry');
+  const trackName = String(b.trackName ?? '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 60) || 'Kart track';
   const width = Math.min(20, Math.max(4, Number(b.width) || 8));
-  const meta = { name: trackName, lengthM: Math.round(lengthIn), center, points, width };
-  await db.set(K.track(track), JSON.stringify(meta), { nx: true });
-  const stored = JSON.parse((await db.get(K.track(track))) ?? JSON.stringify(meta));
 
-  // Plausibility checks (not bullet-proof, but stops casual nonsense).
+  // The first lap on a track stores its geometry (so shared links work without OpenStreetMap).
+  // For an OpenStreetMap id that claim is checked against OpenStreetMap, and only remembered once
+  // it could be: while Overpass is down the lap still counts, but the geometry waits for a later lap.
+  let stored = await storedGeometry(db, track);
+  if (!stored) {
+    const osm = await osmGeometry(track);
+    if (osm && osm !== 'unavailable' && !sameCircuit(osm, centroid(points), lengthM, { m: 400, ratio: [0.75, 1.35] }))
+      return bad('track does not match OpenStreetMap', 422);
+    const meta = { name: trackName, lengthM, center: centroid(points), points, width };
+    if (osm !== 'unavailable') await db.set(K.track(track), JSON.stringify(meta), { nx: true });
+    stored = (await storedGeometry(db, track)) ?? meta;
+  }
+
+  // Plausibility checks against this lap's own circuit (not bullet-proof, but stops casual nonsense,
+  // and a bad first submission can't lock everyone else out).
+  const shortest = Math.min(lengthM, lengthIn);
+  const longest = Math.max(lengthM, lengthIn);
   const frames = decodeGhost(ghost);
-  if (ms < (stored.lengthM / KART_TOP_SPEED) * 1000) return bad('lap too fast to be real', 422);
+  if (ms < (shortest / KART_TOP_SPEED) * 1000) return bad('lap too fast to be real', 422);
   if (Math.abs(frames.length * GHOST_DT * 1000 - ms) > 1500) return bad('ghost does not match lap time', 422);
   const path = ghostPathLength(frames);
-  if (path < stored.lengthM * 0.85 || path > stored.lengthM * 1.4 + 60) return bad('ghost does not match track', 422);
+  if (path < shortest * 0.85 || path > longest * 1.4 + 60) return bad('ghost does not match track', 422);
 
   const name = cleanName(b.name);
   const color = cleanColor(b.color);

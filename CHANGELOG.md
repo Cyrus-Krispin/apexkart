@@ -6,6 +6,30 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+### Added
+- **Live time of day**, now the default: you race at the real time of day at the circuit. KF1
+  after dark is a night race under the floodlights, and by day the sun sits where it really is
+  in the sky. Day and Night are still there if you'd rather pick.
+- The circuit sheet on the home screen says whether it's day or night there right now.
+
+### Fixed
+- Switching from Day back to Night no longer washes the screen out in white. This had been
+  happening since night sessions arrived.
+- In multiplayer, the game-driven cool-down lap after the flag no longer goes onto the leaderboard
+  as your lap.
+- Long multiplayer races are no longer closed by the 30-minute idle timeout.
+- A multiplayer finish lost on a bad connection is retried instead of counting as a DNF, and you're
+  never dropped back into a race you left.
+- If a long background tab drops you from a room, you now get your direct connection back instead
+  of staying on the slower relay.
+- Leaving a shared circuit link before it finished loading no longer leaves its panel stuck open.
+- Switching the World setting twice quickly no longer stacks two worlds in the scene.
+
+### Security
+- Leaderboards and layouts are harder to vandalise. Featured circuits can't be re-traced, a layout
+  fix has to match the circuit's real location, and a bogus first lap can no longer lock everyone
+  else out of a track's leaderboard.
+
 ## [0.5.1] - 2026-10-20
 
 ### Fixed

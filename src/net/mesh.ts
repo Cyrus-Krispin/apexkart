@@ -251,6 +251,13 @@ export class Mesh {
     }
   }
 
+  /** Drop every link (after rejoining a room): the next sync builds fresh ones with the right roles. */
+  reset() {
+    for (const p of this.peers.values()) p.close();
+    this.peers.clear();
+    this.changed();
+  }
+
   handleSignal(msg: SignalMsg) {
     this.peers.get(msg.from)?.onSignal(msg);
   }

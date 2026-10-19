@@ -251,15 +251,19 @@ export class RoomClient {
     return res;
   }
 
-  /** Mailbox position only moves on polls: those are the responses that actually read the inbox. */
-  private apply(res: PollResponse, fromPoll = false) {
+  /**
+   * Mailbox position only moves on polls: those are the responses that actually read the inbox.
+   * A rejoin starts a fresh mailbox on the server, so its count replaces ours.
+   */
+  private apply(res: PollResponse, fromPoll = false, rejoined = false) {
     if (this.disposed) return;
     if (!res.state) {
       this.dispose();
       this.emit('closed', res.closed ?? 'gone');
       return;
     }
-    if (fromPoll && res.mailN !== undefined) this.mailN = Math.max(this.mailN, res.mailN);
+    if (rejoined) this.mailN = res.mailN ?? 0;
+    else if (fromPoll && res.mailN !== undefined) this.mailN = Math.max(this.mailN, res.mailN);
     this.state = res.state;
     this.mesh.sync(res.state.players); // before mail, so offers from new peers find their Peer
     res.mail?.forEach((m: SignalMsg) => this.mesh.handleSignal(m));
@@ -296,7 +300,11 @@ export class RoomClient {
       // Dropped for being quiet too long (e.g. a long background tab)? Walk back in.
       if (res.state && !res.state.players.some((p) => p.mid === this.mid)) {
         const me = this.lastProfile();
-        if (me) return this.apply(await this.call('join', me));
+        if (me) {
+          const res = await this.call('join', me);
+          this.mesh.reset(); // the others dropped their side of every link when we left
+          return this.apply(res, false, true);
+        }
       }
       this.apply(res, true);
     } catch (e) {
