@@ -733,7 +733,8 @@ export class Race {
     if (this.state === 'intro') {
       // Slow cinematic orbit around the kart on the grid.
       const a = this.realT * 0.18 + 2.2;
-      wantPos = new THREE.Vector3(p.x + Math.sin(a) * 6.5, 1.7 + Math.sin(this.realT * 0.3) * 0.3, p.z + Math.cos(a) * 6.5);
+      // Tight orbit so the camera stays on the circuit (real pit buildings often sit right beside the grid).
+      wantPos = new THREE.Vector3(p.x + Math.sin(a) * 4.6, 1.45 + Math.sin(this.realT * 0.3) * 0.25, p.z + Math.cos(a) * 4.6);
       wantLook = new THREE.Vector3(p.x, 0.55, p.z);
       if (this.root.clientWidth > 900) {
         // Frame the kart in the open right half, clear of the intro panel.
