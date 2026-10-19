@@ -3,11 +3,12 @@
 // click time. It also rewrites public/tracks/world.json to keep only venues with a raceable loop,
 // each dot moved onto its longest layout.
 //
-// A few hundred Overpass queries (one per 5° cell that has venues), so it runs on CI:
+// A few hundred Overpass queries (one per 5° cell that has venues, covering only the ground around
+// each venue), so it runs on CI:
 // .github/workflows/bake-venues.yml. Locally: npm run venues [-- --cells 9_20,10_20]
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { findLoops, loopToTrack, centroid } from '../src/track/osm.ts';
-import { CELL_DEG, cellOf, packPoints, unpackPoints, venueKey, type PackedLayout, type VenueCell } from '../src/shared/venues.ts';
+import { cellOf, packPoints, unpackPoints, venueKey, type PackedLayout, type VenueCell } from '../src/shared/venues.ts';
 
 const UA = 'ApexKart venue baker (github.com/Cyrus-Krispin/apexkart)';
 const MIRRORS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
@@ -22,13 +23,8 @@ const world: { venues: Venue[]; countries: Record<string, unknown>; source: stri
 const onlyCells = process.argv.includes('--cells') ? new Set(process.argv[process.argv.indexOf('--cells') + 1].split(',')) : null;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Raceways in one box. A box that keeps failing (too much data for a public Overpass slot) is
- *  split into quarters, down to 1.25°, rather than retried as-is. */
-async function racewaysIn(box: [number, number, number, number], label: string, worker: number, depth = 0): Promise<any[]> {
-  const pad = 0.02;
-  const bbox = [box[0] - pad, box[1] - pad, box[2] + pad, box[3] + pad].map((v) => v.toFixed(3)).join(',');
-  const q = `[out:json][timeout:180][maxsize:536870912];way["highway"="raceway"](${bbox});out body geom;`;
-  const attempts = depth < 2 ? 3 : 6;
+/** Overpass, with mirrors and backoff; null after `attempts` failures. */
+async function query(q: string, label: string, worker: number, attempts: number): Promise<any[] | null> {
   for (let attempt = 0; attempt < attempts; attempt++) {
     const url = MIRRORS[(worker + attempt) % MIRRORS.length];
     try {
@@ -36,7 +32,7 @@ async function racewaysIn(box: [number, number, number, number], label: string, 
         method: 'POST',
         headers: { 'User-Agent': UA, Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
         body: 'data=' + encodeURIComponent(q),
-        signal: AbortSignal.timeout(200_000),
+        signal: AbortSignal.timeout(150_000),
       });
       const text = await res.text();
       if (res.ok && text.trimStart().startsWith('{')) {
@@ -47,27 +43,37 @@ async function racewaysIn(box: [number, number, number, number], label: string, 
     } catch (e) {
       console.log(`  ${label}: ${url.split('/')[2]} ${(e as Error).message}`);
     }
-    await sleep(4000 * (attempt + 1));
+    await sleep(3000 * (attempt + 1));
   }
-  if (depth >= 2) throw new Error(`${label}: Overpass unavailable`);
-  const [s, w, n, e] = box;
-  const mLat = (s + n) / 2;
-  const mLon = (w + e) / 2;
-  console.log(`  ${label}: splitting into quarters`);
-  const parts: [number, number, number, number][] = [
-    [s, w, mLat, mLon],
-    [s, mLon, mLat, e],
-    [mLat, w, n, mLon],
-    [mLat, mLon, n, e],
-  ];
+  return null;
+}
+
+/**
+ * Raceways around a set of venues: one query that unions a small box around each venue, so only the
+ * raceways that matter come back (a whole 5° box is mostly motocross and big circuits). A batch that
+ * keeps failing is split in half rather than retried as-is.
+ */
+async function racewaysNear(venues: Venue[], label: string, worker: number, depth = 0): Promise<any[]> {
+  const d = NEAR_DEG + 0.002;
+  const boxes = venues
+    .map(([la, lo]) => {
+      const dl = d / Math.cos((la * Math.PI) / 180);
+      return `way["highway"="raceway"](${(la - d).toFixed(4)},${(lo - dl).toFixed(4)},${(la + d).toFixed(4)},${(lo + dl).toFixed(4)});`;
+    })
+    .join('');
+  const els = await query(`[out:json][timeout:120];(${boxes});out body geom;`, label, worker, venues.length > 1 && depth < 4 ? 3 : 6);
+  if (els) return els;
+  if (venues.length === 1 || depth >= 4) throw new Error(`${label}: Overpass unavailable`);
+  console.log(`  ${label}: splitting ${venues.length} venues in half`);
+  const half = Math.ceil(venues.length / 2);
   const out = new Map<number, any>();
-  for (const [i, b] of parts.entries()) for (const el of await racewaysIn(b, `${label}.${i}`, worker, depth + 1)) out.set(el.id, el);
+  for (const [i, part] of [venues.slice(0, half), venues.slice(half)].entries())
+    for (const el of await racewaysNear(part, `${label}.${i}`, worker, depth + 1)) out.set(el.id, el);
   return [...out.values()];
 }
 
 async function raceways(cell: string, worker: number): Promise<any[]> {
-  const [cy, cx] = cell.split('_').map(Number);
-  return racewaysIn([cy * CELL_DEG, cx * CELL_DEG, (cy + 1) * CELL_DEG, (cx + 1) * CELL_DEG], cell, worker);
+  return racewaysNear(byCell.get(cell)!, cell, worker);
 }
 
 /** The layouts at one venue from the raceways around it, longest first. */
