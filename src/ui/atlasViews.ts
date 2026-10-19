@@ -7,13 +7,14 @@ import { escapeHtml as esc, formatMs, timeAgo, type BoardResponse, type DailyRes
 import type { Venue } from './world';
 import { MEDALS, MEDAL_NAME, type Medal, type Targets } from '../game/medals';
 
-export { esc };
+export { esc, formatMs };
 
 export const SEARCH_ICON = `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.5 15.5L21 21" stroke="currentColor" stroke-width="2" stroke-linecap="square"/></svg>`;
 const PLAY = `<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 2.5v11L13.5 8z" fill="currentColor"/></svg>`;
 const LOOP = `<svg viewBox="0 0 120 56" width="120" height="56" aria-hidden="true"><path d="M18 40c-8-4-9-18 2-22 9-3 18 6 30 4s16-14 30-12 24 12 20 24-18 12-30 8-26 6-36 4-10-3-16-6z" fill="none" stroke="currentColor" stroke-width="2.5" stroke-dasharray="5 5" stroke-linejoin="round"/><circle cx="18" cy="40" r="4" fill="currentColor"/></svg>`;
 const SUN = `<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><circle cx="8" cy="8" r="3.2" fill="currentColor"/><path d="M8 1v2.2M8 12.8V15M1 8h2.2M12.8 8H15M3 3l1.6 1.6M11.4 11.4L13 13M13 3l-1.6 1.6M4.6 11.4L3 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
 const MOON = `<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M10.8 1.6A6.6 6.6 0 1 0 14.4 11 5.4 5.4 0 0 1 10.8 1.6z" fill="currentColor"/></svg>`;
+const GHOST_ICON = `<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 1.5c-3 0-5 2.2-5 5.2v7.3l1.7-1.3 1.6 1.3L8 12.7l1.7 1.3 1.6-1.3 1.7 1.3V6.7c0-3-2-5.2-5-5.2z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><circle cx="6.2" cy="6.6" r="1" fill="currentColor"/><circle cx="9.8" cy="6.6" r="1" fill="currentColor"/></svg>`;
 const NEAR_ICON = `<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="8" cy="8" r="2" fill="currentColor"/></svg>`;
 
 export function coords(c: LatLon) {
@@ -190,6 +191,7 @@ export interface SheetData {
   nightNow: boolean; // the sun is down at the circuit right now
   medals: { targets: Targets; earned: Medal | null };
   daily?: string; // the day's board, when this is today's daily circuit
+  challenge?: { name?: string; ms?: number }; // opened from someone's challenge link
 }
 
 /** The four targets, what you've won, and how far your best is from the next one. */
@@ -243,7 +245,12 @@ export function sheet(d: SheetData): string {
       <button data-dir="${rev ? 'fwd' : 'rev'}" role="radio" aria-checked="false"><span>${other.icon}</span>${other.label}</button>
     </div>
     ${off && canFix ? '<button class="d-warn-top" data-act="edit-start"><b>This trace is off the asphalt.</b> Fix the layout →</button>' : ''}
-    <button class="btn primary lg block" data-act="race">Race <span class="arrow">→</span></button>
+    ${
+      d.challenge
+        ? `<div class="d-challenge">${GHOST_ICON}<p><span class="label">Challenge</span><b>${d.challenge.name ? esc(d.challenge.name) : 'A driver'}</b> dares you to beat <b class="mono">${d.challenge.ms ? formatMs(d.challenge.ms) : '…'}</b>. Their lap races with you as a ghost.</p></div>`
+        : ''
+    }
+    <button class="btn primary lg block" data-act="race">${d.challenge?.name ? `Race ${esc(d.challenge.name)}’s ghost` : 'Race'} <span class="arrow">→</span></button>
     <p class="d-pb">${d.pb ? `Your best <b class="mono">${formatMs(d.pb)}</b>` : 'Your first clean lap goes straight onto the board.'}</p>
     ${medalLadder(d.medals, d.pb)}
     ${d.daily ?? ''}
@@ -262,6 +269,7 @@ export function sheet(d: SheetData): string {
 
 export function board(b: BoardResponse, me: string): { count: string; live: string; list: string } {
   const lead = b.entries[0]?.ms;
+  const mine = b.entries.find((e) => e.pid === me);
   return {
     count: b.total ? `${b.total} driver${b.total > 1 ? 's' : ''}` : '',
     live: b.onTrack.length
@@ -275,9 +283,10 @@ export function board(b: BoardResponse, me: string): { count: string; live: stri
               <span class="bar" style="background:${esc(e.color)}"></span>
               <span class="nm">${esc(e.name)}${e.pid === me ? ' <em>you</em>' : ''}</span>
               <span class="tm mono">${e.rank === 1 ? formatMs(e.ms) : `+${((e.ms - lead) / 1000).toFixed(3)}`}</span>
+              ${e.pid === me ? '<span></span>' : `<button class="bd-ghost" data-rival="${esc(e.pid)}" title="Race ${esc(e.name)}’s ghost" aria-label="Race ${esc(e.name)}’s ghost">${GHOST_ICON}</button>`}
             </li>`,
           )
-          .join('')}</ol>`
+          .join('')}</ol>${mine ? `<button class="link bd-share" data-act="challenge">Challenge a friend to beat your ${formatMs(mine.ms)} →</button>` : ''}`
       : '<p class="empty">No times yet. Set the benchmark.</p>',
   };
 }

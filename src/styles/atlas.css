@@ -222,7 +222,15 @@
 .chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border: 1px solid var(--rule-strong); border-radius: 99px; font-weight: 600; font-size: 12.5px; }
 .chip i { width: 8px; height: 8px; border-radius: 50%; }
 .board { list-style: none; margin: 8px 0 0; padding: 0; }
-.board li { display: grid; grid-template-columns: 28px 4px minmax(0, 1fr) auto; align-items: center; gap: 10px; height: 36px; padding: 0 8px; border-bottom: 1px solid var(--rule); }
+.board li { display: grid; grid-template-columns: 28px 4px minmax(0, 1fr) auto 24px; align-items: center; gap: 10px; height: 36px; padding: 0 8px; border-bottom: 1px solid var(--rule); }
+.bd-ghost { display: grid; place-items: center; width: 24px; height: 24px; color: var(--ink-3); border-radius: var(--radius); }
+.bd-ghost:hover { color: var(--ink); background: var(--paper-2); }
+.board li.me .bd-ghost { color: var(--ink); }
+.bd-share { display: block; margin: 10px 0 0; }
+.d-challenge { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 10px; align-items: start; margin: 0 0 10px; padding: 10px 12px; border: 1px solid var(--ink); background: var(--paper-2); }
+.d-challenge svg { width: 20px; height: 20px; color: var(--signal-deep); }
+.d-challenge p { margin: 0; font-size: 13.5px; }
+.d-challenge .label { display: block; margin-bottom: 2px; color: var(--signal-deep); font-weight: 700; }
 .board .pos { font-size: 12px; color: var(--ink-3); font-weight: 700; }
 .board li:first-child .pos { color: var(--ink); }
 .board .bar { width: 4px; height: 18px; }

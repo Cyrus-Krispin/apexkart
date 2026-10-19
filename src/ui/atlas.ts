@@ -29,8 +29,9 @@ const SAT_ZOOM = 14;
 export interface AtlasOptions {
   root: HTMLElement;
   driver: Driver;
-  /** `daily`: this is today's daily circuit, so laps also go on the day's board. */
-  onRace: (track: TrackData, dir: Dir, daily: boolean) => void;
+  /** `daily`: this is today's daily circuit, so laps also go on the day's board. `rival`: a driver's
+   *  public id whose lap races along as a ghost (a challenge). */
+  onRace: (track: TrackData, dir: Dir, daily: boolean, rival?: string) => void;
 }
 
 type Filter = { kind: 'featured' } | { kind: 'country'; cc: string } | { kind: 'near'; at: LatLon } | { kind: 'view'; bounds: L.LatLngBounds };
@@ -123,6 +124,7 @@ export class Atlas {
   private cells = new Map<string, Promise<VenueCell | null>>(); // pre-stitched layouts per 5° cell
   private sheetRecord: number | undefined; // the record the open sheet's medal targets use
   private daily: DailyResponse | null = null;
+  private rival: { pid: string; name?: string; ms?: number } | null = null; // from a challenge link
 
   constructor(private o: AtlasOptions) {
     o.root.innerHTML = ATLAS_HTML;
@@ -593,14 +595,14 @@ export class Atlas {
     if (p) this.race(p.t, p.dir);
   }
 
-  private race(t: TrackData, dir: Dir) {
+  private race(t: TrackData, dir: Dir, rival?: string) {
     try {
       localStorage.setItem(LAST_KEY, JSON.stringify({ id: t.id, dir }));
     } catch {
       /* private mode */
     }
     this.closeSearch();
-    this.o.onRace(t, dir, this.isDaily(t, dir));
+    this.o.onRace(t, dir, this.isDaily(t, dir), rival);
   }
 
   // ------------------------------------------------------------------ daily circuit
@@ -744,7 +746,10 @@ export class Atlas {
     this.el.sheet.addEventListener('click', (e) => {
       const t = e.target as HTMLElement;
       if (t.closest('[data-act=back]')) location.hash = this.filterHash();
-      if (t.closest('[data-act=race]') && this.selected) this.race(this.selected, this.dir);
+      if (t.closest('[data-act=race]') && this.selected) this.race(this.selected, this.dir, this.rival?.pid);
+      const ghost = t.closest<HTMLElement>('[data-rival]');
+      if (ghost && this.selected) this.race(this.selected, this.dir, ghost.dataset.rival);
+      if (t.closest('[data-act=challenge]')) this.shareChallenge();
       const sib = t.closest<HTMLElement>('.sib[data-track]');
       if (sib && sib.dataset.track !== this.selected?.id) this.open(sib.dataset.track!);
       const act = t.closest<HTMLElement>('[data-act^=edit]')?.dataset.act;
@@ -1062,9 +1067,10 @@ export class Atlas {
 
   private route(): boolean {
     const h = location.hash;
-    const m = /^#\/t\/([^/]+)\/?(fwd|rev)?/.exec(h);
+    const m = /^#\/t\/([^/]+)\/?(fwd|rev)?(?:\/vs\/([0-9a-f]{12}))?/.exec(h);
     if (m) {
       this.dir = (m[2] as Dir) || 'fwd';
+      this.setRival(m[3] ?? null, decodeURIComponent(m[1]));
       const id = decodeURIComponent(m[1]);
       const alias = this.aliases.get(id);
       if (alias) {
@@ -1279,10 +1285,44 @@ export class Atlas {
       nightNow: isNightAt(t.center),
       medals: { targets: targets(this.feed?.records[`${t.id}|${this.dir}`]?.ms, t.lengthM), earned: earnedMedal(t.id, this.dir) },
       daily: this.isDaily(t, this.dir) ? V.dailyBoard(this.daily?.track === t.id ? this.daily : null, this.o.driver.pid, msLeftToday()) : undefined,
+      challenge: this.rival && this.rival.pid !== this.o.driver.pid ? { name: this.rival.name, ms: this.rival.ms } : undefined,
     });
     this.sheetRecord = this.feed?.records[`${t.id}|${this.dir}`]?.ms;
     this.el.detail.querySelectorAll<HTMLElement>('[data-el]').forEach((e) => (this.el[e.dataset.el!] = e));
     if (this.board) this.renderBoard();
+  }
+
+  /** A challenge link (#/t/ID/DIR/vs/PID): look up whose lap it is, for the sheet. */
+  private setRival(pid: string | null, track: string) {
+    if (!pid) return void (this.rival = null);
+    if (this.rival?.pid === pid) return;
+    this.rival = { pid };
+    api
+      .ghost(track, this.dir, pid)
+      .then((r) => {
+        if (this.rival?.pid !== pid) return;
+        this.rival = { pid, name: r.name, ms: r.ms };
+        if (this.selected && !this.editor) this.renderDetail();
+      })
+      .catch(() => undefined);
+  }
+
+  /** Copy (or share) a link that opens this circuit with your best lap as a ghost to beat. */
+  private async shareChallenge() {
+    const t = this.selected;
+    if (!t) return;
+    const url = `${location.origin}${location.pathname}#/t/${t.id}/${this.dir}/vs/${this.o.driver.pid}`;
+    const mine = this.board?.entries.find((e) => e.pid === this.o.driver.pid);
+    const text = `Beat my ${mine ? V.formatMs(mine.ms) : 'lap'} at ${t.name} on ApexKart`;
+    try {
+      if (small() && 'share' in navigator) await navigator.share({ title: 'ApexKart challenge', text, url });
+      else {
+        await navigator.clipboard.writeText(url);
+        this.toast('Challenge link copied. Send it to a friend.');
+      }
+    } catch (e) {
+      if ((e as Error).name !== 'AbortError') this.toast(`Copy this link: ${url}`, 'warn');
+    }
   }
 
   private renderBoard() {

@@ -16,7 +16,7 @@ import { rotationLabel } from '../ui/trackArt';
 import { analyzeShape } from '../track/shape';
 import { decodeGhost, encodeGhost, sampleGhost, GHOST_DT, type GhostData, type GhostFrame } from '../shared/ghost';
 import type { TrackData } from '../track/osm';
-import { api, type BoardResponse, type Dir, type Driver } from '../net/api';
+import { api, formatMs, type BoardResponse, type Dir, type Driver } from '../net/api';
 import { gridPose, type RaceContext, type RaceMode } from './raceMode';
 
 export interface RaceOptions {
@@ -29,6 +29,8 @@ export interface RaceOptions {
   mode?: RaceMode;
   /** Today's daily circuit: your best lap of the day also goes on the day's board. */
   daily?: boolean;
+  /** A challenge: race this driver's leaderboard lap as a ghost (their public id). */
+  rival?: string;
 }
 
 interface LocalPB {
@@ -71,6 +73,7 @@ export class Race {
   /** Live, Day or Night; a shared session (multiplayer room) fixes it for everyone. */
   private timeSetting: TimePref;
   private worldBuild = 0; // world style toggles can overlap; only the newest build is kept
+  private rival: { name: string; ms: number; beaten: boolean } | null = null;
   private liveEnvAsked = false;
   private frameTimes: number[] = [];
   private camera = new THREE.PerspectiveCamera(62, 1, 0.1, 5000);
@@ -170,6 +173,7 @@ export class Race {
     });
 
     this.buildWorld();
+    if (opts.rival && !opts.mode) this.loadRival(opts.rival);
     this.syncToggles();
     this.buildMinimap();
     this.buildSkids();
@@ -344,6 +348,19 @@ export class Race {
     this.audio.start();
     this.hud.setVisible(true);
     this.resetToGrid();
+    if (this.rival) this.hud.banner(`Chasing ${this.rival.name} · ${formatMs(this.rival.ms)}`, 'info', 3);
+  }
+
+  /** A challenge: their lap joins as a ghost and stays for the whole session. */
+  private async loadRival(pid: string) {
+    try {
+      const r = await api.ghost(this.opts.track.id, this.opts.dir, pid);
+      if (!r.ghost || this.disposed) return;
+      this.rival = { name: r.name, ms: r.ms, beaten: false };
+      this.setGhost('rival', `${r.name} · challenge`, r.color, r.ghost);
+    } catch {
+      /* race on without it */
+    }
   }
 
   private action(a: string) {
@@ -667,6 +684,10 @@ export class Race {
       this.ghostRec.push({ x: this.phys.x, z: this.phys.z, h: this.phys.heading });
       this.submitDaily({ ms, sectors, ghost: encodeGhost(this.ghostRec) });
     }
+    if (this.rival && !this.rival.beaten && ms < this.rival.ms) {
+      this.rival.beaten = true;
+      this.hud.toast(`You beat ${this.rival.name}'s ${formatMs(this.rival.ms)}`, 'gold');
+    }
     // Medals in time trials, against the record on the live board (once it has loaded).
     if (!this.opts.mode && this.board) {
       const m = medalFor(ms, targets(this.board.entries[0]?.ms, this.opts.track.lengthM));
@@ -776,9 +797,9 @@ export class Race {
 
   private async syncBoardGhosts() {
     const me = this.opts.driver.pid;
-    const top = (this.board?.entries ?? []).filter((e) => e.pid !== me).slice(0, 3);
+    const top = (this.board?.entries ?? []).filter((e) => e.pid !== me && e.pid !== this.opts.rival).slice(0, 3);
     const wanted = new Set(top.map((e) => `${e.pid}:${e.ms}`));
-    for (const g of this.ghosts.filter((g) => g.key !== 'pb' && !wanted.has(g.key))) this.removeGhost(g.key);
+    for (const g of this.ghosts.filter((g) => g.key !== 'pb' && g.key !== 'rival' && !wanted.has(g.key))) this.removeGhost(g.key);
     if (this.pb && !this.ghosts.some((g) => g.key === 'pb')) this.setGhost('pb', 'Your best', this.opts.driver.color, this.pb.ghost);
     for (const e of top) {
       const key = `${e.pid}:${e.ms}`;
