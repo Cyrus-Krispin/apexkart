@@ -10,16 +10,17 @@ interface Preset {
   search?: string;
   radius?: number;
   layout?: number; // index into layouts sorted by length (0 = longest)
+  country: string; // ISO alpha-3
 }
 
 const PRESETS: Preset[] = [
-  { name: 'KF1 Karting Circuit', location: 'Kranji, Singapore', center: [1.423125, 103.7585874], radius: 250 },
-  { name: 'Racing Underdog Medini', location: 'Iskandar Puteri, Malaysia', center: [1.4059952, 103.6254735], radius: 250 },
-  { name: 'South Garda Karting', location: 'Lonato, Italy', search: 'South Garda Karting Lonato', radius: 500 },
-  { name: 'Karting Genk', location: 'Genk, Belgium', search: 'Karting Genk Horensbergdam', radius: 500 },
-  { name: 'PF International', location: 'Lincolnshire, England', center: [53.0387859, -0.6599601], radius: 600 },
-  { name: 'Erftlandring Kerpen', location: 'Kerpen, Germany', search: 'Erftlandring Kerpen', radius: 500 },
-  { name: 'Kartódromo Internacional do Algarve', location: 'Portimão, Portugal', search: 'Kartódromo Internacional do Algarve', radius: 600 },
+  { name: 'KF1 Karting Circuit', country: 'SGP', location: 'Kranji, Singapore', center: [1.423125, 103.7585874], radius: 250 },
+  { name: 'Racing Underdog Medini', country: 'MYS', location: 'Iskandar Puteri, Malaysia', center: [1.4059952, 103.6254735], radius: 250 },
+  { name: 'South Garda Karting', country: 'ITA', location: 'Lonato, Italy', search: 'South Garda Karting Lonato', radius: 500 },
+  { name: 'Karting Genk', country: 'BEL', location: 'Genk, Belgium', search: 'Karting Genk Horensbergdam', radius: 500 },
+  { name: 'PF International', country: 'GBR', location: 'Lincolnshire, England', center: [53.0387859, -0.6599601], radius: 600 },
+  { name: 'Erftlandring Kerpen', country: 'DEU', location: 'Kerpen, Germany', search: 'Erftlandring Kerpen', radius: 500 },
+  { name: 'Kartódromo Internacional do Algarve', country: 'PRT', location: 'Portimão, Portugal', search: 'Kartódromo Internacional do Algarve', radius: 600 },
 ];
 
 const UA = 'ApexKart track baker (github.com/Cyrus-Krispin/apexkart)';
@@ -53,6 +54,7 @@ for (const p of PRESETS) {
     const t = loopToTrack(loop, elements, p.name, p.location);
     t.name = p.name;
     t.preset = true;
+    t.country = p.country;
     result.push(t);
     console.log(`✓ ${p.name}: ${t.lengthM} m, ${t.points.length} pts, ways ${t.osmWays.join(',')} (${loops.length} layouts: ${loops.map((l) => Math.round(l.lengthM)).join('/')})`);
   } catch (e) {

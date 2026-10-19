@@ -1,0 +1,109 @@
+/* ApexKart · "Paddock Paper" design system
+   Paper and ink like a printed race programme, signal orange for action,
+   F1 timing colours for sectors. Sharp corners, hairline rules, mono numerals. */
+
+:root {
+  --paper: #f2eee5;
+  --paper-2: #e9e4d8;
+  --paper-3: #ddd6c6;
+  --ink: #141414;
+  --ink-2: #3b3a36;
+  --ink-3: #75716a;
+  --rule: rgba(20, 20, 20, 0.14);
+  --rule-strong: rgba(20, 20, 20, 0.3);
+  --signal: #ff4d00;
+  --signal-deep: #e04300;
+  --night: #111110;
+  --night-2: #1c1b19;
+  --night-rule: rgba(242, 238, 229, 0.1);
+  --night-text: #f2eee5;
+  --night-muted: #9a958a;
+  --purple: #8b5cf6;
+  --green: #16a34a;
+  --green-bright: #22c55e;
+  --yellow: #eab308;
+  --red: #e5383b;
+
+  --display: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  --body: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --radius: 2px;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--body);
+  font-size: 15px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; background: none; border: 0; padding: 0; }
+a { color: inherit; }
+[hidden] { display: none !important; }
+::selection { background: var(--signal); color: var(--ink); }
+:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+
+/* Type */
+.display { font-family: var(--display); font-stretch: 125%; font-weight: 800; letter-spacing: -0.015em; line-height: 0.98; text-transform: uppercase; }
+.label { font-family: var(--mono); font-size: 11px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+/* Buttons */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  height: 44px; padding: 0 18px; border-radius: var(--radius);
+  font-weight: 700; font-size: 14px; letter-spacing: 0.01em;
+  border: 1px solid var(--ink); background: transparent; color: var(--ink);
+  transition: background 0.15s, color 0.15s, transform 0.08s;
+}
+.btn:hover { background: var(--ink); color: var(--paper); }
+.btn:active { transform: translateY(1px); }
+.btn.primary { background: var(--signal); border-color: var(--signal); color: var(--ink); }
+.btn.primary:hover { background: var(--ink); border-color: var(--ink); color: var(--signal); }
+.btn.block { width: 100%; }
+.btn.lg { height: 58px; font-family: var(--display); font-stretch: 125%; font-weight: 800; font-size: 17px; text-transform: uppercase; letter-spacing: 0.02em; }
+.btn .arrow { font-family: var(--mono); transition: transform 0.2s var(--ease); }
+.btn:hover .arrow { transform: translateX(4px); }
+
+.live-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--signal); flex: none; animation: live 1.8s infinite; }
+@keyframes live { 0% { box-shadow: 0 0 0 0 rgba(255, 77, 0, 0.55); } 70% { box-shadow: 0 0 0 7px rgba(255, 77, 0, 0); } 100% { box-shadow: 0 0 0 0 rgba(255, 77, 0, 0); } }
+
+kbd {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; padding: 0 6px;
+  font-family: var(--mono); font-size: 11px; font-weight: 700; border-radius: var(--radius);
+  border: 1px solid var(--rule-strong); border-bottom-width: 2px; background: var(--paper); color: var(--ink);
+}
+
+/* Track art */
+.track-art { display: block; width: 100%; height: auto; overflow: visible; }
+.track-art .ta-line { fill: none; stroke: var(--ink); stroke-linejoin: round; stroke-linecap: round; }
+.track-art .ta-casing { fill: none; stroke: var(--ink); stroke-linejoin: round; }
+.track-art .ta-road { fill: none; stroke: var(--paper); stroke-linejoin: round; }
+.track-art .ta-center { fill: none; stroke: var(--ink); stroke-dasharray: 3 4; opacity: 0.35; }
+.track-art .ta-arrow { fill: none; stroke: var(--signal); stroke-linecap: round; stroke-linejoin: round; }
+.track-art .ta-chk-w { fill: #fff; }
+.track-art .ta-chk-b { fill: var(--ink); }
+.track-art .ta-sf-frame { fill: var(--ink); }
+.track-art .ta-turn circle { fill: var(--paper); stroke: var(--ink); stroke-width: 1.2; }
+.track-art .ta-turn text { font-family: var(--mono); font-size: 9px; font-weight: 700; text-anchor: middle; fill: var(--ink); }
+.track-art.draw .ta-line, .track-art.draw .ta-road { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw 2.4s var(--ease) forwards 0.2s; }
+@keyframes draw { to { stroke-dashoffset: 0; } }
+
+.graph-paper {
+  background-color: var(--paper);
+  background-image:
+    linear-gradient(rgba(20, 20, 20, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(20, 20, 20, 0.055) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}

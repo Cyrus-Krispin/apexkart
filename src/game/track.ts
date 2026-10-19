@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { LatLon, TrackData } from '../track/osm';
+import { analyzeShape } from '../track/shape';
 
 const R = 6378137;
 const SPACING = 1; // metres between centreline samples
@@ -74,7 +75,8 @@ export class TrackModel {
       });
     }
 
-    let start = this.findStart(pts);
+    // Same start line as the 2D track art (both are parametrised by arc length).
+    let start = Math.round(analyzeShape(data.points).startFrac * count) % count;
     if (reverse) {
       pts = pts.slice().reverse();
       start = count - 1 - start;
@@ -120,34 +122,6 @@ export class TrackModel {
       if (!this.grid.has(key)) this.grid.set(key, []);
       this.grid.get(key)!.push(i);
     }
-  }
-
-  /** Start/finish line: ~65% of the way down the longest straight. */
-  private findStart(pts: THREE.Vector3[]): number {
-    const n = pts.length;
-    const heading = (i: number) => {
-      const a = pts[i];
-      const b = pts[(i + 1) % n];
-      return Math.atan2(b.x - a.x, b.z - a.z);
-    };
-    const straight: boolean[] = [];
-    for (let i = 0; i < n; i++) {
-      let d = heading((i + 6) % n) - heading((i - 6 + n) % n);
-      d = Math.atan2(Math.sin(d), Math.cos(d));
-      straight.push(Math.abs(d) < 0.12);
-    }
-    let bestLen = 0;
-    let bestStart = 0;
-    for (let i = 0; i < n; i++) {
-      if (!straight[i] || straight[(i - 1 + n) % n]) continue;
-      let len = 0;
-      while (straight[(i + len) % n] && len < n) len++;
-      if (len > bestLen) {
-        bestLen = len;
-        bestStart = i;
-      }
-    }
-    return bestLen ? (bestStart + Math.floor(bestLen * 0.65)) % n : 0;
   }
 
   private cell(x: number, z: number) {

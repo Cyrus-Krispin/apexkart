@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import type { TrackModel } from './track';
 
 export interface KartVisual {
@@ -9,6 +10,24 @@ export interface KartVisual {
   materials: THREE.Material[];
 }
 
+function tyreGeometry(r: number, w: number): THREE.BufferGeometry {
+  // Lathe a rounded tyre profile around the axle (lathe axis = y, rotated to x later).
+  const pts: THREE.Vector2[] = [];
+  const rim = r * 0.62;
+  const s = 0.35; // sidewall roundness
+  pts.push(new THREE.Vector2(rim, -w / 2));
+  for (let i = 0; i <= 6; i++) {
+    const a = (i / 6) * (Math.PI / 2);
+    pts.push(new THREE.Vector2(r - w * s * (1 - Math.sin(a)), -w / 2 + w * s * (1 - Math.cos(a))));
+  }
+  for (let i = 0; i <= 6; i++) {
+    const a = (i / 6) * (Math.PI / 2);
+    pts.push(new THREE.Vector2(r - w * s * (1 - Math.cos(a)), w / 2 - w * s * (1 - Math.sin(a))));
+  }
+  pts.push(new THREE.Vector2(rim, w / 2));
+  return new THREE.LatheGeometry(pts, 20).rotateZ(Math.PI / 2);
+}
+
 /** Low-poly racing kart facing +z, origin on the ground at the kart's centre. */
 export function buildKart(color: string, opts: { ghost?: boolean; number?: number } = {}): KartVisual {
   const root = new THREE.Group();
@@ -16,22 +35,24 @@ export function buildKart(color: string, opts: { ghost?: boolean; number?: numbe
   root.add(body);
   const materials: THREE.Material[] = [];
   const mat = (c: THREE.ColorRepresentation, extra: Partial<THREE.MeshStandardMaterialParameters> = {}) => {
-    const m = new THREE.MeshStandardMaterial({ color: c, roughness: 0.55, metalness: 0.1, ...extra });
+    const m = new THREE.MeshStandardMaterial({ color: c, roughness: 0.5, metalness: 0.05, ...extra });
     if (opts.ghost) {
       m.transparent = true;
-      m.opacity = 0.38;
+      m.opacity = 0.34;
       m.depthWrite = false;
+      m.emissive = new THREE.Color(color);
+      m.emissiveIntensity = 0.25;
     }
     materials.push(m);
     return m;
   };
-  const paint = mat(color, { roughness: 0.35, metalness: 0.2 });
-  const dark = mat(0x1d1f24, { roughness: 0.8 });
-  const steel = mat(0x9aa0a6, { metalness: 0.8, roughness: 0.3 });
-  const tyre = mat(0x141414, { roughness: 0.95 });
-  const suit = mat(color, { roughness: 0.7 });
-  const white = mat(0xf2f2f2, { roughness: 0.5 });
-  const visor = mat(0x0a0a12, { roughness: 0.1, metalness: 0.6 });
+  const paint = mat(color, { roughness: 0.32, metalness: 0.15 });
+  const ink = mat(0x18181a, { roughness: 0.75 });
+  const paper = mat(0xf2eee5, { roughness: 0.45 });
+  const steel = mat(0xa7abb0, { metalness: 0.85, roughness: 0.3 });
+  const rubber = mat(0x151515, { roughness: 0.92 });
+  const suit = mat(color, { roughness: 0.8 });
+  const visor = mat(0x0b0b10, { roughness: 0.08, metalness: 0.7 });
 
   const add = (geo: THREE.BufferGeometry, m: THREE.Material, x: number, y: number, z: number, parent: THREE.Object3D = body) => {
     const mesh = new THREE.Mesh(geo, m);
@@ -40,85 +61,104 @@ export function buildKart(color: string, opts: { ghost?: boolean; number?: numbe
     parent.add(mesh);
     return mesh;
   };
+  const rbox = (w: number, h: number, d: number, r: number) => new RoundedBoxGeometry(w, h, d, 3, r);
 
-  // Chassis tray + rails
-  add(new THREE.BoxGeometry(0.72, 0.05, 1.5), dark, 0, 0.12, 0);
-  for (const s of [-1, 1]) add(new THREE.CylinderGeometry(0.025, 0.025, 1.55, 6).rotateX(Math.PI / 2), steel, s * 0.38, 0.13, 0);
-  // Nose cone
-  const nose = add(new THREE.BoxGeometry(0.95, 0.18, 0.42), paint, 0, 0.2, 0.92);
-  nose.rotation.x = -0.18;
-  // Front fairing in front of the driver's feet
-  add(new THREE.BoxGeometry(0.42, 0.22, 0.3), paint, 0, 0.3, 0.55).rotation.x = -0.5;
-  // Side pods
-  for (const s of [-1, 1]) {
-    const pod = add(new THREE.BoxGeometry(0.22, 0.17, 0.82), paint, s * 0.58, 0.2, -0.05);
-    pod.rotation.z = s * -0.12;
+  // Chassis: floor tray, side rails, axles
+  add(rbox(0.7, 0.04, 1.45, 0.015), ink, 0, 0.1, 0);
+  for (const sx of [-1, 1]) add(new THREE.CylinderGeometry(0.022, 0.022, 1.5, 8).rotateX(Math.PI / 2), steel, sx * 0.36, 0.12, 0);
+  add(new THREE.CylinderGeometry(0.025, 0.025, 1.18, 8).rotateZ(Math.PI / 2), steel, 0, 0.14, -0.62);
+
+  // Nose cone: extruded rounded trapezoid (top view), bevelled
+  const nose = new THREE.Shape();
+  nose.moveTo(-0.28, -0.62);
+  nose.lineTo(0.28, -0.62);
+  nose.quadraticCurveTo(0.5, -0.7, 0.5, -0.9);
+  nose.quadraticCurveTo(0.5, -1.02, 0.38, -1.02);
+  nose.lineTo(-0.38, -1.02);
+  nose.quadraticCurveTo(-0.5, -1.02, -0.5, -0.9);
+  nose.quadraticCurveTo(-0.5, -0.7, -0.28, -0.62);
+  const noseGeo = new THREE.ExtrudeGeometry(nose, { depth: 0.1, bevelEnabled: true, bevelSize: 0.03, bevelThickness: 0.03, bevelSegments: 3, curveSegments: 10 });
+  noseGeo.rotateX(-Math.PI / 2); // shape y = -z, extrusion goes up
+  add(noseGeo, paint, 0, 0.1, 0);
+  // Front panel ahead of the driver's legs, with a paper number board
+  const panel = add(rbox(0.46, 0.3, 0.07, 0.03), paint, 0, 0.3, 0.52);
+  panel.rotation.x = -0.55;
+  // Side pods with a paper stripe
+  for (const sx of [-1, 1]) {
+    const pod = add(rbox(0.22, 0.17, 0.8, 0.06), paint, sx * 0.6, 0.19, -0.04);
+    pod.rotation.z = sx * -0.08;
+    add(rbox(0.225, 0.035, 0.6, 0.015), paper, sx * 0.6, 0.235, -0.04).rotation.z = sx * -0.08;
   }
   // Rear bumper
-  add(new THREE.BoxGeometry(1.25, 0.09, 0.12), dark, 0, 0.22, -0.98);
-  // Engine + exhaust (right side, rear)
-  add(new THREE.BoxGeometry(0.26, 0.28, 0.32), steel, 0.32, 0.32, -0.5);
-  add(new THREE.CylinderGeometry(0.05, 0.05, 0.4, 8).rotateX(Math.PI / 2), dark, 0.45, 0.3, -0.75);
+  add(rbox(1.28, 0.07, 0.1, 0.03), ink, 0, 0.21, -0.98);
+  for (const sx of [-1, 1]) add(rbox(0.06, 0.07, 0.3, 0.02), ink, sx * 0.4, 0.21, -0.85);
+  // Engine block, cylinder head and silencer (right rear)
+  add(rbox(0.24, 0.26, 0.3, 0.03), steel, 0.32, 0.3, -0.48);
+  add(new THREE.CylinderGeometry(0.075, 0.09, 0.12, 12), steel, 0.32, 0.48, -0.48);
+  add(new THREE.CylinderGeometry(0.065, 0.065, 0.36, 12).rotateX(Math.PI / 2), ink, 0.47, 0.3, -0.76);
   // Seat
-  add(new THREE.BoxGeometry(0.4, 0.4, 0.12), dark, 0, 0.38, -0.32).rotation.x = -0.35;
+  const seat = add(rbox(0.42, 0.42, 0.12, 0.05), ink, 0, 0.36, -0.33);
+  seat.rotation.x = -0.32;
   // Steering column + wheel
-  add(new THREE.CylinderGeometry(0.02, 0.02, 0.45, 6).rotateX(Math.PI / 2 - 0.9), steel, 0, 0.35, 0.3);
-  const sw = add(new THREE.TorusGeometry(0.13, 0.022, 6, 16), dark, 0, 0.5, 0.15);
+  add(new THREE.CylinderGeometry(0.018, 0.018, 0.46, 6).rotateX(Math.PI / 2 - 0.92), steel, 0, 0.33, 0.3);
+  const sw = add(new THREE.TorusGeometry(0.13, 0.02, 8, 20), ink, 0, 0.5, 0.15);
   sw.rotation.x = -0.6;
-  // Driver
-  add(new THREE.CylinderGeometry(0.17, 0.2, 0.5, 10), suit, 0, 0.62, -0.22).rotation.x = -0.35;
-  for (const s of [-1, 1]) {
-    const arm = add(new THREE.CylinderGeometry(0.045, 0.045, 0.42, 6), suit, s * 0.17, 0.62, -0.02);
-    arm.rotation.x = Math.PI / 2 - 0.5;
-    arm.rotation.z = s * 0.25;
+
+  // Driver: torso, arms, helmet with visor and livery stripe
+  const torso = add(new THREE.CapsuleGeometry(0.17, 0.26, 4, 10), suit, 0, 0.62, -0.22);
+  torso.rotation.x = -0.35;
+  add(new THREE.CapsuleGeometry(0.172, 0.04, 4, 10), paper, 0, 0.5, -0.18).rotation.x = -0.35;
+  for (const sx of [-1, 1]) {
+    const arm = add(new THREE.CapsuleGeometry(0.045, 0.32, 4, 8), suit, sx * 0.16, 0.62, -0.02);
+    arm.rotation.x = Math.PI / 2 - 0.55;
+    arm.rotation.z = sx * 0.28;
   }
-  add(new THREE.SphereGeometry(0.16, 16, 12), white, 0, 1.0, -0.15);
-  const vis = add(new THREE.SphereGeometry(0.162, 16, 8, -Math.PI / 2.6, Math.PI / 1.3, Math.PI / 2.8, Math.PI / 4), visor, 0, 1.0, -0.15);
-  vis.rotation.y = 0;
-  const stripe = add(new THREE.TorusGeometry(0.158, 0.018, 6, 20), paint, 0, 1.0, -0.15);
+  add(new THREE.SphereGeometry(0.155, 20, 16), paper, 0, 0.99, -0.16);
+  add(new THREE.SphereGeometry(0.157, 20, 10, -Math.PI / 2.6, Math.PI / 1.3, Math.PI / 2.75, Math.PI / 4.2), visor, 0, 0.99, -0.16);
+  const stripe = add(new THREE.TorusGeometry(0.153, 0.022, 6, 24), paint, 0, 0.99, -0.16);
   stripe.rotation.y = Math.PI / 2;
 
-  // Number plate on the nose
+  // Number board on the front panel
   if (opts.number !== undefined && !opts.ghost) {
     const c = document.createElement('canvas');
-    c.width = c.height = 64;
+    c.width = 96;
+    c.height = 64;
     const g = c.getContext('2d')!;
-    g.fillStyle = '#ffd60a';
-    g.beginPath();
-    g.arc(32, 32, 30, 0, Math.PI * 2);
-    g.fill();
-    g.fillStyle = '#111';
-    g.font = 'bold 34px system-ui';
+    g.fillStyle = '#f2eee5';
+    g.fillRect(0, 0, 96, 64);
+    g.fillStyle = '#141414';
+    g.font = '800 48px Archivo, system-ui, sans-serif';
     g.textAlign = 'center';
     g.textBaseline = 'middle';
-    g.fillText(String(opts.number), 32, 34);
+    g.fillText(String(opts.number), 48, 36);
     const t = new THREE.CanvasTexture(c);
     t.colorSpace = THREE.SRGBColorSpace;
-    const plate = add(new THREE.CircleGeometry(0.11, 20), new THREE.MeshBasicMaterial({ map: t }), 0, 0.3, 1.0);
-    plate.rotation.x = -Math.PI / 2 + 0.25;
+    const plate = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.2), new THREE.MeshBasicMaterial({ map: t }));
+    plate.position.set(0, 0.0, 0.037);
+    panel.add(plate);
   }
 
-  // Wheels
+  // Wheels with rounded tyres and paper rims
   const wheels: THREE.Mesh[] = [];
   const frontPivots: THREE.Group[] = [];
-  const rim = new THREE.CylinderGeometry(0.075, 0.075, 0.01, 10).rotateZ(Math.PI / 2);
   const mk = (x: number, z: number, r: number, w: number, front: boolean) => {
     const pivot = new THREE.Group();
     pivot.position.set(x, r, z);
     root.add(pivot);
-    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(r, r, w, 16).rotateZ(Math.PI / 2), tyre);
+    const wheel = new THREE.Mesh(tyreGeometry(r, w), rubber);
     wheel.castShadow = !opts.ghost;
-    const hub = new THREE.Mesh(rim, steel);
-    hub.position.x = Math.sign(x) * (w / 2 + 0.002);
+    const hub = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.6, r * 0.6, w * 0.9, 14).rotateZ(Math.PI / 2), paper);
     wheel.add(hub);
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.2, r * 0.2, w * 0.95, 8).rotateZ(Math.PI / 2), ink);
+    wheel.add(cap);
     pivot.add(wheel);
     wheels.push(wheel);
     if (front) frontPivots.push(pivot);
   };
-  mk(-0.55, 0.62, 0.13, 0.13, true);
-  mk(0.55, 0.62, 0.13, 0.13, true);
-  mk(-0.6, -0.62, 0.14, 0.21, false);
-  mk(0.6, -0.62, 0.14, 0.21, false);
+  mk(-0.56, 0.62, 0.13, 0.13, true);
+  mk(0.56, 0.62, 0.13, 0.13, true);
+  mk(-0.6, -0.62, 0.14, 0.2, false);
+  mk(0.6, -0.62, 0.14, 0.2, false);
 
   return { root, body, frontPivots, wheels, materials };
 }
