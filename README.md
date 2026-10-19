@@ -31,9 +31,8 @@ broadcast-style timing panels with F1 sector colours. Tokens live in `src/styles
   links can't sneak into a lap. When OpenStreetMap itself is wrong, **Fix the layout** on a circuit
   page opens an editor over the satellite imagery. Corrections are shared through `/api/layout`
   and get their own leaderboard.
-- **Seven featured circuits** baked into `public/tracks/presets.json`: KF1 (Singapore),
-  Racing Underdog Medini, South Garda (Lonato), Genk, PF International, Kerpen and the
-  Algarve.
+- **Six featured circuits** baked into `public/tracks/presets.json`: KF1 (Singapore),
+  South Garda (Lonato), Genk, PF International, Kerpen and the Algarve.
 - **Both directions**: every track can be raced in reverse (KF1 really is a dual-direction
   circuit), with separate leaderboards.
 - **Timing like TV**: flying laps, three sectors with purple/green/yellow colours, a live delta

@@ -16,9 +16,10 @@ interface Preset {
   needsFix?: boolean; // OSM trace known not to match the asphalt
 }
 
+// Racing Underdog Medini is out for now: its OSM trace doesn't follow the asphalt.
+// A hand-traced layout is kept in scripts/pending/medini-trace.json.
 const PRESETS: Preset[] = [
   { name: 'KF1 Karting Circuit', country: 'SGP', location: 'Kranji, Singapore', center: [1.423125, 103.7585874], radius: 250 },
-  { name: 'Racing Underdog Medini', country: 'MYS', needsFix: true, location: 'Iskandar Puteri, Malaysia', center: [1.4059952, 103.6254735], radius: 250 },
   { name: 'South Garda Karting', country: 'ITA', location: 'Lonato, Italy', search: 'South Garda Karting Lonato', radius: 500 },
   { name: 'Karting Genk', country: 'BEL', location: 'Genk, Belgium', search: 'Karting Genk Horensbergdam', radius: 500 },
   { name: 'PF International', country: 'GBR', location: 'Lincolnshire, England', center: [53.0387859, -0.6599601], radius: 600 },
