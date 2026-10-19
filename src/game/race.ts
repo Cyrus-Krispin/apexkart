@@ -6,6 +6,7 @@ import { Input } from './input';
 import { KartAudio } from './audio';
 import { Atmosphere, resolveTime, saveTimePref, timePref, type TimePref } from './atmosphere';
 import { awardMedal, earnedMedal, MEDAL_NAME, MEDALS, medalFor, targets } from './medals';
+import { recordDailyLap } from '../shared/daily';
 import { floodlit } from './floodlights';
 import { RenderPipeline, autoQuality, initialQuality, type Quality, type QualitySetting } from './render';
 import { buildWorld, fetchLiveEnv, initialStyle, type World, type WorldStyle } from './world';
@@ -26,6 +27,8 @@ export interface RaceOptions {
   onExit: () => void;
   /** Multiplayer and other add-ons (src/game/raceMode.ts). Omit for a time trial. */
   mode?: RaceMode;
+  /** Today's daily circuit: your best lap of the day also goes on the day's board. */
+  daily?: boolean;
 }
 
 interface LocalPB {
@@ -658,6 +661,12 @@ export class Race {
       this.nextSyncAt = 0;
       this.submit();
     }
+    // The daily circuit: a best-of-the-day lap goes on the day's board even if it isn't a PB
+    // (a PB is submitted above, and the server files it on both boards).
+    if (this.opts.daily && !this.opts.mode && recordDailyLap(ms) && !isPb) {
+      this.ghostRec.push({ x: this.phys.x, z: this.phys.z, h: this.phys.heading });
+      this.submitDaily({ ms, sectors, ghost: encodeGhost(this.ghostRec) });
+    }
     // Medals in time trials, against the record on the live board (once it has loaded).
     if (!this.opts.mode && this.board) {
       const m = medalFor(ms, targets(this.board.entries[0]?.ms, this.opts.track.lengthM));
@@ -672,6 +681,29 @@ export class Race {
     const have = earnedMedal(this.opts.track.id, this.opts.dir);
     const next = MEDALS[(have ? MEDALS.indexOf(have) : -1) + 1] ?? null;
     this.hud.target(next, next ? targets(this.board.entries[0]?.ms, this.opts.track.lengthM)[next] : null);
+  }
+
+  /** A best-of-the-day lap on the daily circuit that isn't your all-time best. */
+  private async submitDaily(lap: { ms: number; sectors: number[]; ghost: GhostData }) {
+    const d = this.opts.driver;
+    try {
+      const res = await api.submit({
+        track: this.opts.track.id,
+        dir: this.opts.dir,
+        trackName: this.opts.track.name,
+        trackLength: Math.round(this.track.length),
+        center: this.opts.track.center,
+        name: d.name,
+        color: d.color,
+        driverId: d.id,
+        ...lap,
+        points: this.opts.track.points,
+        width: this.opts.track.width,
+      });
+      if (res.daily) this.hud.toast(`Daily circuit · P${res.daily.rank} of ${res.daily.total} today`, res.daily.rank === 1 ? 'gold' : undefined);
+    } catch {
+      /* the day's best is kept on this device; the next one will try again */
+    }
   }
 
   private async submit() {
@@ -700,6 +732,7 @@ export class Race {
       if (res.improved) {
         this.hud.lapCardRank(res.rank, res.total);
         if (res.rank === 1) this.hud.toast('Fastest lap on the live board', 'gold');
+        else if (res.daily?.improved) this.hud.toast(`Daily circuit · P${res.daily.rank} of ${res.daily.total} today`, res.daily.rank === 1 ? 'gold' : undefined);
       }
       this.refreshBoard();
     } catch (e) {

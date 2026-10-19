@@ -78,6 +78,16 @@ export interface LapResult {
   rank: number;
   pbMs: number;
   total: number;
+  daily?: { improved: boolean; rank: number; total: number }; // when it's today's daily circuit
+}
+
+export interface DailyResponse {
+  day: string; // UTC, YYYY-MM-DD
+  track: string | null;
+  dir: Dir;
+  endsAt: number;
+  total: number;
+  entries: { rank: number; pid: string; name: string; color: string; ms: number }[];
 }
 
 async function json<T>(res: Response): Promise<T> {
@@ -92,6 +102,7 @@ export const api = {
     return fetch(`/api/board?${q}`).then((r) => json<BoardResponse>(r));
   },
   feed: () => fetch('/api/feed').then((r) => json<FeedResponse>(r)),
+  daily: () => fetch('/api/daily').then((r) => json<DailyResponse>(r)),
   submit: (lap: LapSubmission) =>
     fetch('/api/lap', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(lap) }).then((r) =>
       json<LapResult>(r),

@@ -6,6 +6,13 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+### Added
+- **Daily circuit**: one featured circuit a day, the same for everyone, with its own leaderboard
+  that starts fresh at midnight UTC.
+  - It leads the rail on the home screen, with the day's leader, your place and the time left.
+  - Your best lap of the day counts even when it isn't your all-time best.
+  - Set a lap on consecutive days to build a streak.
+
 ## [0.8.0] - 2026-10-20
 
 ### Added

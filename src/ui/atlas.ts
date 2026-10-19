@@ -4,10 +4,11 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { centroid, discoverTracks, layoutsNear, loopToTrack, trackFromId, waysFromId, type LatLon, type TrackData } from '../track/osm';
 import { cellOf, unpackPoints, venueKey, type VenueCell } from '../shared/venues';
+import { dailyStreak, dailyTrack, dayOf, msLeftToday } from '../shared/daily';
 import { analyzeShape, type TrackShape } from '../track/shape';
 import { ProfileMenu } from './profile';
 import { LayoutEditor } from './layoutEditor';
-import { api, type BoardResponse, type CommunityLayout, type Dir, type Driver, type FeedResponse } from '../net/api';
+import { api, type BoardResponse, type CommunityLayout, type DailyResponse, type Dir, type Driver, type FeedResponse } from '../net/api';
 import { localPB } from '../game/race';
 import { earnedMedal, targets } from '../game/medals';
 import { isNightAt } from '../game/sun';
@@ -28,7 +29,8 @@ const SAT_ZOOM = 14;
 export interface AtlasOptions {
   root: HTMLElement;
   driver: Driver;
-  onRace: (track: TrackData, dir: Dir) => void;
+  /** `daily`: this is today's daily circuit, so laps also go on the day's board. */
+  onRace: (track: TrackData, dir: Dir, daily: boolean) => void;
 }
 
 type Filter = { kind: 'featured' } | { kind: 'country'; cc: string } | { kind: 'near'; at: LatLon } | { kind: 'view'; bounds: L.LatLngBounds };
@@ -120,6 +122,7 @@ export class Atlas {
   private hitSel = 0;
   private cells = new Map<string, Promise<VenueCell | null>>(); // pre-stitched layouts per 5° cell
   private sheetRecord: number | undefined; // the record the open sheet's medal targets use
+  private daily: DailyResponse | null = null;
 
   constructor(private o: AtlasOptions) {
     o.root.innerHTML = ATLAS_HTML;
@@ -502,6 +505,7 @@ export class Atlas {
     }
     this.el.rail.innerHTML = '';
     this.moreRail();
+    if (this.filter.kind === 'featured') this.el.rail.insertAdjacentHTML('afterbegin', this.dailyCardHtml());
     // The first venues on the rail are the likely next taps: fetch their layouts ahead.
     for (const it of items.slice(0, 8)) if (it.kind === 'venue') this.venueCell(it.v);
     if (keep) {
@@ -596,7 +600,41 @@ export class Atlas {
       /* private mode */
     }
     this.closeSearch();
-    this.o.onRace(t, dir);
+    this.o.onRace(t, dir, this.isDaily(t, dir));
+  }
+
+  // ------------------------------------------------------------------ daily circuit
+
+  /** Today's circuit, worked out here (the same way the server does) so it shows even offline. */
+  private dailyId() {
+    return dailyTrack(dayOf(), [...this.tracks.values()].filter((t) => t.preset).map((t) => t.id));
+  }
+
+  private isDaily(t: TrackData, dir: Dir) {
+    return dir === 'fwd' && t.id === this.dailyId();
+  }
+
+  private dailyCardHtml() {
+    const t = this.tracks.get(this.dailyId() ?? '');
+    if (!t) return '';
+    const board = this.daily?.track === t.id ? this.daily : null;
+    return V.dailyCard({ t, shape: shapeOf(t), board, me: this.o.driver.pid, streak: dailyStreak(), msLeft: msLeftToday() });
+  }
+
+  /** Refresh the daily card in place (it leads the rail in the Featured view). */
+  private renderDaily() {
+    const card = this.el.rail.querySelector('.card.daily');
+    if (card) card.outerHTML = this.dailyCardHtml();
+    if (this.selected && this.isDaily(this.selected, this.dir) && !this.editor) this.renderDetail();
+  }
+
+  private async pollDaily() {
+    try {
+      this.daily = await api.daily();
+      this.renderDaily();
+    } catch {
+      /* the card still shows today's circuit */
+    }
   }
 
   // ------------------------------------------------------------------ events
@@ -890,7 +928,9 @@ export class Atlas {
     if (!this.route() || location.hash.startsWith('#/t/')) this.applyFilter(this.filter, false);
     this.renderNow();
     this.pollFeed();
+    this.pollDaily();
     window.setInterval(() => !this.o.root.hidden && this.pollFeed(), 6000);
+    window.setInterval(() => !this.o.root.hidden && this.pollDaily(), 60000);
     window.setInterval(() => this.selected && !this.o.root.hidden && this.pollBoard(), 5000);
   }
 
@@ -1238,6 +1278,7 @@ export class Atlas {
       countryName: t.country ? this.countryName(t.country) : undefined,
       nightNow: isNightAt(t.center),
       medals: { targets: targets(this.feed?.records[`${t.id}|${this.dir}`]?.ms, t.lengthM), earned: earnedMedal(t.id, this.dir) },
+      daily: this.isDaily(t, this.dir) ? V.dailyBoard(this.daily?.track === t.id ? this.daily : null, this.o.driver.pid, msLeftToday()) : undefined,
     });
     this.sheetRecord = this.feed?.records[`${t.id}|${this.dir}`]?.ms;
     this.el.detail.querySelectorAll<HTMLElement>('[data-el]').forEach((e) => (this.el[e.dataset.el!] = e));
@@ -1312,6 +1353,7 @@ export class Atlas {
     }
     this.renderRail(true);
     this.pollFeed();
+    this.pollDaily();
   }
 
   hide() {
