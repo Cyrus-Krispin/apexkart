@@ -1,8 +1,9 @@
 // Race HUD: broadcast-style timing in the "Paddock Paper" night palette.
 import { escapeHtml, formatMs, type BoardResponse } from '../net/api';
+import { MEDAL_NAME, type Medal } from './medals';
 
 export type SectorColor = '' | 'purple' | 'green' | 'yellow';
-export type BannerKind = 'go' | 'pb' | 'warn' | 'info';
+export type BannerKind = 'go' | 'pb' | 'warn' | 'info' | 'medal';
 
 export interface SessionStats {
   laps: number;
@@ -59,6 +60,7 @@ export class Hud {
         <footer>
           <div><span class="label">Last</span><b class="mono" data-el="last">–:––.–––</b></div>
           <div><span class="label">Best</span><b class="mono" data-el="best">–:––.–––</b></div>
+          <div class="h-target" data-el="target" hidden></div>
         </footer>
       </section>
 
@@ -183,6 +185,13 @@ export class Hud {
 
   best(ms: number | null) {
     this.text('best', ms === null ? '–:––.–––' : formatMs(ms));
+  }
+
+  /** The next medal to chase and its time; null hides the row (all won, or not a time trial). */
+  target(medal: Medal | null, ms: number | null) {
+    const el = this.$.target;
+    el.hidden = !medal || ms === null;
+    if (medal && ms !== null) el.innerHTML = `<span class="label"><i class="medal m-${medal}"></i>${MEDAL_NAME[medal]} medal</span><b class="mono">${formatMs(ms)}</b>`;
   }
 
   speed(kmh: number, frac: number) {

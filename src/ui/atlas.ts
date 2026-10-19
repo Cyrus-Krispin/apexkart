@@ -9,6 +9,7 @@ import { ProfileMenu } from './profile';
 import { LayoutEditor } from './layoutEditor';
 import { api, type BoardResponse, type CommunityLayout, type Dir, type Driver, type FeedResponse } from '../net/api';
 import { localPB } from '../game/race';
+import { earnedMedal, targets } from '../game/medals';
 import { isNightAt } from '../game/sun';
 import { timePref } from '../game/atmosphere';
 import { coreBounds, distM, loadWorld, localeCountry, type Venue, type WorldIndex } from './world';
@@ -118,6 +119,7 @@ export class Atlas {
   private hits: V.SearchHit[] = [];
   private hitSel = 0;
   private cells = new Map<string, Promise<VenueCell | null>>(); // pre-stitched layouts per 5° cell
+  private sheetRecord: number | undefined; // the record the open sheet's medal targets use
 
   constructor(private o: AtlasOptions) {
     o.root.innerHTML = ATLAS_HTML;
@@ -528,6 +530,7 @@ export class Atlas {
           record: rec?.ms,
           live: (this.feed?.live[`${t.id}|fwd`] ?? 0) + (this.feed?.live[`${t.id}|rev`] ?? 0),
           pb: localPB(t.id, 'fwd'),
+          medal: earnedMedal(t.id, 'fwd'),
         });
       })
       .join('');
@@ -1234,7 +1237,9 @@ export class Atlas {
       shapeOf,
       countryName: t.country ? this.countryName(t.country) : undefined,
       nightNow: isNightAt(t.center),
+      medals: { targets: targets(this.feed?.records[`${t.id}|${this.dir}`]?.ms, t.lengthM), earned: earnedMedal(t.id, this.dir) },
     });
+    this.sheetRecord = this.feed?.records[`${t.id}|${this.dir}`]?.ms;
     this.el.detail.querySelectorAll<HTMLElement>('[data-el]').forEach((e) => (this.el[e.dataset.el!] = e));
     if (this.board) this.renderBoard();
   }
@@ -1287,6 +1292,8 @@ export class Atlas {
       if (rec) rec.innerHTML = V.recordHtml(f.records[`${id}|fwd`]?.ms);
     }
     if (!this.selected) this.renderNow();
+    // A new record moves the medal targets on the open sheet.
+    else if (!this.editor && f.records[`${this.selected.id}|${this.dir}`]?.ms !== this.sheetRecord) this.renderDetail();
   }
 
   private toast(msg: string, kind: '' | 'warn' | 'busy' = '') {

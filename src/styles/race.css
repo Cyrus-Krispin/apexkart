@@ -96,6 +96,9 @@ kbd.wide { min-width: 52px; }
 .h-timing footer div { display: flex; justify-content: space-between; align-items: baseline; padding: 8px 14px; }
 .h-timing footer div + div { border-left: 1px solid var(--night-rule); }
 .h-timing footer b { font-size: 13px; color: var(--night-text); }
+.h-timing footer .h-target { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--night-rule); }
+.h-timing footer .h-target .label { display: inline-flex; align-items: center; gap: 7px; }
+.h-timing footer .h-target .medal { width: 10px; height: 10px; }
 
 .h-tower { position: absolute; top: 20px; right: 20px; width: 268px; background: rgba(17, 17, 16, 0.86); }
 .h-tower header { display: flex; justify-content: space-between; align-items: center; height: 34px; padding: 0 12px; border-bottom: 1px solid var(--night-rule); font-family: var(--mono); font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
@@ -168,6 +171,7 @@ kbd.wide { min-width: 52px; }
 .h-banner span { display: block; padding: 10px 48px; font-family: var(--display); font-stretch: 125%; font-weight: 800; font-style: italic; font-size: 34px; text-transform: uppercase; letter-spacing: 0.01em; background: var(--night); color: var(--night-text); transform: skewX(-10deg); box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.25); }
 .h-banner.go span { background: var(--signal); color: var(--ink); font-size: 64px; padding: 6px 70px; }
 .h-banner.pb span { background: var(--purple); color: #fff; }
+.h-banner.medal span { background: linear-gradient(100deg, #f6d36b, #d4a017 55%, #f6d36b); color: #141414; }
 .h-banner.warn span { background: var(--red); color: #fff; font-size: 24px; }
 .h-banner.info span { font-size: 22px; font-style: normal; border-left: 4px solid var(--signal); }
 

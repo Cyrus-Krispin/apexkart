@@ -5,6 +5,7 @@ import { buildKart, KartPhysics, type KartVisual } from './kart';
 import { Input } from './input';
 import { KartAudio } from './audio';
 import { Atmosphere, resolveTime, saveTimePref, timePref, type TimePref } from './atmosphere';
+import { awardMedal, earnedMedal, MEDAL_NAME, MEDALS, medalFor, targets } from './medals';
 import { floodlit } from './floodlights';
 import { RenderPipeline, autoQuality, initialQuality, type Quality, type QualitySetting } from './render';
 import { buildWorld, fetchLiveEnv, initialStyle, type World, type WorldStyle } from './world';
@@ -657,6 +658,20 @@ export class Race {
       this.nextSyncAt = 0;
       this.submit();
     }
+    // Medals in time trials, against the record on the live board (once it has loaded).
+    if (!this.opts.mode && this.board) {
+      const m = medalFor(ms, targets(this.board.entries[0]?.ms, this.opts.track.lengthM));
+      if (m && awardMedal(this.opts.track.id, this.opts.dir, m)) this.hud.banner(`${MEDAL_NAME[m]} medal`, 'medal', 2.8);
+      this.showTarget();
+    }
+  }
+
+  /** Time trials: the next medal to chase, under Last and Best. */
+  private showTarget() {
+    if (this.opts.mode || !this.board) return this.hud.target(null, null);
+    const have = earnedMedal(this.opts.track.id, this.opts.dir);
+    const next = MEDALS[(have ? MEDALS.indexOf(have) : -1) + 1] ?? null;
+    this.hud.target(next, next ? targets(this.board.entries[0]?.ms, this.opts.track.lengthM)[next] : null);
   }
 
   private async submit() {
@@ -710,6 +725,7 @@ export class Race {
       const b = await api.board(this.opts.track.id, this.opts.dir, presence);
       if (this.disposed) return;
       this.board = b;
+      this.showTarget();
       this.hud.board(b, d.pid);
       if (this.pb && !this.pb.synced) {
         const mine = b.entries.find((e) => e.pid === d.pid);
