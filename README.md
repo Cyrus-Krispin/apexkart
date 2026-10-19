@@ -4,7 +4,7 @@ Browser kart racing on **real tracks**. Track layouts come from OpenStreetMap, t
 under them is real satellite imagery, and every lap feeds a live worldwide leaderboard with
 ghost replays.
 
-Start with **KF1 Karting Circuit, Singapore**, or pick any of the 5,784 kart tracks on the
+Start with **KF1 Karting Circuit, Singapore**, or pick any of the thousands of kart tracks on the
 world map (every one mapped on OSM) and race it.
 
 ## Design
@@ -32,8 +32,12 @@ timing panels with F1 sector colours. Tokens live in `src/styles/base.css`.
   links can't sneak into a lap. When OpenStreetMap itself is wrong, **Fix the layout** on a circuit
   page opens an editor over the satellite imagery. Corrections are shared through `/api/layout`
   and get their own leaderboard.
-- **Six featured circuits** baked into `public/tracks/presets.json`: KF1 (Singapore),
-  South Garda (Lonato), Genk, PF International, Kerpen and the Algarve.
+- **22 featured circuits** on five continents, baked with their surroundings into
+  `public/tracks/presets.json` and `public/tracks/env/`: KF1 (Singapore), South Garda (Lonato), Genk,
+  PF International, Kerpen, the Algarve, Adria, Zuera, Valencia, Franciacorta, Buckmore Park, Rye
+  House, Ampfing, Paul Ricard, Sepang, Dubai, Bahrain, Eastern Creek, Granja Viana, New Castle,
+  Orlando and SH Karting. Add one to `PRESETS` in `scripts/fetch-tracks.ts` and run
+  `npm run tracks -- --new` (existing circuits keep their ids, and so their leaderboards).
 - **Both directions**: every track can be raced in reverse (KF1 really is a dual-direction
   circuit), with separate leaderboards.
 - **Timing like TV**: flying laps, three sectors with purple/green/yellow colours, a live delta
@@ -44,8 +48,11 @@ timing panels with F1 sector colours. Tokens live in `src/styles/base.css`.
   synchronised start, positions and results). Peer-to-peer over WebRTC; see [MULTIPLAYER.md](MULTIPLAYER.md).
 - **Live leaderboard**: per-track top 10, "who's on track now" presence, and a global feed
   of the latest laps.
-- **World map** (`src/ui/atlas.ts`): every kart venue on OpenStreetMap (`public/tracks/world.json`,
-  baked by `npm run world`) as a dot; tap one and its layouts load from Overpass. Country filters,
+- **World map** (`src/ui/atlas.ts`): every kart venue on OpenStreetMap with a raceable loop
+  (`public/tracks/world.json`) as a dot. Tapping one opens instantly: each venue's layouts are
+  pre-stitched into `public/tracks/venues/<cell>.json` by the **Bake venue layouts** GitHub Actions
+  workflow (`scripts/build-venues.ts`), and tracks without baked surroundings start racing at once
+  while buildings and trees stream in from Overpass. Country filters,
   a rail of circuits with one-tap racing, **Race now** (Enter) for your last circuit, live pins where
   people are driving, and one search box for circuits, countries, venues and cities. Each circuit has
   a sheet with numbered turns, its other layouts, rotation and the live board.
@@ -73,7 +80,8 @@ npm install
 npm run dev        # http://localhost:5173 (the /api routes run inside Vite too)
 npm run build      # typecheck + production build
 npm run tracks     # re-bake preset tracks + surroundings (falls back to the OSM API if Overpass is down)
-npm run world      # re-bake the world map's kart venue index from Overpass
+npm run world      # re-collect every kart venue on OpenStreetMap into world.json (two planet-wide queries)
+npm run venues     # pre-stitch every venue's layouts (a few hundred queries: run the "Bake venue layouts" workflow instead)
 ```
 
 In dev, the leaderboard lives in memory and resets when the server restarts.
