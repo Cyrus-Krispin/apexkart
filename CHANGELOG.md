@@ -6,6 +6,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-20
+
 ### Added
 - **16 new featured circuits**, for 22 on five continents. Each comes with its 3D surroundings
   built in:
@@ -163,7 +165,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 ### Fixed
 - Leaderboard and lap submission on the live site.
 
-[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.4.1...v0.5.0
