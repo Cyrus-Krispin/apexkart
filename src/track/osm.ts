@@ -33,42 +33,78 @@ const ENDPOINTS = [
   'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
 ];
 
-/** Overpass is a shared, often-busy service: rotate mirrors, time out, and back off. */
+const HEDGE_MS = 4000; // ask the next mirror too if this one hasn't answered by then
+const ASK_TIMEOUT_MS = 20000;
+
+/** One request to one mirror: the data, or a rejection (busy, timed out, aborted). */
+async function ask(url: string, query: string, signal: AbortSignal): Promise<any> {
+  const ctl = new AbortController();
+  const stop = () => ctl.abort();
+  signal.addEventListener('abort', stop);
+  const timer = setTimeout(stop, ASK_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded',
+        // Overpass rejects anonymous scripts; browsers send their own user agent.
+        ...(typeof window === 'undefined' ? { 'User-Agent': 'ApexKart/0.2 (github.com/Cyrus-Krispin/apexkart)' } : {}),
+      },
+      body: 'data=' + encodeURIComponent(query),
+      signal: ctl.signal,
+    });
+    const text = await res.text();
+    if (!res.ok || !text.trimStart().startsWith('{')) throw new Error(`Overpass ${res.status}`);
+    const data = JSON.parse(text);
+    // A busy server can answer 200 with an empty result plus a "runtime error" remark.
+    if (typeof data.remark === 'string' && /error|timed out|timeout/i.test(data.remark)) throw new Error(`Overpass: ${data.remark.slice(0, 120)}`);
+    return data;
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener('abort', stop);
+  }
+}
+
+/**
+ * Overpass is a shared, often-busy service. Ask one mirror; if it hasn't answered within a few
+ * seconds, or fails, ask the next as well, and take whichever answers first (the others are
+ * cancelled). Two rounds over the mirrors at most.
+ */
 export async function overpass(query: string, signal?: AbortSignal): Promise<any> {
-  let lastErr: unknown;
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const url = ENDPOINTS[attempt % ENDPOINTS.length];
+  let lastErr: unknown = new Error('Overpass unavailable');
+  for (let round = 0; round < 2; round++) {
     const ctl = new AbortController();
     const onAbort = () => ctl.abort();
     signal?.addEventListener('abort', onAbort);
-    const timer = setTimeout(() => ctl.abort(), 20000);
+    let hedge: ReturnType<typeof setInterval> | undefined;
     try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/x-www-form-urlencoded',
-          // Overpass rejects anonymous scripts; browsers send their own user agent.
-          ...(typeof window === 'undefined' ? { 'User-Agent': 'ApexKart/0.2 (github.com/Cyrus-Krispin/apexkart)' } : {}),
-        },
-        body: 'data=' + encodeURIComponent(query),
-        signal: ctl.signal,
+      return await new Promise((resolve, reject) => {
+        let started = 0;
+        let failed = 0;
+        const next = () => {
+          if (started >= ENDPOINTS.length || ctl.signal.aborted) return;
+          const url = ENDPOINTS[(started + round) % ENDPOINTS.length];
+          started++;
+          ask(url, query, ctl.signal).then(resolve, (e) => {
+            lastErr = e;
+            failed++;
+            if (signal?.aborted) reject(e);
+            else if (failed === ENDPOINTS.length) reject(e);
+            else next(); // don't wait for the hedge timer when one fails outright
+          });
+        };
+        next();
+        hedge = setInterval(next, HEDGE_MS); // the scripts run this in Node too, so no window.*
       });
-      const text = await res.text();
-      if (res.ok && text.trimStart().startsWith('{')) {
-        const data = JSON.parse(text);
-        // A busy server can answer 200 with an empty result plus a "runtime error" remark.
-        if (!(typeof data.remark === 'string' && /error|timed out|timeout/i.test(data.remark))) return data;
-        lastErr = new Error(`Overpass: ${data.remark.slice(0, 120)}`);
-      } else lastErr = new Error(`Overpass ${res.status}`);
     } catch (e) {
       if (signal?.aborted) throw e;
-      lastErr = e;
     } finally {
-      clearTimeout(timer);
+      clearInterval(hedge);
+      ctl.abort(); // cancel the slower requests
       signal?.removeEventListener('abort', onAbort);
     }
-    await new Promise((r) => setTimeout(r, Math.min(3000, 500 * 2 ** attempt)));
+    await new Promise((r) => setTimeout(r, 1500));
   }
   throw lastErr;
 }
