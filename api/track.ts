@@ -1,7 +1,7 @@
 // GET /api/track?id=: geometry for a track someone has raced (stored on first lap),
 // so shared links and the live feed don't depend on OpenStreetMap's Overpass API.
-import { getStore, K, json, bad, TRACK_RE } from './_lib/store';
-import { waysFromId } from '../src/track/osm';
+import { getStore, K, json, bad, TRACK_RE } from './_lib/store.js';
+import { waysFromId } from '../src/track/osm.js';
 
 export async function GET(req: Request) {
   const id = new URL(req.url).searchParams.get('id') ?? '';

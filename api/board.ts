@@ -1,7 +1,7 @@
 // GET /api/board?track=&dir=&limit=&pid=&name=&color=
 // Top lap times for one track/direction, plus who is on track right now.
 // Passing pid/name/color also registers the caller as "on track" (a heartbeat).
-import { getStore, K, json, bad, TRACK_RE, PID_RE, isDir, cleanName, cleanColor, LIVE_WINDOW_MS } from './_lib/store';
+import { getStore, K, json, bad, TRACK_RE, PID_RE, isDir, cleanName, cleanColor, LIVE_WINDOW_MS } from './_lib/store.js';
 
 export async function GET(req: Request) {
   const q = new URL(req.url).searchParams;

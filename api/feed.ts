@@ -1,6 +1,6 @@
 // GET /api/feed: latest laps worldwide, the record on every track, and live driver counts.
 // Identical for every caller, so the CDN can absorb polling.
-import { getStore, K, json, LIVE_WINDOW_MS } from './_lib/store';
+import { getStore, K, json, LIVE_WINDOW_MS } from './_lib/store.js';
 
 export async function GET() {
   const db = getStore();

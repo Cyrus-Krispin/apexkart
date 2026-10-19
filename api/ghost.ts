@@ -1,5 +1,5 @@
 // GET /api/ghost?track=&dir=&pid=: a driver's personal-best ghost lap.
-import { getStore, K, json, bad, TRACK_RE, PID_RE, isDir } from './_lib/store';
+import { getStore, K, json, bad, TRACK_RE, PID_RE, isDir } from './_lib/store.js';
 
 export async function GET(req: Request) {
   const q = new URL(req.url).searchParams;

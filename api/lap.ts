@@ -1,7 +1,7 @@
 // POST /api/lap: submit a lap. Keeps each driver's personal best per track/direction,
 // stores its ghost, and posts to the global live feed.
-import { getStore, K, json, bad, TRACK_RE, isDir, cleanName, cleanColor, publicId } from './_lib/store';
-import { decodeGhost, ghostPathLength, GHOST_DT } from '../src/shared/ghost';
+import { getStore, K, json, bad, TRACK_RE, isDir, cleanName, cleanColor, publicId } from './_lib/store.js';
+import { decodeGhost, ghostPathLength, GHOST_DT } from '../src/shared/ghost.js';
 
 const KART_TOP_SPEED = 30; // m/s, a bit above the game's real top speed
 
