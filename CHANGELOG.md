@@ -6,6 +6,12 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+### Added
+- **Challenge links.** Once you're on a circuit's leaderboard, **Challenge a friend** copies a link
+  (or opens the share sheet on a phone). It opens the circuit with your lap waiting as a ghost to
+  beat, and they get a cheer at the line when they do.
+- Race any leaderboard lap as a ghost: every row on a circuit's board has a ghost button.
+
 ## [0.9.0] - 2026-10-20
 
 ### Added
