@@ -225,6 +225,16 @@ export class Race {
     this.world = world;
     this.scene.add(world.group);
     (this.ground.material as THREE.MeshLambertMaterial).color.copy(world.groundColor);
+    // Compile every shader now (including a ghost kart's) so nothing compiles mid-lap.
+    const warm = this.ghostVisual(this.opts.driver.color).root;
+    warm.position.set(this.phys.x, -50, this.phys.z);
+    this.scene.add(warm);
+    try {
+      await this.pipeline.renderer.compileAsync(this.scene, this.camera);
+    } catch {
+      /* best effort */
+    }
+    this.scene.remove(warm);
   }
 
   private buildMinimap() {
@@ -426,9 +436,15 @@ export class Race {
     if (this.state === 'grid' || this.state === 'racing') {
       this.acc += dt;
       while (this.acc >= STEP) {
+        this.prev.x = this.phys.x;
+        this.prev.z = this.phys.z;
+        this.prev.h = this.phys.heading;
         this.tick(STEP);
         this.acc -= STEP;
       }
+      this.alpha = this.acc / STEP;
+    } else {
+      this.alpha = 1;
     }
     this.boardTimer -= dt;
     if (this.boardTimer <= 0) this.refreshBoard();
@@ -440,11 +456,13 @@ export class Race {
   private adaptQuality(dt: number) {
     if (this.qualitySetting !== 'auto' || this.state !== 'racing' || document.hidden) return;
     this.frameTimes.push(dt);
-    if (this.frameTimes.length < 150) return;
+    if (this.frameTimes.length < 120) return;
     const sorted = [...this.frameTimes].sort((a, b) => a - b);
-    const p50 = sorted[Math.floor(sorted.length / 2)];
+    const p50 = sorted[Math.floor(sorted.length * 0.5)];
+    const p90 = sorted[Math.floor(sorted.length * 0.9)];
     this.frameTimes = [];
-    if (p50 > 1 / 40 && this.pipeline.quality !== 'low') {
+    // Step down on a low average *or* on frequent spikes (the spikes are what read as stutter).
+    if ((p50 > 1 / 45 || p90 > 1 / 30) && this.pipeline.quality !== 'low') {
       this.applyQuality(this.pipeline.quality === 'high' ? 'medium' : 'low');
       this.syncToggles();
     }
@@ -686,9 +704,22 @@ export class Race {
     }
   }
 
+  private ghostTemplates = new Map<string, THREE.Group>();
+
+  /** Ghost karts are cloned from one template per colour: shared geometry and materials, no rebuild hitch. */
+  private ghostVisual(color: string): KartVisual {
+    let tpl = this.ghostTemplates.get(color);
+    if (!tpl) {
+      tpl = buildKart(color, { ghost: true }).root;
+      this.ghostTemplates.set(color, tpl);
+    }
+    const root = tpl.clone();
+    return { root, body: root, frontPivots: [], wheels: [], materials: [] };
+  }
+
   private setGhost(key: string, label: string, color: string, data: GhostData) {
     this.removeGhost(key);
-    const visual = buildKart(color, { ghost: true });
+    const visual = this.ghostVisual(color);
     this.scene.add(visual.root);
     const tag = document.createElement('div');
     tag.className = 'ghost-tag';
@@ -709,57 +740,79 @@ export class Race {
 
   // ------------------------------------------------------------------ render
 
+  private snapPrev() {
+    this.prev.x = this.phys.x;
+    this.prev.z = this.phys.z;
+    this.prev.h = this.phys.heading;
+  }
+
   private snapCamera() {
+    this.snapPrev();
     this.camPos.set(this.phys.x - Math.sin(this.phys.heading) * 6, 2.6, this.phys.z - Math.cos(this.phys.heading) * 6);
     this.camLook.set(this.phys.x, 0.6, this.phys.z);
   }
 
+  // Scratch objects reused every frame (no per-frame allocations, so no GC hitches).
+  private readonly v = { fwd: new THREE.Vector3(), pos: new THREE.Vector3(), look: new THREE.Vector3(), tmp: new THREE.Vector3(), up: new THREE.Vector3(0, 1, 0) };
+  private prev = { x: 0, z: 0, h: 0 };
+  private alpha = 1; // how far between the last two physics steps this frame sits
+  private viewW = 1;
+  private viewH = 1;
+
   private render(dt: number) {
     const p = this.phys;
     const k = this.kart;
-    k.root.position.set(p.x, 0, p.z);
-    k.root.rotation.y = p.heading;
+    // Interpolate between the previous and current physics state so motion is smooth
+    // regardless of the display's refresh rate.
+    const a = this.alpha;
+    const x = this.prev.x + (p.x - this.prev.x) * a;
+    const z = this.prev.z + (p.z - this.prev.z) * a;
+    let dh = p.heading - this.prev.h;
+    dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+    const heading = this.prev.h + dh * a;
+    k.root.position.set(x, 0, z);
+    k.root.rotation.y = heading;
     k.body.rotation.z += (THREE.MathUtils.clamp(p.yawRate * p.forwardSpeed * 0.004, -0.07, 0.07) - k.body.rotation.z) * Math.min(1, dt * 8);
     k.body.rotation.x += ((this.throttle ? -0.012 : 0.01) - k.body.rotation.x) * Math.min(1, dt * 5);
     k.body.position.y = p.surface === 'grass' ? Math.sin(this.simT * 40) * 0.012 : p.surface === 'kerb' ? Math.sin(this.simT * 70) * 0.02 : 0;
-    k.frontPivots.forEach((f) => (f.rotation.y = -p.steerAngle * 1.2));
-    k.wheels.forEach((w) => (w.rotation.x = p.wheelSpin));
+    for (const f of k.frontPivots) f.rotation.y = -p.steerAngle * 1.2;
+    for (const w of k.wheels) w.rotation.x = p.wheelSpin;
 
-    const fwd = new THREE.Vector3(Math.sin(p.heading), 0, Math.cos(p.heading));
+    const { fwd, pos, look, tmp, up } = this.v;
+    fwd.set(Math.sin(heading), 0, Math.cos(heading));
     const mode = CAMS[this.camMode].id;
-    let wantPos: THREE.Vector3;
-    let wantLook: THREE.Vector3;
     let lerp = 1 - Math.exp(-dt * 7);
     if (this.state === 'intro') {
-      // Slow cinematic orbit around the kart on the grid.
-      const a = this.realT * 0.18 + 2.2;
-      // Tight orbit so the camera stays on the circuit (real pit buildings often sit right beside the grid).
-      wantPos = new THREE.Vector3(p.x + Math.sin(a) * 4.6, 1.45 + Math.sin(this.realT * 0.3) * 0.25, p.z + Math.cos(a) * 4.6);
-      wantLook = new THREE.Vector3(p.x, 0.55, p.z);
-      if (this.root.clientWidth > 900) {
+      // Slow cinematic orbit; tight so the camera stays on the circuit (real pit buildings often sit beside the grid).
+      const ang = this.realT * 0.18 + 2.2;
+      pos.set(x + Math.sin(ang) * 4.6, 1.45 + Math.sin(this.realT * 0.3) * 0.25, z + Math.cos(ang) * 4.6);
+      look.set(x, 0.55, z);
+      if (this.viewW > 900) {
         // Frame the kart in the open right half, clear of the intro panel.
-        const dir = wantLook.clone().sub(wantPos).normalize();
-        const right = dir.cross(new THREE.Vector3(0, 1, 0)).normalize();
-        wantLook.addScaledVector(right, -2.4);
+        tmp.copy(look).sub(pos).normalize().cross(up).normalize();
+        look.addScaledVector(tmp, -2.4);
       }
       lerp = 1;
     } else if (mode === 'hood') {
-      wantPos = new THREE.Vector3(p.x, 1.12, p.z).addScaledVector(fwd, 0.1);
-      wantLook = new THREE.Vector3(p.x, 0.9, p.z).addScaledVector(fwd, 10);
+      pos.set(x, 1.12, z).addScaledVector(fwd, 0.1);
+      look.set(x, 0.9, z).addScaledVector(fwd, 10);
       lerp = 1;
     } else if (mode === 'tv') {
-      wantPos = new THREE.Vector3(p.x, 34, p.z).addScaledVector(fwd, -18);
-      wantLook = new THREE.Vector3(p.x, 0, p.z).addScaledVector(fwd, 6);
+      pos.set(x, 34, z).addScaledVector(fwd, -18);
+      look.set(x, 0, z).addScaledVector(fwd, 6);
       lerp = 1 - Math.exp(-dt * 3);
     } else {
       const far = mode === 'far';
-      wantPos = new THREE.Vector3(p.x, far ? 4.2 : 2.3, p.z).addScaledVector(fwd, far ? -9.5 : -5.2);
-      wantLook = new THREE.Vector3(p.x, 0.7, p.z).addScaledVector(fwd, 3.5);
+      pos.set(x, far ? 4.2 : 2.3, z).addScaledVector(fwd, far ? -9.5 : -5.2);
+      look.set(x, 0.7, z).addScaledVector(fwd, 3.5);
     }
-    this.camPos.lerp(wantPos, lerp);
-    this.camLook.lerp(wantLook, Math.min(1, lerp * 1.6));
+    this.camPos.lerp(pos, lerp);
+    this.camLook.lerp(look, Math.min(1, lerp * 1.6));
     this.camera.position.copy(this.camPos);
-    if (p.bump > 0.02) this.camera.position.add(new THREE.Vector3((Math.random() - 0.5) * p.bump * 0.4, (Math.random() - 0.5) * p.bump * 0.3, 0));
+    if (p.bump > 0.02) {
+      this.camera.position.x += (Math.random() - 0.5) * p.bump * 0.4;
+      this.camera.position.y += (Math.random() - 0.5) * p.bump * 0.3;
+    }
     this.camera.lookAt(this.camLook);
     const fov = this.state === 'intro' ? 42 : (mode === 'hood' ? 70 : 60) + p.speed * 0.38;
     if (Math.abs(this.camera.fov - fov) > 0.05) {
@@ -769,19 +822,17 @@ export class Race {
     k.root.visible = mode !== 'hood' || this.state === 'intro';
 
     const sd = this.sun.userData.dir as THREE.Vector3;
-    this.sun.position.set(p.x + sd.x * 100, sd.y * 100, p.z + sd.z * 100);
-    this.sun.target.position.set(p.x, 0, p.z);
+    this.sun.position.set(x + sd.x * 100, sd.y * 100, z + sd.z * 100);
+    this.sun.target.position.set(x, 0, z);
 
-    const lapT = this.lapStart !== null && this.state !== 'grid' ? this.simT - this.lapStart : -1;
-    const tmp = new THREE.Vector3();
-    const w = this.root.clientWidth;
-    const h = this.root.clientHeight;
+    // Ghost time matches the interpolated kart (one step behind simT, plus the fraction).
+    const lapT = this.lapStart !== null && this.state !== 'grid' ? this.simT - STEP * (1 - a) - this.lapStart : -1;
     for (const g of this.ghosts) {
       if (!g.visual) continue;
       const pose = this.showGhosts && lapT >= 0 ? sampleGhost(g.frames, g.dt, lapT) : null;
       g.visual.root.visible = !!pose;
       if (!pose) {
-        g.tag.style.display = 'none';
+        if (g.tag.style.display !== 'none') g.tag.style.display = 'none';
         continue;
       }
       g.visual.root.position.set(pose.x, 0, pose.z);
@@ -790,15 +841,15 @@ export class Race {
       const dist = this.camera.position.distanceTo(g.visual.root.position);
       if (tmp.z < 1 && dist < 150 && dist > 2.5) {
         g.tag.style.display = '';
-        g.tag.style.transform = `translate(${((tmp.x + 1) / 2) * w}px, ${((1 - tmp.y) / 2) * h}px) translate(-50%, -100%)`;
-      } else g.tag.style.display = 'none';
+        g.tag.style.transform = `translate(${((tmp.x + 1) / 2) * this.viewW}px, ${((1 - tmp.y) / 2) * this.viewH}px) translate(-50%, -100%)`;
+      } else if (g.tag.style.display !== 'none') g.tag.style.display = 'none';
     }
 
     this.pipeline.render();
-    this.drawHud(lapT);
+    this.drawHud(lapT, x, z);
   }
 
-  private drawHud(lapT: number) {
+  private drawHud(lapT: number, kx: number, kz: number) {
     const p = this.phys;
     this.hud.speed(p.speed * 3.6, p.speed / p.vmax);
     const L = this.track.length;
@@ -824,7 +875,7 @@ export class Race {
       g.strokeStyle = gh.color;
       g.stroke();
     }
-    const [mx, my] = map(p.x, p.z);
+    const [mx, my] = map(kx, kz);
     g.beginPath();
     g.arc(mx, my, 9, 0, Math.PI * 2);
     g.fillStyle = this.opts.driver.color;
@@ -841,8 +892,10 @@ export class Race {
     const fz = Math.cos(p.heading);
     const sk = this.skid;
     [-0.6, 0.6].forEach((side, w) => {
-      const cur = new THREE.Vector3(p.x + fz * side - fx * 0.62, 0.05, p.z - fx * side - fz * 0.62);
+      const cx = p.x + fz * side - fx * 0.62;
+      const cz = p.z - fx * side - fz * 0.62;
       const prev = sk.prev[w];
+      const cur = this.v.tmp.set(cx, 0.05, cz);
       if (skidding && prev && prev.distanceToSquared(cur) > 0.04) {
         const dx = cur.x - prev.x;
         const dz = cur.z - prev.z;
@@ -860,15 +913,17 @@ export class Race {
         sk.i++;
         sk.geo.setDrawRange(0, Math.min(sk.i, 3000) * 6);
         (sk.geo.attributes.position as THREE.BufferAttribute).needsUpdate = true;
-        sk.prev[w] = cur;
+        prev.set(cx, 0.05, cz);
       } else if (!skidding) sk.prev[w] = null;
-      else if (!prev) sk.prev[w] = cur;
+      else if (!prev) sk.prev[w] = new THREE.Vector3(cx, 0.05, cz); // once per skid, not per tick
     });
   }
 
   private onResize = () => {
     const w = this.root.clientWidth || innerWidth;
     const h = this.root.clientHeight || innerHeight;
+    this.viewW = w;
+    this.viewH = h;
     this.pipeline.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
@@ -901,6 +956,7 @@ export class Race {
     this.input.dispose();
     this.audio.dispose();
     disposeTree(this.scene);
+    for (const tpl of this.ghostTemplates.values()) disposeTree(tpl);
     this.scene.environment?.dispose();
     this.pipeline.dispose();
     this.root.remove();

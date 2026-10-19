@@ -15,8 +15,10 @@ export function initialQuality(): QualitySetting {
 }
 
 export function autoQuality(): Quality {
+  // Ambient occlusion roughly doubles the GPU work per frame, so Auto starts at Medium.
+  // High stays available as a manual choice for strong GPUs.
   const coarse = matchMedia('(pointer: coarse)').matches;
-  return coarse || innerWidth < 700 ? 'low' : 'high';
+  return coarse || innerWidth < 700 ? 'low' : 'medium';
 }
 
 export class RenderPipeline {
@@ -43,7 +45,7 @@ export class RenderPipeline {
     this.quality = q;
     this.composer?.dispose();
     this.composer = null;
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, q === 'high' ? 1.75 : q === 'medium' ? 1.25 : 1));
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio, q === 'high' ? 1.5 : q === 'medium' ? 1.25 : 1));
     if (q !== 'low') {
       const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
       const target = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: 4 });
@@ -53,8 +55,8 @@ export class RenderPipeline {
         const gtao = new GTAOPass(this.scene, this.camera, size.x, size.y);
         gtao.output = GTAOPass.OUTPUT.Default;
         gtao.blendIntensity = 0.9;
-        gtao.updateGtaoMaterial({ radius: 1.4, distanceExponent: 1.4, thickness: 2.5, scale: 1.1, samples: 12, distanceFallOff: 1, screenSpaceRadius: false });
-        gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 12 });
+        gtao.updateGtaoMaterial({ radius: 1.4, distanceExponent: 1.4, thickness: 2.5, scale: 1.1, samples: 8, distanceFallOff: 1, screenSpaceRadius: false });
+        gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 5, rings: 2, samples: 8 });
         composer.addPass(gtao);
       }
       composer.addPass(new UnrealBloomPass(new THREE.Vector2(size.x / 2, size.y / 2), 0.32, 0.45, 0.93));

@@ -44,7 +44,8 @@ function variantGeometry(v: Variant): THREE.BufferGeometry {
   } else if (v === 'raintree') {
     parts.push(trunk(0.42, 0.3, 3.4));
     parts.push(colored(new THREE.CylinderGeometry(0.16, 0.22, 2.2, 5).rotateZ(0.7).translate(0.8, 3.9, 0), '#6b4f36', 0.1, 4));
-    parts.push(colored(new THREE.IcosahedronGeometry(3.6, 1).scale(1, 0.42, 1).translate(0, 5.4, 0), '#4e8a35', 0.22, 31));
+    parts.push(colored(new THREE.IcosahedronGeometry(3.6, 0).scale(1, 0.42, 1).translate(0, 5.4, 0), '#4e8a35', 0.22, 31));
+    parts.push(colored(new THREE.IcosahedronGeometry(2.6, 0).scale(1, 0.45, 1).rotateY(0.6).translate(-0.4, 6.0, 0.3), '#55913b', 0.22, 34));
     parts.push(colored(new THREE.IcosahedronGeometry(2.2, 0).scale(1, 0.5, 1).translate(1.8, 5.0, 1.0), '#5a9640', 0.22, 32));
     parts.push(colored(new THREE.IcosahedronGeometry(2.0, 0).scale(1, 0.5, 1).translate(-1.9, 5.1, -0.8), '#46802f', 0.22, 33));
   } else {
@@ -128,13 +129,25 @@ export function buildTrees(track: TrackModel, env: EnvData | null, ground: Groun
 
   const group = new THREE.Group();
   const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, flatShading: true });
-  const byVariant = new Map<Variant, Placement[]>();
-  for (const p of placements) byVariant.set(p.v, [...(byVariant.get(p.v) ?? []), p]);
+  // Chunk instances spatially so the renderer can skip off-screen chunks and the shadow pass
+  // only draws trees near the kart (one big InstancedMesh can't be culled at all).
+  const CHUNK = 70;
+  const chunks = new Map<string, Placement[]>();
+  for (const p of placements) {
+    const key = `${p.v}:${Math.floor(p.x / CHUNK)}:${Math.floor(p.z / CHUNK)}`;
+    let list = chunks.get(key);
+    if (!list) chunks.set(key, (list = []));
+    list.push(p);
+  }
+  const geos = new Map<Variant, THREE.BufferGeometry>();
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
   const col = new THREE.Color();
-  for (const [v, list] of byVariant) {
-    const inst = new THREE.InstancedMesh(variantGeometry(v), material, list.length);
+  for (const [key, list] of chunks) {
+    const v = key.split(':')[0] as Variant;
+    let geo = geos.get(v);
+    if (!geo) geos.set(v, (geo = variantGeometry(v)));
+    const inst = new THREE.InstancedMesh(geo, material, list.length);
     list.forEach((p, i) => {
       q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), p.r);
       m.compose(new THREE.Vector3(p.x, 0, p.z), q, new THREE.Vector3(p.s, p.s * (0.9 + rand() * 0.25), p.s));
@@ -144,6 +157,7 @@ export function buildTrees(track: TrackModel, env: EnvData | null, ground: Groun
     });
     inst.castShadow = true;
     inst.receiveShadow = true;
+    inst.computeBoundingSphere();
     group.add(inst);
   }
   // Soft contact shadows painted onto the ground under each tree.
