@@ -105,7 +105,7 @@ export class RemoteKarts {
   constructor(
     private scene: THREE.Scene,
     private camera: THREE.Camera,
-    hud: HTMLElement,
+    private hud: HTMLElement,
     private trackLength: number,
   ) {
     this.tags = document.createElement('div');
@@ -167,6 +167,8 @@ export class RemoteKarts {
   /** Advance every kart to server time `now` and place visuals + tags. */
   update(dt: number, now: number) {
     const blend = 1 - Math.exp(-dt * 9);
+    const vw = this.hud.clientWidth || innerWidth;
+    const vh = this.hud.clientHeight || innerHeight;
     for (const k of this.karts.values()) {
       const s = k.snap;
       const fresh = s && performance.now() - k.recvAt < STALE_HIDE * 1000;
@@ -209,7 +211,7 @@ export class RemoteKarts {
       const dist = this.camera.position.distanceTo(v.root.position);
       if (this.tmp.z < 1 && dist < 220 && dist > 1.5) {
         k.tag.style.display = '';
-        k.tag.style.transform = `translate(${((this.tmp.x + 1) / 2) * innerWidth}px, ${((1 - this.tmp.y) / 2) * innerHeight}px) translate(-50%, -100%)`;
+        k.tag.style.transform = `translate(${((this.tmp.x + 1) / 2) * vw}px, ${((1 - this.tmp.y) / 2) * vh}px) translate(-50%, -100%)`;
         k.tag.style.opacity = String(THREE.MathUtils.clamp(1.4 - dist / 160, 0.35, 1));
         k.tag.classList.toggle('far', dist > 60);
       } else k.tag.style.display = 'none';

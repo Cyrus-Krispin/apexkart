@@ -14,7 +14,7 @@
 import { getStore, json, bad, publicId, cleanName, cleanColor, isDir, TRACK_RE, type Store } from './_lib/store.js';
 import {
   CODE_ALPHABET, CODE_RE, MID_RE, SECRET_RE, ROOM_MAX, LAPS_MIN, LAPS_MAX, LAPS_DEFAULT, START_DELAY_MS, STALE_MS, IDLE_MS,
-  ROOM_TTL_S, FINISH_GRACE_MS, KART_COLORS, isReady, raceResult,
+  ROOM_TTL_S, FINISH_GRACE_MS, KART_COLORS, isReady, raceResult, nearestLivery,
   type RoomCfg, type RoomPlayer, type RoomState, type PollResponse, type SignalMsg,
 } from '../src/shared/room.js';
 
@@ -226,7 +226,8 @@ function cleanTrack(t: any) {
 
 const cleanLaps = (n: unknown) => Math.min(LAPS_MAX, Math.max(LAPS_MIN, Math.round(Number(n) || LAPS_DEFAULT)));
 
-function pickColor(want: string, taken: string[]) {
+function pickColor(wanted: string, taken: string[]) {
+  const want = nearestLivery(cleanColor(wanted));
   if (!taken.includes(want)) return want;
   return KART_COLORS.find((c) => !taken.includes(c)) ?? want;
 }
@@ -242,7 +243,7 @@ async function create(db: Store, mid: string, b: any, now: number) {
       phase: 'lobby', race: 0, startAt: 0, grid: [], created: now, active: now, last: null,
     };
     if (!(await db.hsetnx(K.room(code), 'cfg', JSON.stringify(cfg)))) continue; // code in use
-    const profile = { name: cleanName(b.name), color: cleanColor(b.color), joined: now };
+    const profile = { name: cleanName(b.name), color: pickColor(b.color, []), joined: now };
     await Promise.all([
       db.hsetMany(K.room(code), { [`p:${mid}`]: JSON.stringify(profile), [`s:${mid}`]: String(now) }),
       db.set(K.trk(code), JSON.stringify(track), { ex: TRK_TTL_S }),
@@ -260,7 +261,7 @@ async function join(db: Store, code: string, mid: string, b: any, now: number): 
   const { players, cfg } = l.state;
   const existing = players.find((p) => p.mid === mid);
   if (!existing && players.length >= ROOM_MAX) throw new HttpError('room is full', 409);
-  const color = pickColor(cleanColor(b.color), players.filter((p) => p.mid !== mid).map((p) => p.color));
+  const color = pickColor(b.color, players.filter((p) => p.mid !== mid).map((p) => p.color));
   const profile = { name: cleanName(b.name), color, joined: existing?.joined ?? now };
   await db.hsetMany(K.room(code), { [`p:${mid}`]: JSON.stringify(profile), [`s:${mid}`]: String(now) });
   // A (re)joining page has no use for signals sent to its previous incarnation.
@@ -371,7 +372,7 @@ async function mutate(db: Store, code: string, mid: string, b: any, now: number)
         return done();
       }
       case 'profile': {
-        const want = cleanColor(b.color);
+        const want = nearestLivery(cleanColor(b.color));
         self.name = cleanName(b.name);
         if (!players.some((p) => p.mid !== mid && p.color === want)) self.color = want; // colours stay unique
         await db.hsetMany(K.room(code), { [`p:${mid}`]: JSON.stringify({ name: self.name, color: self.color, joined: self.joined }) });

@@ -124,38 +124,44 @@ A 4-player session with a 3-minute lobby and a 4-minute race uses ≈1.5–2K co
 250 such sessions a month alongside the leaderboard. In multiplayer races the per-player leaderboard
 polling (≈9 commands every 4 s) is switched off, which more than pays for the room.
 
-## Integration points (for the redesign)
+## Integration points
 
-The multiplayer code doesn't depend on the picker, the HUD markup or `styles.css`. Wiring it into
-the new UI takes these points:
+Multiplayer is wired into the redesigned UI (atlas, briefing, `hud.ts`) through these few points.
+Everything else lives in its own modules.
 
-1. **`src/main.ts`**: `initMultiplayer({ driver, container, enter, leave, entryParent? })`.
-   - `enter()`: hide the app and dispose any time-trial race (multiplayer takes the screen).
-   - `leave()`: show the app again.
-   - `entryParent`: where the temporary floating "👥 Race friends" button goes. Omit it once the new UI
-     has its own button, and call `open()` (returned by `initMultiplayer`) or set `location.hash = '#/room'`.
-   - When the lobby is opened from `#/t/{id}/{dir}`, that track is preselected. If the atlas uses
-     other routes, set `lobby.preferred` or keep a `#/t/...` hash.
-2. **`src/game/race.ts`**: `RaceOptions.mode?: RaceMode` (`src/game/raceMode.ts`). The hooks, which
-   must survive the HUD moving to `hud.ts`:
-   - constructor: `ghosts:false` → `showGhosts=false`; `leaderboard:false` → hide the board panel;
-     `restart:false` → hide "Restart from grid"; then `addon.attach(context())` after `resetToGrid()`.
-   - `resetToGrid()`: `gridSlot` sets the staggered grid position; `startAt` fixes `goAt` (`SYNC_GO`).
-   - `tick()`: grid timer from `startAt` when set; `addon.tick(dt)` after physics.
+1. **`src/main.ts`**: `initMultiplayer({ driver, container, enter, leave, entryParent })`.
+   - `enter()` hides the atlas and disposes any time-trial race. `leave()` shows the atlas again.
+   - `entryParent` is the atlas top bar's `.top-right`; a "Race friends" `.btn.primary` is
+     prepended there. To put the entry somewhere else, drop `entryParent` and call the returned
+     `open()` (or set `location.hash = '#/room'`).
+   - Opening the lobby from `#/t/{id}/{dir}` preselects that circuit (`lobby.preferred`).
+2. **`src/game/race.ts`**: `RaceOptions.mode?: RaceMode` (`src/game/raceMode.ts`). The hooks:
+   - constructor: `ghosts:false` turns ghosts off; `applyMode()` runs after `resetToGrid()`. It hides
+     the live-timing tower (`leaderboard:false`) and "Restart from the grid" (`restart:false`), and
+     relabels the exit button (`exitLabel`). With `startAt` it skips the briefing (`intro.dispose()`
+     then `begin()`), because a synchronised start can't wait for "press any key". Then it calls
+     `addon.attach(context())`.
+   - `resetToGrid()`: `gridSlot` sets the staggered grid position. `startAt` fixes `goAt` to
+     `SYNC_GO` (4.4 s; the lights come on at 0.9 + 0.7·k).
+   - `tick()`: grid timer from `startAt`; `addon.tick(dt)` after physics.
    - `render()`: `addon.frame(dt)` just before `renderer.render`.
-   - `drawHud()` minimap: `addon.minimap(dot)` after the ghost dots.
+   - `drawHud()` minimap: `addon.minimap(dot)` before the local kart's dot.
    - `refreshBoard()`: return early when `leaderboard === false`.
-   - `dispose()`: `addon.dispose()` first (plus `renderer.forceContextLoss()`, because multiplayer creates a race every round).
-   - `context()`: what add-ons may touch: `scene`, `camera`, `track`, `phys`, `hud` (the overlay
-     root), `state`, `simT`, `toast`, `centerMsg`, `setAutopilot`, `exit`.
-3. **HUD layout**: `.mp-standings` sits where the leaderboard panel was (top right, 226 px down,
-   under the minimap). The new HUD should give it a slot. Name tags go in their own `.mp-tags`
-   layer, and the results card is centred.
-4. **Styles**: everything is in `src/ui/multiplayer.css`, using `--bg --panel --line --text --muted
-   --accent --green --yellow --red --font` with fallbacks. Restyle freely. The JS only relies on the
-   `data-el` / `data-act` attributes inside `lobby.ts` and `raceOverlay.ts`.
-5. **Laps still count**: valid laps in a multiplayer race are submitted to the leaderboard like
-   time-trial laps (`Race.finishLap`). To change that, add a `submit:false` mode flag.
+   - `dispose()`: `addon.dispose()` first, and `renderer.forceContextLoss()`, because multiplayer creates a race every round.
+   - `context()`: what add-ons may touch: `scene`, `camera`, `track`, `phys`, `hud` (the `Hud` root),
+     `state`, `simT`, `toast`, `banner`, `setAutopilot`, `exit`.
+3. **HUD**: the overlay is appended to the `Hud` root, so it fades with `hidden-hud`.
+   - `.mp-standings` takes the live-timing tower's slot (top right). The tower is hidden in multiplayer.
+   - Name tags have their own `.mp-tags` layer.
+   - The results card is centred. The time-trial lap card still appears on the right.
+4. **Styles**: `src/ui/multiplayer.css` uses the Paddock Paper tokens and the `.btn`, `.label`, `.display`,
+   `.mono` and `.graph-paper` primitives. The lobby is paper; the race overlay is night.
+   - The lobby draws circuits with `trackArt(analyzeShape(...))`.
+   - Room colours are the `LIVERIES` from `src/ui/profile.ts`, copied into `KART_COLORS` in
+     `src/shared/room.ts` because the API can't import UI code. Keep the two lists in sync. Any
+     other colour is snapped to the nearest livery.
+5. **Laps still count**: valid laps in a multiplayer race go to the leaderboard like time-trial
+   laps (`Race.finishLap`). To change that, add a `submit:false` mode flag.
 
 ## Testing
 
@@ -171,8 +177,8 @@ npm run dev            # then open two tabs at http://localhost:5173/#/room
 - In dev, rooms live in memory (like the leaderboard) and reset when the server restarts. On
   Vercel they're in Upstash.
 
-What was tested, with two to four headless Chrome players (separate profiles) racing on autopilot
-against `npm run dev` and against `vite preview`:
+What was tested, on the redesigned UI, with two to four headless Chrome players (separate profiles)
+racing on autopilot against `npm run dev` and against `vite preview`:
 
 - create, join by link, join by typed code
 - p2p link up in ~3 s
@@ -185,7 +191,7 @@ against `npm run dev` and against `vite preview`:
 - a late joiner waits for the next race
 - the host closing the tab migrates host in ~8 s
 - kick, leave, close to the track map
-- time trial unchanged (random start, leaderboard, ghosts, restart)
+- time trial unchanged (briefing, random start, timing tower, ghosts, restart)
 
 ## Limitations and follow-ups
 

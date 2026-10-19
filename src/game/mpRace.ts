@@ -8,7 +8,7 @@ import type { RoomClient } from '../net/room';
 import type { RaceAddon, RaceContext, RaceMode } from './raceMode';
 
 const SEND_MS = 50; // 20 Hz
-const LIGHTS_LEAD = 3.4; // s before lights out that the first red light comes on (see Race.tick)
+const LIGHTS_LEAD = 3.5; // s before lights out that the first red light comes on (Race: SYNC_GO - 0.9)
 
 export interface MpRaceOptions {
   room: RoomClient;
@@ -44,7 +44,7 @@ export class MultiplayerRace implements RaceAddon {
   /** Mode to pass to `new Race({ ..., mode })`. */
   mode(): RaceMode {
     const slot = this.o.grid.findIndex((g) => g.mid === this.o.room.mid);
-    return { startAt: this.o.startAt, gridSlot: Math.max(0, slot), ghosts: false, leaderboard: false, restart: false, addon: this };
+    return { startAt: this.o.startAt, gridSlot: Math.max(0, slot), ghosts: false, leaderboard: false, restart: false, exitLabel: 'Retire to lobby', addon: this };
   }
 
   attach(ctx: RaceContext) {
@@ -134,12 +134,12 @@ export class MultiplayerRace implements RaceAddon {
     const lap = this.currentLap();
     if (lap > this.lastLap && this.finishMs === undefined) {
       this.lastLap = lap;
-      if (lap === this.o.laps && this.o.laps > 1) this.ctx.centerMsg('FINAL LAP', 1.6, 'pb');
+      if (lap === this.o.laps && this.o.laps > 1) this.ctx.banner('Final lap', 'pb', 1.8);
     }
     if (this.finishMs !== undefined && this.lastLap <= this.o.laps) {
       this.lastLap = this.o.laps + 1;
       const pos = this.standings().findIndex((r) => r.me) + 1;
-      if (this.finishMs !== null) this.ctx.centerMsg(`🏁 FINISHED P${pos}`, 3, 'go');
+      if (this.finishMs !== null) this.ctx.banner(`Finished P${pos}`, 'go', 3);
     }
 
     if (perf - this.lastHud > 120) {

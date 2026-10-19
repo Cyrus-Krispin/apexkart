@@ -21,7 +21,22 @@ export const ROOM_TTL_S = 120;
 /** After the winner finishes, everyone else has this long before they're marked DNF. */
 export const FINISH_GRACE_MS = 45_000;
 
-export const KART_COLORS = ['#ff5a1f', '#ffd60a', '#2ee66b', '#22d3ee', '#3b82f6', '#a855f7', '#f43f5e', '#f5f5f5'];
+/** Kart liveries (same list as LIVERIES in src/ui/profile.ts; colours are unique within a room). */
+export const KART_COLORS = ['#ff4d00', '#141414', '#f2eee5', '#e5383b', '#ffc600', '#16a34a', '#0ea5e9', '#2f4bff', '#8b5cf6', '#ec4899'];
+
+/** Snap any colour to the closest livery, so "taken" colours can't be near-duplicates. */
+export function nearestLivery(hex: string): string {
+  const rgb = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const [r, g, b] = rgb(hex);
+  let best = KART_COLORS[0];
+  let bestD = Infinity;
+  for (const c of KART_COLORS) {
+    const [r2, g2, b2] = rgb(c);
+    const d = (r - r2) ** 2 + (g - g2) ** 2 + (b - b2) ** 2;
+    if (d < bestD) [best, bestD] = [c, d];
+  }
+  return best;
+}
 
 export type Dir = 'fwd' | 'rev';
 

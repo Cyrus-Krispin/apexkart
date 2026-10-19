@@ -15,6 +15,8 @@ export interface RaceMode {
   leaderboard?: boolean;
   /** Offer "Restart from grid" in the pause menu. Default true. */
   restart?: boolean;
+  /** Label for the pause menu's exit button (default "Back to circuits"). */
+  exitLabel?: string;
   addon?: RaceAddon;
 }
 
@@ -37,11 +39,12 @@ export interface RaceContext {
   readonly phys: KartPhysics;
   /** HUD root element; overlays can be appended here. */
   readonly hud: HTMLElement;
-  readonly state: 'grid' | 'racing' | 'paused';
+  readonly state: 'intro' | 'grid' | 'racing' | 'paused';
   /** Simulation clock in seconds (stops while paused). */
   readonly simT: number;
-  toast(text: string, kind?: string): void;
-  centerMsg(text: string, secs: number, kind?: string): void;
+  toast(text: string, kind?: '' | 'warn' | 'gold'): void;
+  /** Big centre banner (GO, FINAL LAP, …). */
+  banner(text: string, kind?: 'go' | 'pb' | 'warn' | 'info', secs?: number): void;
   /** Hand the kart to the built-in driver (e.g. a cool-down lap after the flag). */
   setAutopilot(on: boolean): void;
   /** Same as "Back to track map" in the pause menu. */

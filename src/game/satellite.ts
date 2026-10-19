@@ -25,8 +25,18 @@ function loadImage(url: string): Promise<HTMLImageElement | null> {
   });
 }
 
+export interface SatelliteGround {
+  mesh: THREE.Mesh;
+  /** Average imagery colour, used to tint the surrounding ground so the edge disappears. */
+  edgeColor: THREE.Color;
+}
+
 /** Stitch satellite tiles around the track into one ground texture, positioned in track space. */
-export async function buildSatelliteGround(track: TrackModel, maxAniso: number): Promise<THREE.Mesh | null> {
+export async function buildSatelliteGround(
+  track: TrackModel,
+  maxAniso: number,
+  onProgress?: (done: number, total: number) => void,
+): Promise<SatelliteGround | null> {
   const pts = track.data.points;
   let minLat = Infinity,
     maxLat = -Infinity,
@@ -67,7 +77,10 @@ export async function buildSatelliteGround(track: TrackModel, maxAniso: number):
   ctx.fillRect(0, 0, w, h);
 
   const jobs: Promise<void>[] = [];
+  const total = (x1 - x0 + 1) * (y1 - y0 + 1);
   let ok = 0;
+  let done = 0;
+  onProgress?.(0, total);
   for (let x = x0; x <= x1; x++)
     for (let y = y0; y <= y1; y++)
       jobs.push(
@@ -76,10 +89,42 @@ export async function buildSatelliteGround(track: TrackModel, maxAniso: number):
             ctx.drawImage(img, (x - x0) * 256, (y - y0) * 256);
             ok++;
           }
+          onProgress?.(++done, total);
         }),
       );
   await Promise.all(jobs);
   if (!ok) return null;
+
+  // Average colour of the image border, then feather all four edges into it.
+  const probe = document.createElement('canvas');
+  probe.width = probe.height = 16;
+  const pctx = probe.getContext('2d')!;
+  pctx.drawImage(canvas, 0, 0, 16, 16);
+  const px = pctx.getImageData(0, 0, 16, 16).data;
+  let r = 0, g = 0, b = 0, cnt = 0;
+  for (let i = 0; i < 16; i++)
+    for (let j = 0; j < 16; j++) {
+      if (i > 1 && i < 14 && j > 1 && j < 14) continue;
+      const o = (j * 16 + i) * 4;
+      r += px[o];
+      g += px[o + 1];
+      b += px[o + 2];
+      cnt++;
+    }
+  const avg = `rgb(${Math.round(r / cnt)},${Math.round(g / cnt)},${Math.round(b / cnt)})`;
+  const fx = w * 0.14;
+  const fy = h * 0.14;
+  const fade = (x0g: number, y0g: number, x1g: number, y1g: number, rx: number, ry: number, rw: number, rh: number) => {
+    const grad = ctx.createLinearGradient(x0g, y0g, x1g, y1g);
+    grad.addColorStop(0, avg);
+    grad.addColorStop(1, avg.replace('rgb', 'rgba').replace(')', ',0)'));
+    ctx.fillStyle = grad;
+    ctx.fillRect(rx, ry, rw, rh);
+  };
+  fade(0, 0, fx, 0, 0, 0, fx, h);
+  fade(w, 0, w - fx, 0, w - fx, 0, fx, h);
+  fade(0, 0, 0, fy, 0, 0, w, fy);
+  fade(0, h, 0, h - fy, 0, h - fy, w, fy);
 
   const nw = track.proj.toLocal(y2lat(y0, z), x2lon(x0, z));
   const se = track.proj.toLocal(y2lat(y1 + 1, z), x2lon(x1 + 1, z));
@@ -93,5 +138,6 @@ export async function buildSatelliteGround(track: TrackModel, maxAniso: number):
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.set((nw.x + se.x) / 2, 0, (nw.z + se.z) / 2);
   mesh.receiveShadow = true;
-  return mesh;
+  const edgeColor = new THREE.Color(avg);
+  return { mesh, edgeColor };
 }

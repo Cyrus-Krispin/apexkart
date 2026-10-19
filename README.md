@@ -7,6 +7,13 @@ ghost replays.
 Start with **KF1 Karting Circuit, Singapore**, or fly anywhere on the map, hit
 **Find kart tracks here**, and race any kart track that someone has mapped on OSM.
 
+## Design
+
+The UI uses a style I call "Paddock Paper": the home screen reads like a printed race programme crossed
+with a map atlas, with warm paper, ink, signal orange, real circuit outlines on graph paper, Archivo
+Expanded for display type and JetBrains Mono for numerals. In the race, the HUD switches to dark
+broadcast-style timing panels with F1 sector colours. Tokens live in `src/styles/base.css`.
+
 ## Features
 
 - **Real tracks, anywhere**: raceway ways from OpenStreetMap are split at junctions and
@@ -27,6 +34,10 @@ Start with **KF1 Karting Circuit, Singapore**, or fly anywhere on the map, hit
   synchronised start, positions and results). Peer-to-peer over WebRTC; see [MULTIPLAYER.md](MULTIPLAYER.md).
 - **Live leaderboard**: per-track top 10, "who's on track now" presence, and a global feed
   of the latest laps.
+- **Circuit atlas**: search filters circuits as you type, or flies to any city and scans it for tracks.
+  Each circuit has a programme page with numbered turns, rotation and the live board.
+- **Pre-race briefing**: the circuit drawing animates in while satellite tiles load, alongside
+  controls and rules, then you press any key to go.
 - Keyboard, gamepad and touch controls; synthesized engine and tyre audio; skid marks;
   four cameras.
 

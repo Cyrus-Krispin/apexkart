@@ -14,6 +14,7 @@ export interface TrackData {
   osmWays: number[];
   source: string;
   preset?: boolean;
+  country?: string; // ISO 3166 alpha-3, presets only
 }
 
 interface OsmWay {

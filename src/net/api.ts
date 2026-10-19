@@ -110,7 +110,7 @@ export async function loadDriver(): Promise<Driver> {
   const name =
     localStorage.getItem('ak:name') || `${KART_NAMES[Math.floor(Math.random() * KART_NAMES.length)]}${Math.floor(Math.random() * 90 + 10)}`;
   localStorage.setItem('ak:name', name);
-  const color = localStorage.getItem('ak:color') || '#ff5a1f';
+  const color = localStorage.getItem('ak:color') || '#ff4d00';
   return { id, pid: await publicId(id), name, color };
 }
 

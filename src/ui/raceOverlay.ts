@@ -39,10 +39,10 @@ export class RaceOverlay {
       </div>
       <div class="mp-countdown" data-el="countdown" hidden></div>
       <div class="mp-results" data-el="results" hidden>
-        <h2 data-el="resTitle"></h2>
+        <header><p class="label" data-el="resKicker"></p><h2 class="display" data-el="resTitle"></h2></header>
         <ol data-el="resRows"></ol>
-        <p class="mp-muted" data-el="resNote"></p>
-        <button class="mp-btn primary" data-act="lobby">Back to lobby</button>
+        <p data-el="resNote"></p>
+        <button class="btn primary lg" data-act="lobby">Back to lobby <span class="arrow">→</span></button>
       </div>`;
     this.el.querySelectorAll<HTMLElement>('[data-el]').forEach((e) => (this.$[e.dataset.el!] = e));
     this.el.querySelector('[data-act="lobby"]')!.addEventListener('click', () => handlers.lobby());
@@ -57,7 +57,7 @@ export class RaceOverlay {
 
   render(v: OverlayView) {
     const n = v.rows.length;
-    this.set('pos', `P${v.pos}<small>/${n}</small>`);
+    this.set('pos', `P${v.pos}<small> / ${n}</small>`);
     this.set('lap', v.finished ? 'FINISHED' : `LAP ${Math.min(v.lap, v.laps)}/${v.laps}`);
     const leader = v.rows[0]?.ms;
     const right = (r: StandingRow) =>
@@ -71,7 +71,7 @@ export class RaceOverlay {
             ? 'DNF'
             : 'OUT';
     const row = (r: StandingRow, i: number) =>
-      `<li class="${r.me ? 'me' : ''} ${r.status}"><span class="pos">${i + 1}</span><span class="dot" style="background:${escapeHtml(r.color)}"></span><span class="nm">${escapeHtml(r.name)}</span><span class="tm">${right(r)}</span></li>`;
+      `<li class="${r.me ? 'me' : ''} ${r.status}"><span class="pos">${String(i + 1).padStart(2, '0')}</span><span class="bar" style="background:${escapeHtml(r.color)}"></span><span class="nm">${escapeHtml(r.name)}</span><span class="tm">${right(r)}</span></li>`;
     this.set('rows', v.rows.map(row).join(''));
 
     this.$.countdown.hidden = v.countdown === null;
@@ -82,6 +82,7 @@ export class RaceOverlay {
       const me = v.rows.find((r) => r.me);
       const title = v.final ? 'Final results' : me?.status === 'finished' ? `You finished P${v.pos}` : 'You retired';
       this.set('resTitle', title);
+      this.set('resKicker', `${v.laps} lap${v.laps > 1 ? 's' : ''} · ${v.rows.length} driver${v.rows.length > 1 ? 's' : ''}`);
       const full = (r: StandingRow) =>
         r.status === 'finished' ? formatMs(r.ms) : r.status === 'racing' ? `racing · lap ${Math.min(r.lap, v.laps)}/${v.laps}` : r.status === 'dnf' ? 'DNF' : 'left';
       this.set(
@@ -89,7 +90,7 @@ export class RaceOverlay {
         v.rows
           .map(
             (r, i) =>
-              `<li class="${r.me ? 'me' : ''} ${r.status}"><span class="pos">${r.status === 'finished' ? i + 1 : '–'}</span><span class="dot" style="background:${escapeHtml(r.color)}"></span><span class="nm">${escapeHtml(r.name)}</span><span class="tm">${full(r)}</span></li>`,
+              `<li class="${r.me ? 'me' : ''} ${r.status}"><span class="pos">${r.status === 'finished' ? String(i + 1).padStart(2, '0') : '–'}</span><span class="bar" style="background:${escapeHtml(r.color)}"></span><span class="nm">${escapeHtml(r.name)}</span><span class="tm">${full(r)}</span></li>`,
           )
           .join(''),
       );
