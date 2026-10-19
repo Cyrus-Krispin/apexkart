@@ -20,9 +20,6 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
     Center (USA), SH Karting (Canada)
 
 ### Changed
-- **Every track on the world map opens instantly.** Layouts are now prepared ahead of time instead
-  of being fetched from OpenStreetMap when you tap a dot. Dots without a raceable layout are gone,
-  so every dot you see works.
 - Races on tracks outside the featured set start straight away. The surrounding buildings and trees
   fill in when they arrive, instead of holding up the start.
 
