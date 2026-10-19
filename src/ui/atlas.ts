@@ -124,6 +124,7 @@ export class Atlas {
   private cells = new Map<string, Promise<VenueCell | null>>(); // pre-stitched layouts per 5° cell
   private sheetRecord: number | undefined; // the record the open sheet's medal targets use
   private daily: DailyResponse | null = null;
+  private feedFails = 0;
   private rival: { pid: string; name?: string; ms?: number } | null = null; // from a challenge link
 
   constructor(private o: AtlasOptions) {
@@ -1001,9 +1002,11 @@ export class Atlas {
   private async pollFeed() {
     try {
       this.feed = await api.feed();
+      this.feedFails = 0;
       this.renderFeed();
     } catch {
-      this.el.liveBody.innerHTML = '<p class="lv-empty">Live timing is offline.</p>';
+      // One dropped request isn't an outage: keep showing the last timing until a few fail in a row.
+      if (++this.feedFails >= 3 || !this.feed) this.el.liveBody.innerHTML = '<p class="lv-empty">Live timing is offline.</p>';
     }
   }
 
