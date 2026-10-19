@@ -15,6 +15,8 @@ export interface TrackData {
   source: string;
   preset?: boolean;
   country?: string; // ISO 3166 alpha-3, presets only
+  corrected?: { by: string; at: number; baseId: string; osmPoints: LatLon[] }; // community-fixed layout
+  needsFix?: boolean; // OSM trace known not to match the asphalt
 }
 
 interface OsmWay {
@@ -43,13 +45,22 @@ export async function overpass(query: string, signal?: AbortSignal): Promise<any
     try {
       const res = await fetch(url, {
         method: 'POST',
-        headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/x-www-form-urlencoded',
+          // Overpass rejects anonymous scripts; browsers send their own user agent.
+          ...(typeof window === 'undefined' ? { 'User-Agent': 'ApexKart/0.2 (github.com/Cyrus-Krispin/apexkart)' } : {}),
+        },
         body: 'data=' + encodeURIComponent(query),
         signal: ctl.signal,
       });
       const text = await res.text();
-      if (res.ok && text.trimStart().startsWith('{')) return JSON.parse(text);
-      lastErr = new Error(`Overpass ${res.status}`);
+      if (res.ok && text.trimStart().startsWith('{')) {
+        const data = JSON.parse(text);
+        // A busy server can answer 200 with an empty result plus a "runtime error" remark.
+        if (!(typeof data.remark === 'string' && /error|timed out|timeout/i.test(data.remark))) return data;
+        lastErr = new Error(`Overpass: ${data.remark.slice(0, 120)}`);
+      } else lastErr = new Error(`Overpass ${res.status}`);
     } catch (e) {
       if (signal?.aborted) throw e;
       lastErr = e;
@@ -91,7 +102,13 @@ interface Segment {
   ways: Set<number>;
   oneway: number; // +1 if any oneway way runs a->b, -1 if b->a, 0 unknown
   len: number;
+  dirA: [number, number]; // heading leaving `a` into the segment
+  dirB: [number, number]; // heading leaving `b` into the segment
 }
+
+/** Largest change of direction allowed when passing through a junction. Racing lines flow
+ * through junctions; anything sharper is a U-turn via a pit lane or link, not a lap. */
+const MAX_JUNCTION_TURN = (100 * Math.PI) / 180;
 
 export interface Loop {
   nodes: number[];
@@ -169,7 +186,16 @@ export function findLoops(elements: any[], maxLoops = 4): Loop[] {
         prev = edge.to;
         edge = next;
       }
-      segments.push({ a: j, b: nodes[nodes.length - 1], nodes, ways: segWays, oneway: Math.sign(oneway), len });
+      segments.push({
+        a: j,
+        b: nodes[nodes.length - 1],
+        nodes,
+        ways: segWays,
+        oneway: Math.sign(oneway),
+        len,
+        dirA: headingAlong(nodes, coord, false),
+        dirB: headingAlong(nodes, coord, true),
+      });
     }
   }
 
@@ -191,19 +217,26 @@ export function findLoops(elements: any[], maxLoops = 4): Loop[] {
     }
   });
   const jList = [...junction];
+  const neg = (d: [number, number]): [number, number] => [-d[0], -d[1]];
   for (const start of jList) {
     const path: number[] = [];
     const dirs: boolean[] = [];
     const visited = new Set<number>([start]);
-    const dfs = (v: number) => {
+    let firstDepart: [number, number] | null = null;
+    const dfs = (v: number, arrive: [number, number] | null) => {
       if (--budget < 0) return;
       for (const si of segsAt.get(v) ?? []) {
         if (path.includes(si)) continue;
         const s = segments[si];
         if (s.a === s.b) continue;
         const fwd = s.a === v;
+        const depart = fwd ? s.dirA : s.dirB;
+        if (arrive && turnAngle(arrive, depart) > MAX_JUNCTION_TURN) continue;
         const to = fwd ? s.b : s.a;
+        const nextArrive = neg(fwd ? s.dirB : s.dirA);
+        if (!path.length) firstDepart = depart;
         if (to === start && path.length >= 1) {
+          if (firstDepart && turnAngle(nextArrive, firstDepart) > MAX_JUNCTION_TURN) continue;
           const key = [...path, si].sort((x, y) => x - y).join(',');
           if (!cycleKeys.has(key)) {
             cycleKeys.add(key);
@@ -215,13 +248,13 @@ export function findLoops(elements: any[], maxLoops = 4): Loop[] {
         visited.add(to);
         path.push(si);
         dirs.push(fwd);
-        dfs(to);
+        dfs(to, nextArrive);
         path.pop();
         dirs.pop();
         visited.delete(to);
       }
     };
-    dfs(start);
+    dfs(start, null);
   }
 
   let loops: Loop[] = cycles.map(({ segs, dirs }) => {
@@ -257,6 +290,26 @@ export function findLoops(elements: any[], maxLoops = 4): Loop[] {
     .filter((l) => l.lengthM > 150 && l.lengthM < 8000 && l.points.length >= 6)
     .sort((x, y) => y.lengthM - x.lengthM)
     .slice(0, maxLoops);
+}
+
+/** Unit heading ~10 m into a node list, from its start (or its end when `fromEnd`). */
+function headingAlong(nodes: number[], coord: Map<number, LatLon>, fromEnd: boolean): [number, number] {
+  const seq = fromEnd ? [...nodes].reverse() : nodes;
+  const a = coord.get(seq[0])!;
+  let b = coord.get(seq[1] ?? seq[0])!;
+  for (let i = 1; i < seq.length; i++) {
+    b = coord.get(seq[i])!;
+    if (distM(a, b) >= 10) break;
+  }
+  const k = Math.cos((a[0] * Math.PI) / 180);
+  const dx = (b[1] - a[1]) * k;
+  const dy = b[0] - a[0];
+  const l = Math.hypot(dx, dy) || 1;
+  return [dx / l, dy / l];
+}
+
+function turnAngle(arrive: [number, number], depart: [number, number]): number {
+  return Math.acos(Math.max(-1, Math.min(1, arrive[0] * depart[0] + arrive[1] * depart[1])));
 }
 
 export function trackId(ways: number[]): string {

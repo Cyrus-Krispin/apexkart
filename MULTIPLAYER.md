@@ -141,17 +141,29 @@ Everything else lives in its own modules.
      relabels the exit button (`exitLabel`). With `startAt` it skips the briefing (`intro.dispose()`
      then `begin()`), because a synchronised start can't wait for "press any key". Then it calls
      `addon.attach(context())`.
-   - `resetToGrid()`: `gridSlot` sets the staggered grid position. `startAt` fixes `goAt` to
+   - `resetToGrid()`: `gridPose(track, gridSlot)` (in `raceMode.ts`) sets the staggered grid
+     position. Without a slot it is the old centreline spot. `startAt` fixes `goAt` to
      `SYNC_GO` (4.4 s; the lights come on at 0.9 + 0.7·k).
    - `tick()`: grid timer from `startAt`; `addon.tick(dt)` after physics.
-   - `render()`: `addon.frame(dt)` just before `renderer.render`.
+   - `render()`: `addon.frame(dt)` just before `pipeline.render()`.
    - `drawHud()` minimap: `addon.minimap(dot)` before the local kart's dot.
    - `refreshBoard()`: return early when `leaderboard === false`.
-   - `dispose()`: `addon.dispose()` first, and `renderer.forceContextLoss()`, because multiplayer creates a race every round.
-   - `context()`: what add-ons may touch: `scene`, `camera`, `track`, `phys`, `hud` (the `Hud` root),
-     `state`, `simT`, `toast`, `banner`, `setAutopilot`, `exit`.
+   - `dispose()`: `addon.dispose()` first, and `forceContextLoss()` after `pipeline.dispose()`,
+     because multiplayer creates a race every round.
+   - `context()`: what add-ons may touch: `scene`, `camera`, `track`, `phys`, `hud` (the `Hud`
+     root), `state`, `simT`, `viewTime`, `physTime`, `viewW`, `viewH`, `toast`, `banner`,
+     `setAutopilot`, `exit`.
+     - `viewTime` is the instant the frame shows. Rendering is interpolated, so the local kart is drawn one physics step behind the newest state (`lastFrame − STEP`).
+     - `physTime` is the instant of the newest physics state (`lastFrame − acc`).
+   - Remote karts are dead-reckoned to `viewTime`, the same timebase as the local kart and the
+     ghosts. Outgoing poses are stamped with `physTime`, and finish times are converted with it.
+   - Remote karts are cloned from one template per colour. They're placed visibly on their grid
+     slots when the race is built, before the world loads, so the race's `compileAsync`
+     warm-up covers their shaders. Nobody is added mid-race: late joiners wait for the next race.
 3. **HUD**: the overlay is appended to the `Hud` root, so it fades with `hidden-hud`.
-   - `.mp-standings` takes the live-timing tower's slot (top right). The tower is hidden in multiplayer.
+   - `.mp-standings` takes the live-timing tower's slot (top right). The tower is hidden in
+     multiplayer. At ≤640 px the HUD's tools and attribution move to the top right, so the
+     standings drop to 96 px from the top.
    - Name tags have their own `.mp-tags` layer.
    - The results card is centred. The time-trial lap card still appears on the right.
 4. **Styles**: `src/ui/multiplayer.css` uses the Paddock Paper tokens and the `.btn`, `.label`, `.display`,
@@ -192,6 +204,10 @@ racing on autopilot against `npm run dev` and against `vite preview`:
 - the host closing the tab migrates host in ~8 s
 - kick, leave, close to the track map
 - time trial unchanged (briefing, random start, timing tower, ghosts, restart)
+- frame pacing: two windows racing side by side at medium quality give p50 16.7 ms and p99 16.8 ms,
+  with no frames over 25 ms, the same as two time-trial windows. The add-on costs p99 0.2 ms per frame.
+- remote kart accuracy against the other player's own screen at the same server time: median 5 mm, p99 5 cm
+- phone width (375 px, touch): lobby without overflow; standings clear of the timing panel, tools, attribution and minimap; Pause → Retire works
 
 On the Vercel preview deployment, with the real Upstash store:
 

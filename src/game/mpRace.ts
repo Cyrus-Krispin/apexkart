@@ -5,7 +5,7 @@ import { RemoteKarts } from './remoteKarts';
 import { RaceOverlay, type OverlayView, type StandingRow } from '../ui/raceOverlay';
 import { FINISH_GRACE_MS, type GridSlot, type PoseTuple, type RoomState } from '../shared/room';
 import type { RoomClient } from '../net/room';
-import type { RaceAddon, RaceContext, RaceMode } from './raceMode';
+import { gridPose, type RaceAddon, type RaceContext, type RaceMode } from './raceMode';
 
 const SEND_MS = 50; // 20 Hz
 const LIGHTS_LEAD = 3.5; // s before lights out that the first red light comes on (Race: SYNC_GO - 0.9)
@@ -53,14 +53,18 @@ export class MultiplayerRace implements RaceAddon {
     this.prevS = ctx.phys.s;
     this.dist = ctx.phys.s - this.L; // grid is just behind the line
     this.karts = new RemoteKarts(ctx.scene, ctx.camera, ctx.hud, this.L);
-    this.o.grid.forEach((g, i) => g.mid !== this.o.room.mid && this.karts.ensure(g.mid, g.name, g.color, i + 1));
+    // Everyone waits on their grid slot until their first pose arrives.
+    this.o.grid.forEach((g, i) => g.mid !== this.o.room.mid && this.karts.add(g.mid, g.name, g.color, gridPose(ctx.track, i)));
     this.overlay = new RaceOverlay(ctx.hud, { lobby: () => this.o.onLobby() });
     const room = this.o.room;
     this.offs.push(
       room.on('pose', (mid, p) => p[9] === this.o.race && this.karts.push(mid, p)),
       room.on('ctl', (mid, m) => {
         if (m.k === 'fin' && m.race === this.o.race) this.remoteFin.set(mid, m.ms);
-        if (m.k === 'bye') this.gone.add(mid);
+        if (m.k === 'bye') {
+          this.gone.add(mid);
+          this.karts.setGone(mid, true);
+        }
       }),
       room.on('state', (s) => this.onState(s)),
     );
@@ -70,8 +74,10 @@ export class MultiplayerRace implements RaceAddon {
   private onState(s: RoomState) {
     const present = new Set(s.players.map((p) => p.mid));
     for (const g of this.o.grid) {
-      if (present.has(g.mid)) this.gone.delete(g.mid);
+      const here = present.has(g.mid);
+      if (here) this.gone.delete(g.mid);
       else this.gone.add(g.mid);
+      this.karts.setGone(g.mid, !here);
     }
     for (const p of s.players) if (p.fin?.r === this.o.race) this.remoteFin.set(p.mid, p.fin.ms);
     // Server closed the race (everyone done, or the grace period ran out).
@@ -101,17 +107,19 @@ export class MultiplayerRace implements RaceAddon {
         this.crossSimT = this.ctx.simT - dt * (1 - frac);
       }
     }
-    this.karts.collide(phys, this.o.room.clock.now());
+    this.karts.collide(phys);
   }
 
   frame(dt: number) {
     const room = this.o.room;
-    const now = room.clock.now();
+    const ctx = this.ctx;
+    // Remote karts are drawn at the same instant as the (interpolated) local kart.
+    const now = room.clock.at(ctx.viewTime);
     const perf = performance.now();
 
     if (this.crossSimT !== null && this.finishMs === undefined) {
-      // Sim time -> wall time: the last tick of this frame happened "now".
-      const crossPerf = perf - (this.ctx.simT - this.crossSimT) * 1000;
+      // Sim time -> wall time: the newest physics state belongs to ctx.physTime.
+      const crossPerf = ctx.physTime - (ctx.simT - this.crossSimT) * 1000;
       this.finishMs = Math.max(1, Math.round(crossPerf - this.o.startAt));
       this.crossSimT = null;
       room.finish(this.o.race, this.finishMs).catch((e) => this.ctx.toast(`Couldn’t record finish: ${e.message}`, 'warn'));
@@ -124,12 +132,12 @@ export class MultiplayerRace implements RaceAddon {
       this.lastSend = perf;
       const r2 = (x: number) => Math.round(x * 100) / 100;
       const r3 = (x: number) => Math.round(x * 1000) / 1000;
-      const pose: PoseTuple = [Math.round(now), r2(p.x), r2(p.z), r3(p.heading), r2(p.vx), r2(p.vz), r3(p.yawRate), r3(p.steerAngle), Math.round(prog * 1e4) / 1e4, this.o.race];
+      const pose: PoseTuple = [Math.round(room.clock.at(ctx.physTime)), r2(p.x), r2(p.z), r3(p.heading), r2(p.vx), r2(p.vz), r3(p.yawRate), r3(p.steerAngle), Math.round(prog * 1e4) / 1e4, this.o.race];
       room.mesh.sendPose(pose);
       room.localPose = pose;
     }
 
-    this.karts.update(dt, now);
+    this.karts.update(dt, now, ctx.viewW, ctx.viewH);
 
     const lap = this.currentLap();
     if (lap > this.lastLap && this.finishMs === undefined) {
@@ -149,7 +157,7 @@ export class MultiplayerRace implements RaceAddon {
   }
 
   minimap(dot: (x: number, z: number, color: string, r: number, ring?: boolean) => void) {
-    for (const k of this.karts.poses(this.o.room.clock.now())) if (k.visible) dot(k.x, k.z, k.color, 8, true);
+    for (const k of this.karts.list()) if (k.shown) dot(k.x, k.z, k.color, 8, true);
   }
 
   /** Laps completed + fraction of the current lap (negative on the grid). */
@@ -170,11 +178,13 @@ export class MultiplayerRace implements RaceAddon {
 
   standings(): StandingRow[] {
     const room = this.o.room;
-    const poses = new Map(this.karts.poses(room.clock.now()).map((k) => [k.mid, k]));
-    const rows = this.o.grid.map((g) => {
+    const now = room.clock.at(this.ctx.viewTime);
+    const rows = this.o.grid.map((g, i) => {
       const me = g.mid === room.mid;
       const fin = me ? this.finishMs : this.remoteFin.has(g.mid) ? this.remoteFin.get(g.mid) : undefined;
-      const prog = me ? this.progress() : (poses.get(g.mid)?.prog ?? -1);
+      const remote = me ? 0 : this.karts.progress(g.mid, now);
+      // Before their first pose, a player is where the grid put them.
+      const prog = me ? this.progress() : remote >= -0.5 ? remote : gridPose(this.ctx.track, i).s / this.L - 1;
       const status: StandingRow['status'] =
         typeof fin === 'number' ? 'finished' : fin === null ? 'dnf' : !me && this.gone.has(g.mid) ? 'out' : 'racing';
       return { mid: g.mid, name: me ? 'You' : g.name, color: g.color, me, status, ms: typeof fin === 'number' ? fin : null, lap: Math.max(1, Math.floor(prog) + 1), prog };

@@ -86,6 +86,11 @@ export class ServerClock {
     return performance.now() + this.offset;
   }
 
+  /** Server time for a performance.now() timestamp. */
+  at(perfMs: number) {
+    return perfMs + this.offset;
+  }
+
   /** Server epoch ms -> local performance.now() time. */
   toLocal(serverMs: number) {
     return serverMs - this.offset;

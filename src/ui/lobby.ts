@@ -287,7 +287,7 @@ export class Lobby {
     const links = room.mesh.links();
     const linkLabel = (l: LinkInfo | undefined) =>
       !l
-        ? '<span></span>'
+        ? '<span class="link"></span>'
         : l.state === 'p2p'
           ? `<span class="link p2p" title="Direct peer-to-peer link">● ${l.rtt != null ? Math.round(l.rtt) + ' ms' : 'direct'}</span>`
           : l.state === 'relay'
@@ -303,8 +303,8 @@ export class Lobby {
           <span class="bar" style="background:${escapeHtml(p.color)}"></span>
           <span class="nm">${escapeHtml(p.name)}${me ? ' <small>(you)</small>' : ''}${p.mid === s.cfg.host ? '<span class="host">HOST</span>' : ''}</span>
           <span class="state ${ready === 'READY' || ready === 'DONE' ? 'yes' : ''}">${ready}</span>
-          ${me ? '<span></span>' : linkLabel(links.get(p.mid))}
-          ${room.isHost && !me ? `<button class="kick" data-kick="${p.mid}" title="Remove from room">✕</button>` : '<span></span>'}
+          ${me ? '<span class="link"></span>' : linkLabel(links.get(p.mid))}
+          ${room.isHost && !me ? `<button class="kick" data-kick="${p.mid}" title="Remove from room">✕</button>` : '<span class="kick"></span>'}
         </li>`;
       })
       .join('');

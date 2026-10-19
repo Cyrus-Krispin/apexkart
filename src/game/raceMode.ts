@@ -42,6 +42,13 @@ export interface RaceContext {
   readonly state: 'intro' | 'grid' | 'racing' | 'paused';
   /** Simulation clock in seconds (stops while paused). */
   readonly simT: number;
+  /** performance.now() time of the instant this frame shows (the local kart is interpolated). */
+  readonly viewTime: number;
+  /** performance.now() time of the newest physics state (phys). */
+  readonly physTime: number;
+  /** Cached view size in CSS px (don't read clientWidth per frame). */
+  readonly viewW: number;
+  readonly viewH: number;
   toast(text: string, kind?: '' | 'warn' | 'gold'): void;
   /** Big centre banner (GO, FINAL LAP, …). */
   banner(text: string, kind?: 'go' | 'pb' | 'warn' | 'info', secs?: number): void;
@@ -49,4 +56,17 @@ export interface RaceContext {
   setAutopilot(on: boolean): void;
   /** Same as "Back to track map" in the pause menu. */
   exit(): void;
+}
+
+/**
+ * Grid position for a slot: 14 m behind the line on the centreline without a slot (time trial),
+ * otherwise staggered left/right 4 m apart.
+ */
+export function gridPose(track: TrackModel, slot?: number) {
+  const s = track.length - 14 - (slot ?? 0) * 4;
+  const p = track.at(s);
+  if (slot === undefined) return { s, x: p.x, z: p.z, heading: p.heading };
+  const [nx, nz] = track.normal(p.i);
+  const side = (slot % 2 ? 1 : -1) * Math.min(2, track.halfWidth * 0.45);
+  return { s, x: p.x + nx * side, z: p.z + nz * side, heading: p.heading };
 }

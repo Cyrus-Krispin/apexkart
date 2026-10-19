@@ -54,6 +54,15 @@ export interface LapSubmission {
   width: number;
 }
 
+export interface CommunityLayout {
+  id: string;
+  points: LatLon[];
+  lengthM: number;
+  by: string;
+  pid: string;
+  at: number;
+}
+
 export interface LapResult {
   improved: boolean;
   rank: number;
@@ -76,6 +85,11 @@ export const api = {
   submit: (lap: LapSubmission) =>
     fetch('/api/lap', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(lap) }).then((r) =>
       json<LapResult>(r),
+    ),
+  layouts: () => fetch('/api/layout').then((r) => json<Record<string, CommunityLayout>>(r)),
+  saveLayout: (body: { base: string; points: LatLon[]; center: LatLon; trackName: string; width: number; name: string; driverId: string }) =>
+    fetch('/api/layout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) =>
+      json<{ id: string; lengthM: number }>(r),
     ),
   track: (id: string) => fetch(`/api/track?id=${encodeURIComponent(id)}`).then((r) => json<TrackData | null>(r)),
   ghost: (track: string, dir: Dir, pid: string) =>
