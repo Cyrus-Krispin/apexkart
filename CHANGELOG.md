@@ -6,6 +6,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-20
+
 ### Added
 - **Daily circuit**: one featured circuit a day, the same for everyone, with its own leaderboard
   that starts fresh at midnight UTC.
@@ -183,7 +185,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 ### Fixed
 - Leaderboard and lap submission on the live site.
 
-[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.5.1...v0.6.0
