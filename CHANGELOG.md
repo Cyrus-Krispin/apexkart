@@ -6,6 +6,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-20
+
 ### Added
 - **Live time of day**, now the default: you race at the real time of day at the circuit. KF1
   after dark is a night race under the floodlights, and by day the sun sits where it really is
@@ -141,7 +143,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 ### Fixed
 - Leaderboard and lap submission on the live site.
 
-[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.4.0...v0.4.1
