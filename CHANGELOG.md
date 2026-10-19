@@ -6,6 +6,16 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+### Added
+- **Multiplayer**: create a room, share the link or the 4-letter code, and race up to 8 friends
+  live on the same circuit.
+  - The host picks the circuit, direction and number of laps; everyone readies up.
+  - A synchronised start puts every kart on a staggered grid.
+  - Your friends race as solid karts with name tags.
+  - Live race positions, lap X/N and a results screen.
+  - Karts talk to each other directly (WebRTC). When two networks can't connect directly,
+    the game relays positions through the server instead.
+
 ## [0.3.0] - 2026-10-19
 
 ### Added

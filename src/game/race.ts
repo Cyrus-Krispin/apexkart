@@ -14,6 +14,7 @@ import { analyzeShape } from '../track/shape';
 import { decodeGhost, encodeGhost, sampleGhost, GHOST_DT, type GhostData, type GhostFrame } from '../shared/ghost';
 import type { TrackData } from '../track/osm';
 import { api, type BoardResponse, type Dir, type Driver } from '../net/api';
+import { gridPose, type RaceContext, type RaceMode } from './raceMode';
 
 export interface RaceOptions {
   track: TrackData;
@@ -21,6 +22,8 @@ export interface RaceOptions {
   driver: Driver;
   container: HTMLElement;
   onExit: () => void;
+  /** Multiplayer and other add-ons (src/game/raceMode.ts). Omit for a time trial. */
+  mode?: RaceMode;
 }
 
 interface LocalPB {
@@ -51,6 +54,7 @@ const CAMS = [
 ] as const;
 
 type State = 'intro' | 'grid' | 'racing' | 'paused';
+const SYNC_GO = 4.4; // with a synchronised start (mode.startAt), lights go out this long into the grid phase
 
 export class Race {
   private pipeline: RenderPipeline;
@@ -121,6 +125,7 @@ export class Race {
     const shape = analyzeShape(opts.track.points);
     const rot = rotationLabel(shape, opts.dir === 'rev');
     this.pbKey = `ak:pb:${opts.track.id}:${opts.dir}`;
+    if (opts.mode?.ghosts === false) this.showGhosts = false;
     this.pb = this.loadPB();
     this.bestSectors = this.pb?.sectors.slice() ?? [];
 
@@ -157,6 +162,7 @@ export class Race {
     this.buildSkids();
     this.resetToGrid();
     this.state = 'intro';
+    this.applyMode();
 
     addEventListener('resize', this.onResize);
     this.onResize();
@@ -367,11 +373,14 @@ export class Race {
   }
 
   private resetToGrid() {
-    this.phys.place(this.track.length - 14);
-    this.lastS = this.phys.s = this.track.length - 14;
+    const g = gridPose(this.track, this.opts.mode?.gridSlot);
+    this.phys.place(g.s);
+    this.phys.x = g.x;
+    this.phys.z = g.z;
+    this.lastS = this.phys.s = g.s;
     this.state = 'grid';
     this.gridT = 0;
-    this.goAt = 3.6 + 0.4 + Math.random() * 0.9;
+    this.goAt = this.opts.mode?.startAt !== undefined ? SYNC_GO : 3.6 + 0.4 + Math.random() * 0.9;
     this.lightsLit = 0;
     this.lapStart = null;
     this.lapNo = 0;
@@ -471,7 +480,8 @@ export class Race {
   private tick(dt: number) {
     const c = this.autopilot ? this.autoControls() : this.input.read(dt);
     if (this.state === 'grid') {
-      this.gridT += dt;
+      const syncAt = this.opts.mode?.startAt;
+      this.gridT = syncAt !== undefined ? this.goAt - (syncAt - performance.now()) / 1000 : this.gridT + dt;
       const lit = Math.min(5, Math.floor((this.gridT - 0.9) / 0.7) + 1);
       if (lit > this.lightsLit && this.gridT >= 0.9) {
         this.lightsLit = lit;
@@ -496,6 +506,7 @@ export class Race {
     if (this.state === 'racing') this.timing(dt);
     this.updateSkids(c.drift);
     this.throttle = c.throttle;
+    this.opts.mode?.addon?.tick?.(dt);
   }
 
   /** Pure-pursuit driver: steer at a look-ahead point, brake for curvature ahead. */
@@ -663,6 +674,7 @@ export class Race {
 
   private async refreshBoard() {
     this.boardTimer = 4;
+    if (this.opts.mode?.leaderboard === false) return;
     const d = this.opts.driver;
     try {
       const presence = this.state === 'intro' ? undefined : { pid: d.pid, name: d.name, color: d.color };
@@ -845,6 +857,7 @@ export class Race {
       } else if (g.tag.style.display !== 'none') g.tag.style.display = 'none';
     }
 
+    this.opts.mode?.addon?.frame?.(dt);
     this.pipeline.render();
     this.drawHud(lapT, x, z);
   }
@@ -875,6 +888,18 @@ export class Race {
       g.strokeStyle = gh.color;
       g.stroke();
     }
+    this.opts.mode?.addon?.minimap?.((x, z, color, r, ring) => {
+      const [dx, dy] = map(x, z);
+      g.beginPath();
+      g.arc(dx, dy, r, 0, Math.PI * 2);
+      g.fillStyle = color;
+      g.fill();
+      if (ring) {
+        g.lineWidth = 2.5;
+        g.strokeStyle = '#111110';
+        g.stroke();
+      }
+    });
     const [mx, my] = map(kx, kz);
     g.beginPath();
     g.arc(mx, my, 9, 0, Math.PI * 2);
@@ -947,7 +972,59 @@ export class Race {
     }
   }
 
+  /** Multiplayer (and other add-ons): skip the briefing, trim the HUD, hand over a context. */
+  private applyMode() {
+    const mode = this.opts.mode;
+    if (!mode) return;
+    const q = (sel: string) => this.hud.root.querySelector<HTMLElement>(sel);
+    if (mode.leaderboard === false) q('[data-el="tower"]')!.hidden = true;
+    if (mode.restart === false) q('[data-act="restart"]')!.hidden = true;
+    if (mode.exitLabel) q('[data-act="exit"]')!.textContent = mode.exitLabel;
+    if (mode.startAt !== undefined) {
+      // A synchronised start can't wait for "press any key": go straight to the grid.
+      this.intro.dispose();
+      this.begin();
+    }
+    mode.addon?.attach?.(this.context());
+  }
+
+  /** What add-ons get to see and do (src/game/raceMode.ts). */
+  private context(): RaceContext {
+    const race = this;
+    return {
+      scene: this.scene,
+      camera: this.camera,
+      track: this.track,
+      phys: this.phys,
+      hud: this.hud.root,
+      get state() {
+        return race.state;
+      },
+      get simT() {
+        return race.simT;
+      },
+      // The kart on screen is interpolated one physics step behind the newest state.
+      get viewTime() {
+        return race.lastFrame - STEP * 1000;
+      },
+      get physTime() {
+        return race.lastFrame - race.acc * 1000;
+      },
+      get viewW() {
+        return race.viewW;
+      },
+      get viewH() {
+        return race.viewH;
+      },
+      toast: (text, kind) => this.hud.toast(text, kind),
+      banner: (text, kind, secs) => this.hud.banner(text, kind, secs),
+      setAutopilot: (on) => (this.autopilot = on),
+      exit: () => this.opts.onExit(),
+    };
+  }
+
   dispose() {
+    this.opts.mode?.addon?.dispose?.();
     this.disposed = true;
     cancelAnimationFrame(this.raf);
     removeEventListener('resize', this.onResize);
@@ -959,6 +1036,7 @@ export class Race {
     for (const tpl of this.ghostTemplates.values()) disposeTree(tpl);
     this.scene.environment?.dispose();
     this.pipeline.dispose();
+    this.pipeline.renderer.forceContextLoss(); // free the GL context now; multiplayer starts a race every round
     this.root.remove();
   }
 }

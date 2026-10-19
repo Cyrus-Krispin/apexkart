@@ -4,6 +4,7 @@ import './styles/race.css';
 import { Atlas } from './ui/atlas';
 import { Race } from './game/race';
 import { loadDriver } from './net/api';
+import { initMultiplayer } from './multiplayer';
 import { initChangelog } from './ui/changelog';
 
 const driver = await loadDriver();
@@ -29,6 +30,19 @@ const atlas = new Atlas({
       },
     });
   },
+});
+
+// Multiplayer rooms (#/room/CODE). See MULTIPLAYER.md.
+initMultiplayer({
+  driver,
+  container: gameRoot,
+  entryParent: atlasRoot.querySelector<HTMLElement>('.top-right') ?? atlasRoot,
+  enter: () => {
+    race?.dispose();
+    race = null;
+    atlas.hide();
+  },
+  leave: () => atlas.show(),
 });
 
 // What's new (#/changelog) and the version link in the top bar.

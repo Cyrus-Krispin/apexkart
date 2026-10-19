@@ -1,0 +1,221 @@
+// Multiplayer race add-on for Race (via src/game/raceMode.ts): tracks race progress and the
+// finish, streams the local kart's pose to the room, draws the other karts, and feeds the
+// standings/results overlay.
+import { RemoteKarts } from './remoteKarts';
+import { RaceOverlay, type OverlayView, type StandingRow } from '../ui/raceOverlay';
+import { FINISH_GRACE_MS, type GridSlot, type PoseTuple, type RoomState } from '../shared/room';
+import type { RoomClient } from '../net/room';
+import { gridPose, type RaceAddon, type RaceContext, type RaceMode } from './raceMode';
+
+const SEND_MS = 50; // 20 Hz
+const LIGHTS_LEAD = 3.5; // s before lights out that the first red light comes on (Race: SYNC_GO - 0.9)
+
+export interface MpRaceOptions {
+  room: RoomClient;
+  race: number;
+  grid: GridSlot[];
+  laps: number;
+  /** performance.now() time of lights out. */
+  startAt: number;
+  /** Player wants the lobby (results "Back to lobby"). */
+  onLobby: () => void;
+}
+
+export class MultiplayerRace implements RaceAddon {
+  private ctx!: RaceContext;
+  private karts!: RemoteKarts;
+  private overlay!: RaceOverlay;
+  private L = 1;
+  private dist = 0; // metres of race distance covered; 0 = start line, laps * L = flag
+  private prevS = 0;
+  private crossSimT: number | null = null;
+  /** ms from lights out to the flag; null = retired; undefined = still racing. */
+  finishMs: number | null | undefined = undefined;
+  private remoteFin = new Map<string, number | null>();
+  private gone = new Set<string>();
+  private final = false;
+  private lastSend = 0;
+  private lastHud = 0;
+  private lastLap = 1;
+  private offs: (() => void)[] = [];
+
+  constructor(private o: MpRaceOptions) {}
+
+  /** Mode to pass to `new Race({ ..., mode })`. */
+  mode(): RaceMode {
+    const slot = this.o.grid.findIndex((g) => g.mid === this.o.room.mid);
+    return { startAt: this.o.startAt, gridSlot: Math.max(0, slot), ghosts: false, leaderboard: false, restart: false, exitLabel: 'Retire to lobby', addon: this };
+  }
+
+  attach(ctx: RaceContext) {
+    this.ctx = ctx;
+    this.L = ctx.track.length;
+    this.prevS = ctx.phys.s;
+    this.dist = ctx.phys.s - this.L; // grid is just behind the line
+    this.karts = new RemoteKarts(ctx.scene, ctx.camera, ctx.hud, this.L);
+    // Everyone waits on their grid slot until their first pose arrives.
+    this.o.grid.forEach((g, i) => g.mid !== this.o.room.mid && this.karts.add(g.mid, g.name, g.color, gridPose(ctx.track, i)));
+    this.overlay = new RaceOverlay(ctx.hud, { lobby: () => this.o.onLobby() });
+    const room = this.o.room;
+    this.offs.push(
+      room.on('pose', (mid, p) => p[9] === this.o.race && this.karts.push(mid, p)),
+      room.on('ctl', (mid, m) => {
+        if (m.k === 'fin' && m.race === this.o.race) this.remoteFin.set(mid, m.ms);
+        if (m.k === 'bye') {
+          this.gone.add(mid);
+          this.karts.setGone(mid, true);
+        }
+      }),
+      room.on('state', (s) => this.onState(s)),
+    );
+    if (room.state) this.onState(room.state);
+  }
+
+  private onState(s: RoomState) {
+    const present = new Set(s.players.map((p) => p.mid));
+    for (const g of this.o.grid) {
+      const here = present.has(g.mid);
+      if (here) this.gone.delete(g.mid);
+      else this.gone.add(g.mid);
+      this.karts.setGone(g.mid, !here);
+    }
+    for (const p of s.players) if (p.fin?.r === this.o.race) this.remoteFin.set(p.mid, p.fin.ms);
+    // Server closed the race (everyone done, or the grace period ran out).
+    if (s.cfg.race !== this.o.race || s.cfg.phase === 'lobby') {
+      this.final = true;
+      const last = s.cfg.last;
+      if (last?.race === this.o.race) for (const r of last.rows) this.remoteFin.set(r.mid, r.ms);
+      if (this.finishMs === undefined) this.finishMs = null; // out of time
+    }
+  }
+
+  tick(dt: number) {
+    const { phys } = this.ctx;
+    // Race distance from the centreline position. Wrap at the line; ignore jumps no kart
+    // could make in one step (snapping between nearby sections), so cuts earn nothing.
+    let d = phys.s - this.prevS;
+    if (d > this.L / 2) d -= this.L;
+    else if (d < -this.L / 2) d += this.L;
+    if (Math.abs(d) > 12) d = 0;
+    this.prevS = phys.s;
+    if (this.finishMs === undefined && this.crossSimT === null) {
+      const before = this.dist;
+      this.dist += d;
+      const flag = this.o.laps * this.L;
+      if (this.dist >= flag && this.ctx.state === 'racing') {
+        const frac = (flag - before) / Math.max(1e-6, this.dist - before);
+        this.crossSimT = this.ctx.simT - dt * (1 - frac);
+      }
+    }
+    this.karts.collide(phys);
+  }
+
+  frame(dt: number) {
+    const room = this.o.room;
+    const ctx = this.ctx;
+    // Remote karts are drawn at the same instant as the (interpolated) local kart.
+    const now = room.clock.at(ctx.viewTime);
+    const perf = performance.now();
+
+    if (this.crossSimT !== null && this.finishMs === undefined) {
+      // Sim time -> wall time: the newest physics state belongs to ctx.physTime.
+      const crossPerf = ctx.physTime - (ctx.simT - this.crossSimT) * 1000;
+      this.finishMs = Math.max(1, Math.round(crossPerf - this.o.startAt));
+      this.crossSimT = null;
+      room.finish(this.o.race, this.finishMs).catch((e) => this.ctx.toast(`Couldn’t record finish: ${e.message}`, 'warn'));
+      this.ctx.setAutopilot(true); // cool-down lap
+    }
+
+    const p = this.ctx.phys;
+    const prog = this.progress();
+    if (perf - this.lastSend >= SEND_MS) {
+      this.lastSend = perf;
+      const r2 = (x: number) => Math.round(x * 100) / 100;
+      const r3 = (x: number) => Math.round(x * 1000) / 1000;
+      const pose: PoseTuple = [Math.round(room.clock.at(ctx.physTime)), r2(p.x), r2(p.z), r3(p.heading), r2(p.vx), r2(p.vz), r3(p.yawRate), r3(p.steerAngle), Math.round(prog * 1e4) / 1e4, this.o.race];
+      room.mesh.sendPose(pose);
+      room.localPose = pose;
+    }
+
+    this.karts.update(dt, now, ctx.viewW, ctx.viewH);
+
+    const lap = this.currentLap();
+    if (lap > this.lastLap && this.finishMs === undefined) {
+      this.lastLap = lap;
+      if (lap === this.o.laps && this.o.laps > 1) this.ctx.banner('Final lap', 'pb', 1.8);
+    }
+    if (this.finishMs !== undefined && this.lastLap <= this.o.laps) {
+      this.lastLap = this.o.laps + 1;
+      const pos = this.standings().findIndex((r) => r.me) + 1;
+      if (this.finishMs !== null) this.ctx.banner(`Finished P${pos}`, 'go', 3);
+    }
+
+    if (perf - this.lastHud > 120) {
+      this.lastHud = perf;
+      this.overlay.render(this.view());
+    }
+  }
+
+  minimap(dot: (x: number, z: number, color: string, r: number, ring?: boolean) => void) {
+    for (const k of this.karts.list()) if (k.shown) dot(k.x, k.z, k.color, 8, true);
+  }
+
+  /** Laps completed + fraction of the current lap (negative on the grid). */
+  private progress() {
+    return this.dist / this.L;
+  }
+
+  private currentLap() {
+    return Math.max(1, Math.floor(this.dist / this.L) + 1);
+  }
+
+  /** Mark the local player as retired (left the race before the flag). */
+  retire() {
+    if (this.finishMs !== undefined) return;
+    this.finishMs = null;
+    this.o.room.finish(this.o.race, null).catch(() => undefined);
+  }
+
+  standings(): StandingRow[] {
+    const room = this.o.room;
+    const now = room.clock.at(this.ctx.viewTime);
+    const rows = this.o.grid.map((g, i) => {
+      const me = g.mid === room.mid;
+      const fin = me ? this.finishMs : this.remoteFin.has(g.mid) ? this.remoteFin.get(g.mid) : undefined;
+      const remote = me ? 0 : this.karts.progress(g.mid, now);
+      // Before their first pose, a player is where the grid put them.
+      const prog = me ? this.progress() : remote >= -0.5 ? remote : gridPose(this.ctx.track, i).s / this.L - 1;
+      const status: StandingRow['status'] =
+        typeof fin === 'number' ? 'finished' : fin === null ? 'dnf' : !me && this.gone.has(g.mid) ? 'out' : 'racing';
+      return { mid: g.mid, name: me ? 'You' : g.name, color: g.color, me, status, ms: typeof fin === 'number' ? fin : null, lap: Math.max(1, Math.floor(prog) + 1), prog };
+    });
+    const rank = (r: (typeof rows)[number]) => (r.status === 'finished' ? 0 : r.status === 'racing' ? 1 : 2);
+    rows.sort((a, b) => rank(a) - rank(b) || (a.status === 'finished' ? a.ms! - b.ms! : b.prog - a.prog));
+    return rows;
+  }
+
+  private view(): OverlayView {
+    const rows = this.standings();
+    rows.forEach((r, i) => !r.me && this.karts.setLabel(r.mid, `P${i + 1}`));
+    const untilGo = (this.o.startAt - performance.now()) / 1000;
+    const times = rows.filter((r) => r.status === 'finished').map((r) => r.ms!);
+    const graceEnd = times.length ? this.o.startAt + Math.min(...times) + FINISH_GRACE_MS : null;
+    return {
+      laps: this.o.laps,
+      lap: this.currentLap(),
+      pos: rows.findIndex((r) => r.me) + 1,
+      rows,
+      countdown: untilGo > LIGHTS_LEAD + 0.2 ? untilGo - LIGHTS_LEAD : null,
+      finished: this.finishMs !== undefined,
+      final: this.final,
+      graceLeft: graceEnd !== null ? Math.max(0, (graceEnd - performance.now()) / 1000) : null,
+    };
+  }
+
+  dispose() {
+    this.offs.forEach((f) => f());
+    this.karts?.dispose();
+    this.overlay?.dispose();
+    this.o.room.localPose = null;
+  }
+}

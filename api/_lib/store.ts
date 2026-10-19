@@ -17,7 +17,22 @@ export interface Store {
   get(key: string): Promise<string | null>;
   lpush(key: string, value: string, keep: number): Promise<void>;
   lrange(key: string, start: number, stop: number): Promise<string[]>;
+  // Used by multiplayer rooms (api/room.ts).
+  hsetMany(key: string, fields: Record<string, string>): Promise<void>;
+  hsetnx(key: string, field: string, value: string): Promise<boolean>;
+  hdel(key: string, fields: string[]): Promise<void>;
+  hincrby(key: string, field: string, by: number): Promise<number>;
+  /** Atomically set `field` to `next` only if it currently equals `prev`. */
+  hcas(key: string, field: string, prev: string, next: string): Promise<boolean>;
+  expire(key: string, seconds: number): Promise<void>;
+  del(keys: string[]): Promise<void>;
+  rpush(key: string, value: string): Promise<void>;
+  lpop(key: string, count: number): Promise<string[]>;
+  mget(keys: string[]): Promise<(string | null)[]>;
 }
+
+const CAS_LUA = `if redis.call('HGET', KEYS[1], ARGV[1]) == ARGV[2] then redis.call('HSET', KEYS[1], ARGV[1], ARGV[3]) return 1 end return 0`;
+const str = (v: unknown) => (v == null ? null : typeof v === 'string' ? v : JSON.stringify(v));
 
 function redisStore(url: string, token: string): Store {
   const r = new Redis({ url, token, automaticDeserialization: false });
@@ -70,6 +85,33 @@ function redisStore(url: string, token: string): Store {
       await p.exec();
     },
     lrange: (k, a, b) => r.lrange(k, a, b),
+    async hsetMany(k, f) {
+      await r.hset(k, f);
+    },
+    hsetnx: async (k, f, v) => (await r.hsetnx(k, f, v)) === 1,
+    async hdel(k, fs) {
+      if (fs.length) await r.hdel(k, ...fs);
+    },
+    hincrby: (k, f, by) => r.hincrby(k, f, by),
+    hcas: async (k, f, prev, next) => Number(await r.eval(CAS_LUA, [k], [f, prev, next])) === 1,
+    async expire(k, sec) {
+      await r.expire(k, sec);
+    },
+    async del(ks) {
+      if (ks.length) await r.del(...ks);
+    },
+    async rpush(k, v) {
+      await r.rpush(k, v);
+    },
+    async lpop(k, n) {
+      const res = (await r.lpop(k, n)) as unknown;
+      return res == null ? [] : (Array.isArray(res) ? res : [res]).map((v) => str(v)!);
+    },
+    async mget(ks) {
+      if (!ks.length) return [];
+      const res = (await r.mget(...ks)) as unknown[];
+      return res.map(str);
+    },
   };
 }
 
@@ -112,8 +154,8 @@ function memoryStore(): Store {
       if (!db.has(k)) db.set(k, new Map());
       db.get(k).set(f, v);
     },
-    hmget: async (k, fs) => fs.map((f) => db.get(k)?.get(f) ?? null),
-    hgetall: async (k) => Object.fromEntries(db.get(k) ?? []),
+    hmget: async (k, fs) => fs.map((f) => live(k)?.get(f) ?? null),
+    hgetall: async (k) => Object.fromEntries(live(k) ?? []),
     async set(k, v, o) {
       if (o?.nx && live(k) !== undefined) return false;
       db.set(k, v);
@@ -128,6 +170,57 @@ function memoryStore(): Store {
       db.set(k, l.slice(0, keep));
     },
     lrange: async (k, a, b) => (db.get(k) ?? []).slice(a, b < 0 ? undefined : b + 1),
+    async hsetMany(k, f) {
+      live(k);
+      if (!db.has(k)) db.set(k, new Map());
+      for (const [x, v] of Object.entries(f)) db.get(k).set(x, v);
+    },
+    async hsetnx(k, f, v) {
+      live(k);
+      if (!db.has(k)) db.set(k, new Map());
+      if (db.get(k).has(f)) return false;
+      db.get(k).set(f, v);
+      return true;
+    },
+    async hdel(k, fs) {
+      const h: Map<string, string> | undefined = live(k);
+      fs.forEach((f) => h?.delete(f));
+      if (h && !h.size) db.delete(k);
+    },
+    async hincrby(k, f, by) {
+      live(k);
+      if (!db.has(k)) db.set(k, new Map());
+      const n = Number(db.get(k).get(f) ?? 0) + by;
+      db.get(k).set(f, String(n));
+      return n;
+    },
+    async hcas(k, f, prev, next) {
+      const h: Map<string, string> | undefined = live(k);
+      if (h?.get(f) !== prev) return false;
+      h.set(f, next);
+      return true;
+    },
+    async expire(k, sec) {
+      if (live(k) !== undefined) expiry.set(k, Date.now() + sec * 1000);
+    },
+    async del(ks) {
+      ks.forEach((k) => {
+        db.delete(k);
+        expiry.delete(k);
+      });
+    },
+    async rpush(k, v) {
+      const l: string[] = live(k) ?? [];
+      l.push(v);
+      db.set(k, l);
+    },
+    async lpop(k, n) {
+      const l: string[] = live(k) ?? [];
+      const out = l.splice(0, n);
+      if (!l.length) db.delete(k);
+      return out;
+    },
+    mget: async (ks) => ks.map((k) => live(k) ?? null),
   };
 }
 
