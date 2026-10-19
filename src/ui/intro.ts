@@ -1,5 +1,6 @@
 import { escapeHtml, formatMs, saveDriver, type Dir, type Driver } from '../net/api';
 import type { TrackData } from '../track/osm';
+import type { TimeOfDay } from '../game/atmosphere';
 import type { TrackShape } from '../track/shape';
 import { cleanDriverName } from './profile';
 import { rotationLabel, trackArt } from './trackArt';
@@ -11,6 +12,8 @@ export interface IntroOptions {
   dir: Dir;
   driver: Driver;
   pb: number | null;
+  time: TimeOfDay;
+  onTime: (t: TimeOfDay) => void;
   onStart: () => void;
   onBack: () => void;
 }
@@ -25,6 +28,7 @@ export class RaceIntro {
   private go: HTMLElement;
   private onKey = (e: KeyboardEvent) => {
     if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
+    if ((e.target as HTMLElement)?.closest?.('.io-time') && (e.key === 'Enter' || e.key === ' ')) return; // let the button click
     if (e.key === 'Escape') return this.o.onBack();
     if (['Tab', 'Shift', 'Meta', 'Control', 'Alt'].includes(e.key)) return;
     this.start();
@@ -65,7 +69,16 @@ export class RaceIntro {
       </aside>
       <footer class="io-foot">
         <div class="io-load"><span class="label">Building the world</span><div class="io-bar"><i data-el="bar"></i></div><span class="mono" data-el="count">…</span></div>
-        <button class="io-go" data-el="go" disabled><span class="io-go-key">Press any key</span><span class="io-go-sub">or tap to start</span></button>
+        <div class="io-foot-r">
+          <div class="io-time" role="radiogroup" aria-label="Time of day">
+            <span class="label">Time of day</span>
+            <div class="io-seg">
+              <button type="button" role="radio" data-time="day">Day</button>
+              <button type="button" role="radio" data-time="night">Night<small>Floodlit</small></button>
+            </div>
+          </div>
+          <button class="io-go" data-el="go" disabled><span class="io-go-key">Press any key</span><span class="io-go-sub">or tap to start</span></button>
+        </div>
       </footer>`;
     o.container.appendChild(this.el);
     this.bar = this.el.querySelector('[data-el=bar]')!;
@@ -83,13 +96,31 @@ export class RaceIntro {
       if (e.key === 'Enter') input.blur();
       e.stopPropagation();
     });
+    const seg = [...this.el.querySelectorAll<HTMLButtonElement>('[data-time]')];
+    const mark = (t: TimeOfDay) =>
+      seg.forEach((b) => {
+        const on = b.dataset.time === t;
+        b.classList.toggle('on', on);
+        b.setAttribute('aria-checked', String(on));
+      });
+    mark(o.time);
+    seg.forEach((b) =>
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (e.detail > 0) b.blur(); // after a pointer click, the next key press starts the race again
+        const t = b.dataset.time as TimeOfDay;
+        if (b.classList.contains('on')) return;
+        mark(t);
+        o.onTime(t);
+      }),
+    );
     this.el.querySelector('[data-act=back]')!.addEventListener('click', (e) => {
       e.stopPropagation();
       o.onBack();
     });
     this.el.addEventListener('pointerdown', (e) => {
       const t = e.target as HTMLElement;
-      if (t.closest('input, label, .io-back')) return;
+      if (t.closest('input, label, .io-back, .io-time')) return;
       this.start();
     });
     addEventListener('keydown', this.onKey);

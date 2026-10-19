@@ -10,6 +10,7 @@ import { buildBuildings } from './buildings';
 import { buildTrees } from './trees';
 import { buildTrackside } from './trackside';
 import { trackExtent, type Extent } from './common';
+import type { Lamp } from '../floodlights';
 
 export type WorldStyle = 'stylised' | 'satellite';
 
@@ -21,6 +22,7 @@ export interface World {
   group: THREE.Group;
   groundColor: THREE.Color;
   emissive: THREE.MeshStandardMaterial[];
+  lamps: Lamp[];
   stats: { buildings: number; trees: number; env: boolean };
 }
 
@@ -113,5 +115,5 @@ export async function buildWorld(o: {
     } else group.add(painter.toMesh(o.aniso));
   }
   o.onStage('Ready', 1);
-  return { group, groundColor, emissive: side.emissive, stats: { buildings: b.footprints.length, trees: trees.count, env: !!env } };
+  return { group, groundColor, emissive: side.emissive, lamps: side.lamps, stats: { buildings: b.footprints.length, trees: trees.count, env: !!env } };
 }
