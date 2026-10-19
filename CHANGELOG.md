@@ -6,6 +6,14 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+### Changed
+- **Most tracks on the world map now open instantly.** Their layouts are prepared ahead of time
+  instead of being fetched from OpenStreetMap when you tap a dot. That covers four in five venues
+  so far, and the rest follow in the next update. 713 dots that had no raceable layout are gone.
+
+### Fixed
+- Live timing keeps showing the latest times through a dropped connection instead of going blank.
+
 ## [0.10.1] - 2026-10-20
 
 ### Changed

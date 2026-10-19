@@ -4,9 +4,10 @@
 // each dot moved onto its longest layout.
 //
 // A few hundred Overpass queries (one per 5° cell that has venues, covering only the ground around
-// each venue), so it runs on CI:
-// .github/workflows/bake-venues.yml. Locally: npm run venues [-- --cells 9_20,10_20]
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+// each venue), so it runs on CI: .github/workflows/bake-venues.yml. Partial runs (--cells, or a run
+// that times out) add cell files; `npm run venues -- --merge-only` then rebuilds world.json from
+// every cell file present, offline.
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { findLoops, loopToTrack, centroid } from '../src/track/osm.ts';
 import { cellOf, packPoints, unpackPoints, venueKey, type PackedLayout, type VenueCell } from '../src/shared/venues.ts';
 
@@ -95,6 +96,54 @@ function layoutsAt(v: Venue, ways: { el: any; bb: [number, number, number, numbe
     if (out.length === MAX_LAYOUTS) break;
   }
   return out;
+}
+
+// ---------------------------------------------------------------- merge only
+
+/**
+ * --merge-only: no Overpass. Rebuild world.json from the cell files already in
+ * public/tracks/venues (from one or several runs). In a baked cell, each layout set keeps the
+ * nearest venue's country and name and puts its dot on the track; venues with no layouts there are
+ * dropped. Cells not baked yet keep their venues as they are.
+ */
+if (process.argv.includes('--merge-only')) {
+  const files = new Map<string, VenueCell>();
+  for (const f of readdirSync('public/tracks/venues')) if (f.endsWith('.json')) files.set(f.slice(0, -5), JSON.parse(readFileSync(`public/tracks/venues/${f}`, 'utf8')));
+  const out: Venue[] = [];
+  const byCellAll = new Map<string, Venue[]>();
+  for (const v of world.venues) {
+    const c = cellOf(v[0], v[1]);
+    (byCellAll.get(c) ?? byCellAll.set(c, []).get(c)!).push(v);
+  }
+  let dropped = 0;
+  for (const [c, venues] of byCellAll) {
+    const file = files.get(c);
+    if (!file) {
+      out.push(...venues);
+      continue;
+    }
+    const used = new Set<Venue>();
+    for (const [key, layouts] of Object.entries(file)) {
+      const [lat, lon] = key.split(',').map(Number);
+      let best: Venue | null = null;
+      let bestD = 1500;
+      for (const v of venues) {
+        const d = Math.hypot((v[0] - lat) * 110540, (v[1] - lon) * 111320 * Math.cos((lat * Math.PI) / 180));
+        if (!used.has(v) && d < bestD) {
+          bestD = d;
+          best = v;
+        }
+      }
+      if (best) used.add(best);
+      const name = best?.[3] || (layouts[0][1].startsWith('Unnamed') ? '' : layouts[0][1]);
+      out.push([lat, lon, best?.[2] ?? '', name]);
+    }
+    dropped += venues.length - used.size;
+  }
+  out.sort((a, b) => a[2].localeCompare(b[2]) || a[0] - b[0]);
+  writeFileSync('public/tracks/world.json', JSON.stringify({ ...world, venues: out, built: new Date().toISOString().slice(0, 10) }));
+  console.log(`${out.length} venues (${dropped} without a raceable loop dropped); ${files.size} baked cells, ${byCellAll.size - files.size} not baked yet`);
+  process.exit(0);
 }
 
 // ---------------------------------------------------------------- main
