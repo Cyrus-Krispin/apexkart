@@ -883,7 +883,8 @@ export class Atlas {
       this.drawDots();
     }
     this.nameTracks([...this.tracks.values()].filter((t) => !t.preset && !t.location));
-    if (!this.route()) this.applyFilter({ kind: 'featured' }, false);
+    // A country route fills the dock itself; otherwise (no route, or a circuit link) fill it here.
+    if (!this.route() || location.hash.startsWith('#/t/')) this.applyFilter(this.filter, false);
     this.renderNow();
     this.pollFeed();
     window.setInterval(() => !this.o.root.hidden && this.pollFeed(), 6000);

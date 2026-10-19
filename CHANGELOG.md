@@ -26,6 +26,9 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 - Races on tracks outside the featured set start straight away. The surrounding buildings and trees
   fill in when they arrive, instead of holding up the start.
 
+### Fixed
+- Opening the site from a link to a circuit no longer leaves the bottom dock empty.
+
 ## [0.6.0] - 2026-10-20
 
 ### Added
