@@ -4,6 +4,11 @@
 /* ---------- Entry button (atlas top bar) */
 .mp-entry { height: 34px; padding: 0 12px; gap: 8px; font-size: 13px; }
 .mp-entry svg { flex: none; }
+@media (max-width: 900px) {
+  /* Like the atlas's other top-bar controls, icon only on small screens. */
+  .mp-entry { padding: 0 10px; }
+  .mp-entry-label { display: none; }
+}
 
 /* ---------- Lobby */
 .mp-lobby { position: fixed; inset: 0; z-index: 1500; overflow-y: auto; display: grid; place-items: center; padding: 28px 16px; }

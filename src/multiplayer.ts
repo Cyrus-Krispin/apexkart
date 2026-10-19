@@ -54,7 +54,8 @@ class MultiplayerController {
     if (host.entryParent) {
       const b = document.createElement('button');
       b.className = 'btn primary mp-entry';
-      b.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="9" cy="8" r="3.2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M3 19c.6-3.2 3-5 6-5s5.4 1.8 6 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M15.5 5.2a3 3 0 010 5.6M18 14.4c1.6.7 2.6 2.3 3 4.6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>Race friends';
+      b.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="9" cy="8" r="3.2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M3 19c.6-3.2 3-5 6-5s5.4 1.8 6 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M15.5 5.2a3 3 0 010 5.6M18 14.4c1.6.7 2.6 2.3 3 4.6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span class="mp-entry-label">Race friends</span>';
+      b.setAttribute('aria-label', 'Race friends');
       b.title = 'Create or join a multiplayer room';
       b.addEventListener('click', () => (location.hash = '#/room'));
       host.entryParent.prepend(b);
