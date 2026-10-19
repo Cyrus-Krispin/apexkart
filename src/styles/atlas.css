@@ -278,6 +278,7 @@
 .card-foot { margin-top: auto; display: flex; align-items: center; gap: 6px; padding-top: 6px; border-top: 1px solid var(--rule); font-size: 12.5px; white-space: nowrap; min-width: 0; }
 .card-foot .label { font-size: 10px; }
 .card-foot b { font-weight: 700; }
+.card-rec { display: contents; }
 .card-foot .muted { color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; }
 .card-pb { font-size: 11px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; }
 .card-go { position: relative; z-index: 2; margin-left: auto; flex: none; display: grid; place-items: center; width: 30px; height: 26px; background: var(--ink); color: var(--paper); border-radius: var(--radius); transition: background 0.15s, color 0.15s; }

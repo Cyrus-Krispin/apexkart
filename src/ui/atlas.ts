@@ -1241,6 +1241,8 @@ export class Atlas {
       const top = card.querySelector('.card-top')!;
       top.querySelector('.card-live')?.remove();
       if (n) top.insertAdjacentHTML('beforeend', `<span class="card-live"><i class="live-dot"></i>${n} live</span>`);
+      const rec = card.querySelector('.card-rec');
+      if (rec) rec.innerHTML = V.recordHtml(f.records[`${id}|fwd`]?.ms);
     }
     if (!this.selected) this.renderNow();
   }
