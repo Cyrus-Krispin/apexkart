@@ -6,6 +6,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-20
+
 ### Fixed
 - Circuit cards on the home screen show the track record as soon as live timing loads, instead of "Open".
 
@@ -115,7 +117,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 ### Fixed
 - Leaderboard and lap submission on the live site.
 
-[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.3.0...v0.4.0
