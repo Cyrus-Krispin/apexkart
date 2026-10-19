@@ -94,6 +94,24 @@ Laps go through plausibility checks: top speed, the ghost's duration matching th
 and the ghost path length matching the track. Submissions are rate-limited too. That
 stops casual nonsense, but it isn't cheat-proof, because the client is trusted.
 
+## Changelog and releases
+
+`CHANGELOG.md` lists what's new in each version, and the site shows it at **`#/changelog`**
+(linked from the version number in the top bar). Each release is an annotated git tag on
+`main` (`v0.1.0`, `v0.2.0`, `v0.3.0`, …) following [semantic versioning](https://semver.org).
+
+1. With every feature or fix that lands on `main`, add a line under `## [Unreleased]` in
+   `CHANGELOG.md`. `main` deploys straight away, so Unreleased notes are already live.
+2. To cut a release from an up-to-date `main`:
+   ```bash
+   npm run release -- minor          # or patch / major / an explicit 0.4.0
+   git push origin main v0.4.0       # or pass --push to the release command
+   ```
+   This moves the Unreleased notes under the new version and bumps `package.json`. It then commits
+   and creates the tag, with the release notes as the tag message.
+3. `npm run build` checks that `package.json` matches the newest release in the changelog
+   (`npm run version:check`).
+
 ## Deploying to Vercel
 
 1. Import this repo in Vercel (framework preset **Vite**, already set in `vercel.json`).
