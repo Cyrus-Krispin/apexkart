@@ -6,6 +6,9 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+### Fixed
+- Circuit cards on the home screen show the track record as soon as live timing loads, instead of "Open".
+
 ## [0.5.0] - 2026-10-20
 
 ### Added

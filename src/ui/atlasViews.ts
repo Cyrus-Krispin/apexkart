@@ -80,12 +80,17 @@ export function trackCard(d: TrackCard): string {
       <h3 class="display">${esc(t.name)}</h3>
       <p class="card-sub">${esc(place(t))} · ${km(t.lengthM)} km · ${shape.corners.length} turns</p>
       <div class="card-foot">
-        <span class="label">Rec</span>${d.record ? `<b class="mono">${formatMs(d.record)}</b>` : '<span class="muted">Open</span>'}
+        <span class="label">Rec</span><span class="card-rec">${recordHtml(d.record)}</span>
         ${d.pb ? `<span class="card-pb mono" title="Your best">You ${formatMs(d.pb)}</span>` : ''}
         <button class="card-go" data-go="${esc(t.id)}" title="Race now" aria-label="Race ${esc(t.name)} now">${PLAY}</button>
       </div>
     </div>
   </article>`;
+}
+
+/** The record slot on a track card (refreshed in place when the live feed updates). */
+export function recordHtml(ms: number | undefined): string {
+  return ms ? `<b class="mono">${formatMs(ms)}</b>` : '<span class="muted">Open</span>';
 }
 
 export function venueCard(v: Venue, empty: boolean): string {
