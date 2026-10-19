@@ -15,12 +15,13 @@ let race: Race | null = null;
 const atlas = new Atlas({
   root: atlasRoot,
   driver,
-  onRace: (track, dir) => {
+  onRace: (track, dir, daily) => {
     atlas.hide();
     race?.dispose();
     race = new Race({
       track,
       dir,
+      daily,
       driver,
       container: gameRoot,
       onExit: () => {

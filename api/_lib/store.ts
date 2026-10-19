@@ -244,6 +244,8 @@ export const K = {
   live: (t: string, d: string) => `ak:live:${t}:${d}`,
   liveAll: 'ak:live:all',
   names: 'ak:names',
+  /** The daily circuit's board for one UTC day: pid -> best lap ms that day. */
+  daily: (day: string) => `ak:daily:${day}`,
   /** track id -> {name, center}: lets the live feed say where drivers are, even before a lap. */
   trackInfo: 'ak:trackinfo',
   records: 'ak:records',

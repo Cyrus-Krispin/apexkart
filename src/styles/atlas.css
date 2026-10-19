@@ -315,6 +315,31 @@
 .card.more .display { margin: 0; font-size: 30px; }
 .card.more p { margin: 0; }
 .more-tip { font-size: 12px; color: var(--ink-3); }
+/* The daily circuit: the one dark card on the rail */
+.card.daily { flex-basis: 252px; background: var(--night); color: var(--night-text); border-right: 1px solid var(--ink); }
+.card.daily:hover, .card.daily:focus-within { background: var(--night-2); }
+.card.daily:hover::after, .card.daily:focus-within::after { border-color: var(--signal); }
+.daily-art { position: relative; border-bottom-color: var(--night-rule); background-color: var(--night-2); background-image: linear-gradient(rgba(242, 238, 229, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(242, 238, 229, 0.05) 1px, transparent 1px); background-size: 16px 16px; }
+.daily-art .ta-line { stroke: var(--night-text); }
+.card.daily:hover .daily-art .ta-line { stroke: var(--signal); }
+.daily-tag { position: absolute; top: 6px; left: 8px; padding: 1px 4px; background: var(--night); color: var(--signal); font-weight: 700; }
+.daily-left { position: absolute; top: 6px; right: 8px; padding: 1px 4px; background: var(--night); font-size: 10.5px; color: var(--night-muted); }
+.card.daily h3 { color: var(--night-text); }
+.daily-status { color: var(--night-muted); white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.daily-status b { color: var(--night-text); }
+.card.daily .card-foot { border-top-color: var(--night-rule); }
+.daily-you { font-size: 12px; color: var(--night-muted); overflow: hidden; text-overflow: ellipsis; }
+.daily-you b { color: var(--signal); }
+.card.daily .card-go { background: var(--signal); color: var(--ink); }
+.card.daily .card-go:hover { background: var(--night-text); }
+.d-daily { margin: 0 0 18px; padding: 10px 12px 4px; background: var(--night); color: var(--night-text); }
+.d-daily-head { display: flex; justify-content: space-between; }
+.d-daily-head .label { color: var(--night-muted); }
+.d-daily-head .label:first-child { color: var(--signal); font-weight: 700; }
+.d-daily .board li { border-bottom-color: var(--night-rule); height: 32px; }
+.d-daily .board .pos, .d-daily .board li:first-child .pos { color: var(--night-muted); }
+.d-daily .board li.me { background: var(--signal); color: var(--ink); }
+.d-daily .empty { color: var(--night-muted); padding: 10px 0 12px; }
 .rail-empty { display: grid; place-items: center; width: 100%; padding: 0 24px; color: var(--ink-3); font-size: 14px; }
 .rail-empty p { margin: 0; }
 

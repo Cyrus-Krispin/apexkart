@@ -3,7 +3,7 @@
 import type { LatLon, TrackData } from '../track/osm';
 import type { TrackShape } from '../track/shape';
 import { trackArt, rotationLabel } from './trackArt';
-import { escapeHtml as esc, formatMs, timeAgo, type BoardResponse, type Dir, type FeedItem } from '../net/api';
+import { escapeHtml as esc, formatMs, timeAgo, type BoardResponse, type DailyResponse, type Dir, type FeedItem } from '../net/api';
 import type { Venue } from './world';
 import { MEDALS, MEDAL_NAME, type Medal, type Targets } from '../game/medals';
 
@@ -99,6 +99,60 @@ export function recordHtml(ms: number | undefined): string {
   return ms ? `<b class="mono">${formatMs(ms)}</b>` : '<span class="muted">Open</span>';
 }
 
+const left = (ms: number) => {
+  const h = Math.floor(ms / 3_600_000);
+  const m = Math.floor((ms % 3_600_000) / 60_000);
+  return h ? `${h}h ${String(m).padStart(2, '0')}m left` : `${m}m left`;
+};
+
+export interface DailyCard {
+  t: TrackData;
+  shape: TrackShape;
+  board: DailyResponse | null;
+  me: string; // your pid
+  streak: number; // consecutive days you've set a daily lap, including today
+  msLeft: number;
+}
+
+/** Today's circuit, first on the rail: the day's leader, your place and your streak. */
+export function dailyCard(d: DailyCard): string {
+  const { t, board } = d;
+  const lead = board?.entries[0];
+  const mine = board?.entries.find((e) => e.pid === d.me);
+  const status = lead
+    ? `${board!.total} driver${board!.total > 1 ? 's' : ''} today · ${esc(lead.name)} <b class="mono">${formatMs(lead.ms)}</b>`
+    : 'Nobody yet. Set today’s time.';
+  const you = mine ? `You P${mine.rank}` : 'No lap yet';
+  return `<article class="card daily" data-card="t:${esc(t.id)}">
+    <button class="card-hit" data-track="${esc(t.id)}" aria-label="Daily circuit: ${esc(t.name)}"></button>
+    <div class="card-art daily-art">${trackArt(d.shape, { w: 248, h: 64, pad: 9, arrows: false })}
+      <span class="daily-tag label">Daily circuit</span><span class="daily-left mono">${left(d.msLeft)}</span></div>
+    <div class="card-body">
+      <h3 class="display">${esc(t.name)}</h3>
+      <p class="card-sub daily-status">${status}</p>
+      <div class="card-foot"><span class="daily-you">${you}${d.streak > 1 ? ` · <b>${d.streak}-day streak</b>` : ''}</span>
+        <button class="card-go" data-go="${esc(t.id)}" title="Race today’s circuit" aria-label="Race today’s circuit, ${esc(t.name)}">${PLAY}</button></div>
+    </div>
+  </article>`;
+}
+
+/** On the daily circuit's sheet: the day's top five. */
+export function dailyBoard(board: DailyResponse | null, me: string, msLeft: number): string {
+  const rows = board?.entries.slice(0, 5) ?? [];
+  return `<div class="d-daily">
+    <div class="d-daily-head"><span class="label">Today’s daily circuit</span><span class="label">${left(msLeft)}</span></div>
+    ${
+      rows.length
+        ? `<ol class="board">${rows
+            .map(
+              (e) => `<li class="${e.pid === me ? 'me' : ''}"><span class="pos mono">${String(e.rank).padStart(2, '0')}</span><span class="bar" style="background:${esc(e.color)}"></span><span class="nm">${esc(e.name)}${e.pid === me ? ' <em>you</em>' : ''}</span><span class="tm mono">${formatMs(e.ms)}</span></li>`,
+            )
+            .join('')}</ol>`
+        : '<p class="empty">Nobody has set a time today. Your first clean lap leads.</p>'
+    }
+  </div>`;
+}
+
 export function venueCard(v: Venue, empty: boolean): string {
   const name = v.name || 'Unnamed kart track';
   return `<article class="card venue${empty ? ' empty' : ''}" data-card="v:${v.i}">
@@ -135,6 +189,7 @@ export interface SheetData {
   countryName?: string;
   nightNow: boolean; // the sun is down at the circuit right now
   medals: { targets: Targets; earned: Medal | null };
+  daily?: string; // the day's board, when this is today's daily circuit
 }
 
 /** The four targets, what you've won, and how far your best is from the next one. */
@@ -191,6 +246,7 @@ export function sheet(d: SheetData): string {
     <button class="btn primary lg block" data-act="race">Race <span class="arrow">→</span></button>
     <p class="d-pb">${d.pb ? `Your best <b class="mono">${formatMs(d.pb)}</b>` : 'Your first clean lap goes straight onto the board.'}</p>
     ${medalLadder(d.medals, d.pb)}
+    ${d.daily ?? ''}
     <div class="sec-head"><h2 class="label">Leaderboard · ${rot.label.toLowerCase()}</h2><span class="label" data-el="dCount"></span></div>
     <div class="d-live" data-el="dLive"></div>
     <div data-el="dBoard"><p class="empty">Loading…</p></div>

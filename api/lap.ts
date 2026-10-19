@@ -2,6 +2,8 @@
 // stores its ghost, and posts to the global live feed.
 import { getStore, K, json, bad, TRACK_RE, isDir, cleanName, cleanColor, publicId } from './_lib/store.js';
 import { osmGeometry, sameCircuit, storedGeometry } from './_lib/osmRef.js';
+import { FEATURED_IDS } from './_lib/featured.js';
+import { dailyTrack, dayOf } from '../src/shared/daily.js';
 import { decodeGhost, ghostPathLength, GHOST_DT } from '../src/shared/ghost.js';
 import { centroid, distM, loopLength, type LatLon } from '../src/track/osm.js';
 
@@ -90,5 +92,17 @@ export async function POST(req: Request) {
       rank === 1 ? db.hset(K.records, `${track}|${dir}`, JSON.stringify({ name, ms, color })) : Promise.resolve(),
     ]);
   }
-  return json({ improved, rank, pbMs: improved ? ms : prev, total });
+  // Today's daily circuit keeps its own board: each driver's best lap of the (UTC) day.
+  let daily: { improved: boolean; rank: number; total: number } | undefined;
+  const day = dayOf();
+  if (dir === 'fwd' && track === dailyTrack(day, FEATURED_IDS)) {
+    const prevDay = await db.zscore(K.daily(day), pid);
+    const better = prevDay === null || ms < prevDay;
+    if (better) {
+      await Promise.all([db.zadd(K.daily(day), ms, pid), db.hset(K.names, pid, JSON.stringify({ name, color })), db.expire(K.daily(day), 8 * 86400)]);
+    }
+    const [dRank, dTotal] = await Promise.all([db.zrank(K.daily(day), pid), db.zcard(K.daily(day))]);
+    daily = { improved: better, rank: (dRank ?? 0) + 1, total: dTotal };
+  }
+  return json({ improved, rank, pbMs: improved ? ms : prev, total, daily });
 }
