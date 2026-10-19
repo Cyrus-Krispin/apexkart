@@ -193,6 +193,13 @@ racing on autopilot against `npm run dev` and against `vite preview`:
 - kick, leave, close to the track map
 - time trial unchanged (briefing, random start, timing tower, ghosts, restart)
 
+On the Vercel preview deployment, with the real Upstash store:
+
+- every room action, including the Lua compare-and-set, `LPOP` with count and the relay `MGET` (≈0.6 s per call)
+- two browsers connecting peer-to-peer through Redis signaling in ~6 s, then starting a race, retiring and leaving
+
+Those preview tests never completed a lap, so nothing was submitted to the real leaderboard.
+
 ## Limitations and follow-ups
 
 - **No TURN**: strict-NAT pairs use the 3 Hz relay. If that's common, add TURN through
