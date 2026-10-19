@@ -6,6 +6,15 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+### Added
+- **Medals** on every circuit, in each direction: bronze, silver, gold and platinum target times,
+  set from the track record so they get tougher as the leaderboard gets faster. Platinum is record
+  pace.
+  - The circuit sheet shows all four targets and how far your best lap is from the next one.
+  - While you drive, the next medal's time sits under your best lap, and beating it brings up a
+    medal banner at the line.
+  - Circuit cards show the best medal you've won, and your profile counts them all.
+
 ## [0.7.0] - 2026-10-20
 
 ### Added
