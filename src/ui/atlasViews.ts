@@ -5,6 +5,7 @@ import type { TrackShape } from '../track/shape';
 import { trackArt, rotationLabel } from './trackArt';
 import { escapeHtml as esc, formatMs, timeAgo, type BoardResponse, type Dir, type FeedItem } from '../net/api';
 import type { Venue } from './world';
+import { MEDALS, MEDAL_NAME, type Medal, type Targets } from '../game/medals';
 
 export { esc };
 
@@ -64,7 +65,10 @@ export interface TrackCard {
   record?: number;
   live: number;
   pb: number | null;
+  medal?: Medal | null; // best medal you've won here
 }
+
+const medalDot = (m: Medal) => `<i class="medal m-${m}" title="${MEDAL_NAME[m]} medal" aria-label="${MEDAL_NAME[m]} medal"></i>`;
 
 export function trackCard(d: TrackCard): string {
   const { t, shape } = d;
@@ -78,7 +82,7 @@ export function trackCard(d: TrackCard): string {
     <button class="card-hit" data-track="${esc(t.id)}" aria-label="${esc(t.name)}, ${km(t.lengthM)} km"></button>
     <div class="card-art graph-paper">${trackArt(shape, { w: 228, h: 64, pad: 8, arrows: false })}</div>
     <div class="card-body">
-      <div class="card-top">${t.country ? `<span class="cc mono">${esc(t.country)}</span>` : ''}<span class="label">${tag}</span>${badge}</div>
+      <div class="card-top">${t.country ? `<span class="cc mono">${esc(t.country)}</span>` : ''}<span class="label">${tag}</span>${d.medal ? medalDot(d.medal) : ''}${badge}</div>
       <h3 class="display">${esc(t.name)}</h3>
       <p class="card-sub">${esc(place(t))} · ${km(t.lengthM)} km · ${shape.corners.length} turns</p>
       <div class="card-foot">
@@ -130,6 +134,22 @@ export interface SheetData {
   shapeOf: (t: TrackData) => TrackShape;
   countryName?: string;
   nightNow: boolean; // the sun is down at the circuit right now
+  medals: { targets: Targets; earned: Medal | null };
+}
+
+/** The four targets, what you've won, and how far your best is from the next one. */
+function medalLadder(m: SheetData['medals'], pb: number | null): string {
+  const got = m.earned ? MEDALS.indexOf(m.earned) : -1;
+  const next = MEDALS[got + 1];
+  const note = !next
+    ? 'Platinum: you’re on record pace here.'
+    : pb
+      ? `${MEDAL_NAME[next]} is <b class="mono">${((pb - m.targets[next]) / 1000).toFixed(3)} s</b> away.`
+      : `Beat <b class="mono">${formatMs(m.targets.bronze)}</b> for bronze.`;
+  return `<div class="d-medals" role="list" aria-label="Medal targets">${MEDALS.map(
+    (k, i) =>
+      `<div class="dm${i <= got ? ' got' : ''}${k === next ? ' next' : ''}" role="listitem">${medalDot(k)}<span class="label">${MEDAL_NAME[k]}</span><b class="mono">${formatMs(m.targets[k])}</b></div>`,
+  ).join('')}</div><p class="d-medal-note">${note}</p>`;
 }
 
 export function sheet(d: SheetData): string {
@@ -170,6 +190,7 @@ export function sheet(d: SheetData): string {
     ${off && canFix ? '<button class="d-warn-top" data-act="edit-start"><b>This trace is off the asphalt.</b> Fix the layout →</button>' : ''}
     <button class="btn primary lg block" data-act="race">Race <span class="arrow">→</span></button>
     <p class="d-pb">${d.pb ? `Your best <b class="mono">${formatMs(d.pb)}</b>` : 'Your first clean lap goes straight onto the board.'}</p>
+    ${medalLadder(d.medals, d.pb)}
     <div class="sec-head"><h2 class="label">Leaderboard · ${rot.label.toLowerCase()}</h2><span class="label" data-el="dCount"></span></div>
     <div class="d-live" data-el="dLive"></div>
     <div data-el="dBoard"><p class="empty">Loading…</p></div>

@@ -5,6 +5,7 @@ import { buildKart, KartPhysics, type KartVisual } from './kart';
 import { Input } from './input';
 import { KartAudio } from './audio';
 import { Atmosphere, resolveTime, saveTimePref, timePref, type TimePref } from './atmosphere';
+import { awardMedal, MEDAL_NAME, medalFor, targets } from './medals';
 import { floodlit } from './floodlights';
 import { RenderPipeline, autoQuality, initialQuality, type Quality, type QualitySetting } from './render';
 import { buildWorld, fetchLiveEnv, initialStyle, type World, type WorldStyle } from './world';
@@ -656,6 +657,11 @@ export class Race {
       this.setGhost('pb', 'Your best', this.opts.driver.color, this.pb.ghost);
       this.nextSyncAt = 0;
       this.submit();
+    }
+    // Medals in time trials, against the record on the live board (once it has loaded).
+    if (!this.opts.mode && this.board) {
+      const m = medalFor(ms, targets(this.board.entries[0]?.ms, this.opts.track.lengthM));
+      if (m && awardMedal(this.opts.track.id, this.opts.dir, m)) this.hud.banner(`${MEDAL_NAME[m]} medal`, 'medal', 2.8);
     }
   }
 

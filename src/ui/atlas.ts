@@ -9,6 +9,7 @@ import { ProfileMenu } from './profile';
 import { LayoutEditor } from './layoutEditor';
 import { api, type BoardResponse, type CommunityLayout, type Dir, type Driver, type FeedResponse } from '../net/api';
 import { localPB } from '../game/race';
+import { earnedMedal, targets } from '../game/medals';
 import { isNightAt } from '../game/sun';
 import { timePref } from '../game/atmosphere';
 import { coreBounds, distM, loadWorld, localeCountry, type Venue, type WorldIndex } from './world';
@@ -528,6 +529,7 @@ export class Atlas {
           record: rec?.ms,
           live: (this.feed?.live[`${t.id}|fwd`] ?? 0) + (this.feed?.live[`${t.id}|rev`] ?? 0),
           pb: localPB(t.id, 'fwd'),
+          medal: earnedMedal(t.id, 'fwd'),
         });
       })
       .join('');
@@ -1233,6 +1235,7 @@ export class Atlas {
       shapeOf,
       countryName: t.country ? this.countryName(t.country) : undefined,
       nightNow: isNightAt(t.center),
+      medals: { targets: targets(this.feed?.records[`${t.id}|${this.dir}`]?.ms, t.lengthM), earned: earnedMedal(t.id, this.dir) },
     });
     this.el.detail.querySelectorAll<HTMLElement>('[data-el]').forEach((e) => (this.el[e.dataset.el!] = e));
     if (this.board) this.renderBoard();

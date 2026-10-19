@@ -2,7 +2,7 @@
 import { escapeHtml, formatMs, type BoardResponse } from '../net/api';
 
 export type SectorColor = '' | 'purple' | 'green' | 'yellow';
-export type BannerKind = 'go' | 'pb' | 'warn' | 'info';
+export type BannerKind = 'go' | 'pb' | 'warn' | 'info' | 'medal';
 
 export interface SessionStats {
   laps: number;

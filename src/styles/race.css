@@ -168,6 +168,7 @@ kbd.wide { min-width: 52px; }
 .h-banner span { display: block; padding: 10px 48px; font-family: var(--display); font-stretch: 125%; font-weight: 800; font-style: italic; font-size: 34px; text-transform: uppercase; letter-spacing: 0.01em; background: var(--night); color: var(--night-text); transform: skewX(-10deg); box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.25); }
 .h-banner.go span { background: var(--signal); color: var(--ink); font-size: 64px; padding: 6px 70px; }
 .h-banner.pb span { background: var(--purple); color: #fff; }
+.h-banner.medal span { background: linear-gradient(100deg, #f6d36b, #d4a017 55%, #f6d36b); color: #141414; }
 .h-banner.warn span { background: var(--red); color: #fff; font-size: 24px; }
 .h-banner.info span { font-size: 22px; font-style: normal; border-left: 4px solid var(--signal); }
 
