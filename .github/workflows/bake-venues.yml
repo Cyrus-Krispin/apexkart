@@ -1,0 +1,37 @@
+# Pre-stitches every world-map venue's kart layouts from OpenStreetMap (scripts/build-venues.ts)
+# and uploads them as an artifact: public/tracks/venues/*.json plus the filtered world.json.
+# Run it from the Actions tab (or `gh workflow run bake-venues.yml`), download the artifact,
+# check it, and commit it. It runs here rather than locally because it makes a few hundred
+# Overpass queries.
+name: Bake venue layouts
+
+on:
+  workflow_dispatch:
+    inputs:
+      cells:
+        description: 'Only these 5° cells, comma-separated (e.g. 10_0,10_-1). Empty = all.'
+        required: false
+        default: ''
+
+jobs:
+  bake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - name: Bake
+        env:
+          CELLS: ${{ inputs.cells }}
+        run: |
+          if [ -n "$CELLS" ]; then npm run venues -- --cells "$CELLS"; else npm run venues; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: venues
+          path: |
+            public/tracks/venues/
+            public/tracks/world.json
+          retention-days: 7
