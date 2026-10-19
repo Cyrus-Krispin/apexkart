@@ -6,6 +6,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-20
+
 ### Added
 - **Challenge links.** Once you're on a circuit's leaderboard, **Challenge a friend** copies a link
   (or opens the share sheet on a phone). It opens the circuit with your lap waiting as a ghost to
@@ -191,7 +193,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 ### Fixed
 - Leaderboard and lap submission on the live site.
 
-[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.6.0...v0.7.0
