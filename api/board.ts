@@ -1,7 +1,8 @@
-// GET /api/board?track=&dir=&limit=&pid=&name=&color=
+// GET /api/board?track=&dir=&limit=&pid=&name=&color=&tn=&c=
 // Top lap times for one track/direction, plus who is on track right now.
-// Passing pid/name/color also registers the caller as "on track" (a heartbeat).
-import { getStore, K, json, bad, TRACK_RE, PID_RE, isDir, cleanName, cleanColor, LIVE_WINDOW_MS } from './_lib/store.js';
+// Passing pid/name/color also registers the caller as "on track" (a heartbeat); tn/c (track
+// name and "lat,lon" centre) let the live feed show where they are.
+import { getStore, K, json, bad, TRACK_RE, PID_RE, isDir, cleanName, cleanColor, cleanTrackName, parseCenter, LIVE_WINDOW_MS } from './_lib/store.js';
 
 export async function GET(req: Request) {
   const q = new URL(req.url).searchParams;
@@ -14,10 +15,13 @@ export async function GET(req: Request) {
   const pid = q.get('pid');
 
   if (pid && PID_RE.test(pid)) {
+    const trackName = cleanTrackName(q.get('tn'));
+    const center = parseCenter(q.get('c'));
     await Promise.all([
       db.zadd(K.live(track, dir), now, pid),
       db.zadd(K.liveAll, now, `${track}|${dir}|${pid}`),
       db.hset(K.names, pid, JSON.stringify({ name: cleanName(q.get('name')), color: cleanColor(q.get('color')) })),
+      trackName && center ? db.hsetnx(K.trackInfo, track, JSON.stringify({ name: trackName, center })) : null,
     ]);
   }
   await db.zremrangebyscore(K.live(track, dir), 0, now - LIVE_WINDOW_MS);

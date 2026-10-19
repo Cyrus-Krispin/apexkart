@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "tracks": "node --experimental-strip-types scripts/fetch-tracks.ts",
+    "world": "node --experimental-strip-types scripts/build-world.ts",
     "release": "node --experimental-strip-types scripts/release.ts",
     "version:check": "node --experimental-strip-types scripts/release.ts --check"
   },

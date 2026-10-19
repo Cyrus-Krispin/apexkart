@@ -4,15 +4,16 @@ Browser kart racing on **real tracks**. Track layouts come from OpenStreetMap, t
 under them is real satellite imagery, and every lap feeds a live worldwide leaderboard with
 ghost replays.
 
-Start with **KF1 Karting Circuit, Singapore**, or fly anywhere on the map, hit
-**Find kart tracks here**, and race any kart track that someone has mapped on OSM.
+Start with **KF1 Karting Circuit, Singapore**, or pick any of the 5,784 kart tracks on the
+world map (every one mapped on OSM) and race it.
 
 ## Design
 
-The UI uses a style I call "Paddock Paper": the home screen reads like a printed race programme crossed
-with a map atlas, with warm paper, ink, signal orange, real circuit outlines on graph paper, Archivo
-Expanded for display type and JetBrains Mono for numerals. In the race, the HUD switches to dark
-broadcast-style timing panels with F1 sector colours. Tokens live in `src/styles/base.css`.
+The UI uses a style I call "Paddock Paper": warm paper, ink, signal orange, real circuit outlines on
+graph paper, Archivo Expanded for display type and JetBrains Mono for numerals. The home screen is
+"race control": a dark world map with every kart track as a signal-orange dot, and paper cards laid
+over it like a race programme on the pit wall. In the race, the HUD switches to dark broadcast-style
+timing panels with F1 sector colours. Tokens live in `src/styles/base.css`.
 
 ## Features
 
@@ -43,8 +44,11 @@ broadcast-style timing panels with F1 sector colours. Tokens live in `src/styles
   synchronised start, positions and results). Peer-to-peer over WebRTC; see [MULTIPLAYER.md](MULTIPLAYER.md).
 - **Live leaderboard**: per-track top 10, "who's on track now" presence, and a global feed
   of the latest laps.
-- **Circuit atlas**: search filters circuits as you type, or flies to any city and scans it for tracks.
-  Each circuit has a programme page with numbered turns, rotation and the live board.
+- **World map** (`src/ui/atlas.ts`): every kart venue on OpenStreetMap (`public/tracks/world.json`,
+  baked by `npm run world`) as a dot; tap one and its layouts load from Overpass. Country filters,
+  a rail of circuits with one-tap racing, **Race now** (Enter) for your last circuit, live pins where
+  people are driving, and one search box for circuits, countries, venues and cities. Each circuit has
+  a sheet with numbered turns, its other layouts, rotation and the live board.
 - **Pre-race briefing**: the circuit drawing animates in while satellite tiles load, alongside
   controls and rules, then you press any key to go.
 - Keyboard, gamepad and touch controls; synthesized engine and tyre audio; skid marks;
@@ -69,6 +73,7 @@ npm install
 npm run dev        # http://localhost:5173 (the /api routes run inside Vite too)
 npm run build      # typecheck + production build
 npm run tracks     # re-bake preset tracks + surroundings (falls back to the OSM API if Overpass is down)
+npm run world      # re-bake the world map's kart venue index from Overpass
 ```
 
 In dev, the leaderboard lives in memory and resets when the server restarts.

@@ -6,6 +6,19 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+### Added
+- **A new home screen built around a world map** of 5,784 kart tracks in 153 countries, from
+  OpenStreetMap. Tap any dot and its layout loads, ready to race.
+  - **Race now**: one tap, or Enter, puts you on the grid at the circuit you raced last.
+  - Country filters along the bottom, with every country one click away.
+  - A rail of circuits you can flick through, each with a ▶ to race it straight away.
+  - Pins pulse where people are driving, and Live timing shows who's on track and where.
+  - One search box for circuits, countries, venues and any city.
+  - Venues with several layouts show each one, so you can pick.
+
+### Changed
+- The home screen's intro text is gone. The map, the dock and the circuit sheet say it with less.
+
 ## [0.4.1] - 2026-10-20
 
 ### Added
