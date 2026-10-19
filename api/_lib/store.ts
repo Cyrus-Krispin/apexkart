@@ -46,10 +46,18 @@ function redisStore(url: string, token: string): Store {
     },
     async hmget(k, fs) {
       if (!fs.length) return [];
-      const res = (await r.hmget(k, ...fs)) as Record<string, string | null> | null;
-      return fs.map((f) => (res?.[f] ?? null) as string | null);
+      // With automaticDeserialization off, Upstash returns the raw array; accept either shape.
+      const res = (await r.hmget(k, ...fs)) as unknown;
+      const vals = Array.isArray(res) ? res : fs.map((f) => (res as Record<string, unknown> | null)?.[f] ?? null);
+      return vals.map((v) => (v == null ? null : typeof v === 'string' ? v : JSON.stringify(v)));
     },
-    hgetall: async (k) => ((await r.hgetall(k)) as Record<string, string> | null) ?? {},
+    async hgetall(k) {
+      const res = (await r.hgetall(k)) as unknown;
+      const out: Record<string, string> = {};
+      if (Array.isArray(res)) for (let i = 0; i + 1 < res.length; i += 2) out[String(res[i])] = String(res[i + 1]);
+      else for (const [f, v] of Object.entries((res as Record<string, unknown>) ?? {})) out[f] = typeof v === 'string' ? v : JSON.stringify(v);
+      return out;
+    },
     async set(k, v, o) {
       const res = o?.nx ? await r.set(k, v, o.ex ? { nx: true, ex: o.ex } : { nx: true }) : await r.set(k, v, o?.ex ? { ex: o.ex } : undefined);
       return res === 'OK';
