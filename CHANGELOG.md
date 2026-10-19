@@ -6,6 +6,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-20
+
 ### Added
 - **Night races with friends**: the host picks Day or Night in the room lobby, next to direction
   and laps, and everyone in the room races at that time of day. Your own Day/Night choice for solo
@@ -95,7 +97,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 ### Fixed
 - Leaderboard and lap submission on the live site.
 
-[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.1.0...v0.2.0
