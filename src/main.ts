@@ -4,6 +4,7 @@ import './styles/race.css';
 import { Atlas } from './ui/atlas';
 import { Race } from './game/race';
 import { loadDriver } from './net/api';
+import { initChangelog } from './ui/changelog';
 
 const driver = await loadDriver();
 const atlasRoot = document.getElementById('atlas')!;
@@ -29,3 +30,6 @@ const atlas = new Atlas({
     });
   },
 });
+
+// What's new (#/changelog) and the version link in the top bar.
+initChangelog({ entryParent: atlasRoot.querySelector<HTMLElement>('.top-right') });
