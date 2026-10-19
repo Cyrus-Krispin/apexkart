@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import type { EnvData } from '../../track/env';
 import type { TrackModel } from '../track';
-import { centroid, hashString, pointInPolygon, polygonArea, projectRing, rng, type Pt } from './common';
+import { footprintTouchesTrack, hashString, pointInPolygon, polygonArea, projectRing, rng, type Pt } from './common';
 
 const WALLS = ['#ece6da', '#e4ddcf', '#d6d2c9', '#ddd7cb', '#e8d2b8', '#cfd8cc', '#d9bfae', '#c9d1d8', '#efe9df', '#d8d0c0'];
 const ROOFS = ['#8d8a83', '#7a7873', '#9a968d', '#6f6d68', '#a08670'];
@@ -73,9 +73,8 @@ export function buildBuildings(track: TrackModel, env: EnvData | null, seed: str
     if (area < 0) pts = pts.reverse(); // consistent winding: positive area = clockwise seen from above
     const A = Math.abs(area);
     if (A < 8) continue;
-    const [cx, cz] = centroid(pts);
-    // Never build on the circuit.
-    if (!track.clearOfTrack(cx, cz, track.halfWidth + 2)) continue;
+    // Never build on the circuit (canopies and long sheds are often mapped over the asphalt).
+    if (footprintTouchesTrack(track, pts)) continue;
 
     let h = b.h;
     if (!h) {

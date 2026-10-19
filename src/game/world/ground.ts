@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import type { EnvData, AreaKind, LineKind } from '../../track/env';
 import type { TrackModel } from '../track';
-import { Land, projectRing, rng, type Extent, type LandClass, type Pt } from './common';
+import { footprintTouchesTrack, Land, projectRing, rng, type Extent, type LandClass, type Pt } from './common';
 
 export const GROUND = {
   grass: '#7da457',
@@ -176,17 +176,18 @@ export class GroundPainter {
         if (kind === 'rail') for (const l of lines) stroke(l, 3.2, '#4f4338', null, false, [0.35, 0.55]);
         if (kind === 'major') for (const l of lines) stroke(l, 0.25, '#efe9da', null, false, [3, 6]);
       }
-      // Contact shadows where buildings meet the ground.
+      // Contact shadows where buildings meet the ground (skipping any that overlap the circuit,
+      // which the building builder drops too).
+      const standing = env.buildings.map((b) => projectRing(this.track, b.p)).filter((pts) => pts.length > 2 && !footprintTouchesTrack(this.track, pts));
       g.save();
       g.filter = `blur(${Math.max(2, 3 * R)}px)`;
-      for (const b of env.buildings) {
-        const pts = projectRing(this.track, b.p);
+      for (const pts of standing) {
         path(g, pts.map(([x, z]) => [x + 1.2, z + 1.2] as Pt), R, true);
         g.fillStyle = 'rgba(20,25,10,0.45)';
         g.fill();
       }
       g.restore();
-      for (const b of env.buildings) fill(projectRing(this.track, b.p), '#9c998f', Land.Building);
+      for (const pts of standing) fill(pts, '#9c998f', Land.Building);
     }
 
     // The circuit's own surroundings: mowed runoff with stripes aligned to the

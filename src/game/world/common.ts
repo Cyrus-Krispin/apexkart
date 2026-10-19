@@ -39,6 +39,42 @@ export function centroid(p: Pt[]): Pt {
   return [x / p.length, z / p.length];
 }
 
+/**
+ * True when a footprint overlaps the circuit: any edge comes within the track corridor
+ * (half width + margin) or the centreline passes underneath it. Checking only the centroid
+ * misses long buildings and canopies mapped over the asphalt.
+ */
+export function footprintTouchesTrack(track: TrackModel, pts: Pt[], margin = 1.5): boolean {
+  const r = track.halfWidth + margin;
+  let x0 = Infinity,
+    x1 = -Infinity,
+    z0 = Infinity,
+    z1 = -Infinity;
+  for (const [x, z] of pts) {
+    x0 = Math.min(x0, x);
+    x1 = Math.max(x1, x);
+    z0 = Math.min(z0, z);
+    z1 = Math.max(z1, z);
+  }
+  for (let i = 0; i < track.n; i++) {
+    const x = track.px[i];
+    const z = track.pz[i];
+    if (x < x0 - r || x > x1 + r || z < z0 - r || z > z1 + r) continue;
+    if (pointInPolygon(x, z, pts)) return true;
+  }
+  for (let k = 0; k < pts.length; k++) {
+    const [ax, az] = pts[k];
+    const [bx, bz] = pts[(k + 1) % pts.length];
+    const len = Math.hypot(bx - ax, bz - az);
+    const steps = Math.max(1, Math.ceil(len));
+    for (let sI = 0; sI <= steps; sI++) {
+      const t = sI / steps;
+      if (!track.clearOfTrack(ax + (bx - ax) * t, az + (bz - az) * t, r)) return true;
+    }
+  }
+  return false;
+}
+
 /** Small deterministic PRNG so a track always looks the same. */
 export function rng(seed: number) {
   let s = seed >>> 0 || 1;
