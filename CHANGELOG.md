@@ -15,6 +15,10 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
   - Live race positions, lap X/N and a results screen.
   - Karts talk to each other directly (WebRTC). When two networks can't connect directly,
     the game relays positions through the server instead.
+- **Night sessions**: race any circuit under the floodlights, as KF1 runs in real life.
+  - Choose Day or Night on the pre-race screen, or switch from **Time of day** in the pause menu.
+  - Starry sky, warm light pools under every floodlight and a headlight on your kart.
+  - Kerbs, edge lines and the tyre-wall belt stay readable through every corner.
 
 ## [0.3.0] - 2026-10-19
 
