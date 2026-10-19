@@ -6,6 +6,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-20
+
 ### Changed
 - **Most tracks on the world map now open instantly.** Their layouts are prepared ahead of time
   instead of being fetched from OpenStreetMap when you tap a dot. That covers four in five venues
@@ -208,7 +210,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 ### Fixed
 - Leaderboard and lap submission on the live site.
 
-[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.10.1...HEAD
+[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.8.0...v0.9.0
