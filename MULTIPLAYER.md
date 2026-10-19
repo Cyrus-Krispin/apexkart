@@ -23,7 +23,7 @@ players turn out to be common (see *Limitations*).
   single `signal` call into the peer's Redis inbox. The *later joiner* always makes the offer, so
   there's never glare.
 - **STUN only** (`stun.l.google.com`, `stun.cloudflare.com`: public, no key). Symmetric NAT / CGNAT
-  pairs (common on mobile data) can't connect without TURN. Once an attempt fails (after ~10–25 s), that pair
+  pairs (common on mobile data) can't connect without TURN. After two failed attempts (~25–30 s), that pair
   uses the **relay**: during a race, each such player posts its pose to `/api/room` (`relay`) about
   3×/s and reads the others'. Remote karts stay usable thanks to extrapolation (median error ≈1 m
   in tests) but look less smooth. The lobby shows each link as `● 12 ms` (direct), `● relayed`

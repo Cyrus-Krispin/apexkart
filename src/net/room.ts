@@ -251,14 +251,15 @@ export class RoomClient {
     return res;
   }
 
-  private apply(res: PollResponse) {
+  /** Mailbox position only moves on polls: those are the responses that actually read the inbox. */
+  private apply(res: PollResponse, fromPoll = false) {
     if (this.disposed) return;
     if (!res.state) {
       this.dispose();
       this.emit('closed', res.closed ?? 'gone');
       return;
     }
-    if (res.mailN !== undefined) this.mailN = Math.max(this.mailN, res.mailN);
+    if (fromPoll && res.mailN !== undefined) this.mailN = Math.max(this.mailN, res.mailN);
     this.state = res.state;
     this.mesh.sync(res.state.players); // before mail, so offers from new peers find their Peer
     res.mail?.forEach((m: SignalMsg) => this.mesh.handleSignal(m));
@@ -297,7 +298,7 @@ export class RoomClient {
         const me = this.lastProfile();
         if (me) return this.apply(await this.call('join', me));
       }
-      this.apply(res);
+      this.apply(res, true);
     } catch (e) {
       this.failures++;
       this.emit('net', false);

@@ -27,8 +27,10 @@ export type CtlMsg =
   | { k: 'pong'; t: number };
 
 const DEFAULT_ICE: RTCIceServer[] = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }];
-const ATTEMPT_MS = 8000; // give a connection attempt this long to open (STUN usually takes 1-4 s)
-const MAX_FAST_ATTEMPTS = 2; // from this attempt on, use the relay meanwhile and retry p2p occasionally
+// An attempt is two signaling round trips through the room API (each answered on the
+// other side's next poll) plus ICE gathering on both sides: allow for slow function starts.
+const ATTEMPT_MS = 12_000;
+const MAX_FAST_ATTEMPTS = 2; // after this many failed attempts, use the relay and retry p2p occasionally
 const SLOW_RETRY_MS = 45_000;
 const RESPONDER_WAIT_MS = 18_000; // responder gives up waiting for an offer and uses the relay meanwhile
 
@@ -157,8 +159,7 @@ class Peer {
     }
     // No answer / no open channel in time: retry a few times quickly, then use the relay
     // and keep trying p2p now and then (networks change, e.g. phone joins Wi-Fi).
-    const fast = this.fastTries < MAX_FAST_ATTEMPTS;
-    if (!fast) this.setState('relay');
+    const fast = this.fastTries <= MAX_FAST_ATTEMPTS;
     this.arm(fast ? ATTEMPT_MS : SLOW_RETRY_MS, () => {
       if (this.state === 'p2p') return;
       if (this.fastTries >= MAX_FAST_ATTEMPTS) this.setState('relay');
