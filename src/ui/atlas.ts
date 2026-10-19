@@ -339,7 +339,21 @@ export class Atlas {
 
   /** A venue's layouts: pre-stitched from the CDN, or (if it isn't baked yet) live from Overpass. */
   private async venueLayouts(v: Venue): Promise<TrackData[]> {
-    const packed = (await this.venueCell(v))?.[venueKey(v.at[0], v.at[1])];
+    const cell = await this.venueCell(v);
+    // The baker keys each venue by its dot; fall back to the nearest baked venue in the cell, so a
+    // map index from an older bake still finds its layouts.
+    let packed = cell?.[venueKey(v.at[0], v.at[1])];
+    if (!packed && cell) {
+      let best = 600;
+      for (const [k, layouts] of Object.entries(cell)) {
+        const [la, lo] = k.split(',').map(Number);
+        const d = distM([la, lo], v.at);
+        if (d < best) {
+          best = d;
+          packed = layouts;
+        }
+      }
+    }
     if (packed?.length) {
       return packed.map(([id, name, width, lengthM, pts]) => {
         const points = unpackPoints(pts);
