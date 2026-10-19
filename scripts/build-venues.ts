@@ -22,32 +22,52 @@ const world: { venues: Venue[]; countries: Record<string, unknown>; source: stri
 const onlyCells = process.argv.includes('--cells') ? new Set(process.argv[process.argv.indexOf('--cells') + 1].split(',')) : null;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function raceways(cell: string, worker: number): Promise<any[]> {
-  const [cy, cx] = cell.split('_').map(Number);
+/** Raceways in one box. A box that keeps failing (too much data for a public Overpass slot) is
+ *  split into quarters, down to 1.25°, rather than retried as-is. */
+async function racewaysIn(box: [number, number, number, number], label: string, worker: number, depth = 0): Promise<any[]> {
   const pad = 0.02;
-  const bbox = [cy * CELL_DEG - pad, cx * CELL_DEG - pad, (cy + 1) * CELL_DEG + pad, (cx + 1) * CELL_DEG + pad].map((v) => v.toFixed(3)).join(',');
-  const q = `[out:json][timeout:240][maxsize:536870912];way["highway"="raceway"](${bbox});out body geom;`;
-  for (let attempt = 0; attempt < 8; attempt++) {
+  const bbox = [box[0] - pad, box[1] - pad, box[2] + pad, box[3] + pad].map((v) => v.toFixed(3)).join(',');
+  const q = `[out:json][timeout:180][maxsize:536870912];way["highway"="raceway"](${bbox});out body geom;`;
+  const attempts = depth < 2 ? 3 : 6;
+  for (let attempt = 0; attempt < attempts; attempt++) {
     const url = MIRRORS[(worker + attempt) % MIRRORS.length];
     try {
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'User-Agent': UA, Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
         body: 'data=' + encodeURIComponent(q),
-        signal: AbortSignal.timeout(300_000),
+        signal: AbortSignal.timeout(200_000),
       });
       const text = await res.text();
       if (res.ok && text.trimStart().startsWith('{')) {
         const data = JSON.parse(text);
         if (!(typeof data.remark === 'string' && /error|timed out/i.test(data.remark))) return data.elements ?? [];
       }
-      console.log(`  ${cell}: ${url.split('/')[2]} ${res.status}`);
+      console.log(`  ${label}: ${url.split('/')[2]} ${res.status}`);
     } catch (e) {
-      console.log(`  ${cell}: ${url.split('/')[2]} ${(e as Error).message}`);
+      console.log(`  ${label}: ${url.split('/')[2]} ${(e as Error).message}`);
     }
-    await sleep(5000 * (attempt + 1));
+    await sleep(4000 * (attempt + 1));
   }
-  throw new Error(`cell ${cell}: Overpass unavailable`);
+  if (depth >= 2) throw new Error(`${label}: Overpass unavailable`);
+  const [s, w, n, e] = box;
+  const mLat = (s + n) / 2;
+  const mLon = (w + e) / 2;
+  console.log(`  ${label}: splitting into quarters`);
+  const parts: [number, number, number, number][] = [
+    [s, w, mLat, mLon],
+    [s, mLon, mLat, e],
+    [mLat, w, n, mLon],
+    [mLat, mLon, n, e],
+  ];
+  const out = new Map<number, any>();
+  for (const [i, b] of parts.entries()) for (const el of await racewaysIn(b, `${label}.${i}`, worker, depth + 1)) out.set(el.id, el);
+  return [...out.values()];
+}
+
+async function raceways(cell: string, worker: number): Promise<any[]> {
+  const [cy, cx] = cell.split('_').map(Number);
+  return racewaysIn([cy * CELL_DEG, cx * CELL_DEG, (cy + 1) * CELL_DEG, (cx + 1) * CELL_DEG], cell, worker);
 }
 
 /** The layouts at one venue from the raceways around it, longest first. */
@@ -140,7 +160,9 @@ await Promise.all(
 );
 
 if (failed.length) {
-  // Never publish a half-baked map: a missing cell would drop every venue in it.
+  // Never publish a half-baked map: a missing cell would drop every venue in it. The cell files that
+  // did bake are kept (and uploaded), so a re-run only needs the failed ones.
+  writeFileSync('public/tracks/venues/failed-cells.txt', failed.join(',') + '\n');
   console.log(`\n${failed.length} cells failed (${failed.join(',')}); not rewriting world.json. Re-run with --cells ${failed.join(',')}.`);
   process.exit(1);
 }

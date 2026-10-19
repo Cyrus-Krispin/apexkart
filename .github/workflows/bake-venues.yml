@@ -29,6 +29,7 @@ jobs:
         run: |
           if [ -n "$CELLS" ]; then npm run venues -- --cells "$CELLS"; else npm run venues; fi
       - uses: actions/upload-artifact@v4
+        if: always() # partial results (and failed-cells.txt) are useful for a targeted re-run
         with:
           name: venues
           path: |
