@@ -6,6 +6,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-10-21
+
 ### Changed
 - **Clouds**: soft cumulus drift slowly across the day sky, lit on the sun side, with faint clouds at
   night. Kart paint reflects them.
@@ -498,7 +500,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 ### Fixed
 - Leaderboard and lap submission on the live site.
 
-[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.27.0...HEAD
+[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.28.0...HEAD
+[0.28.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.24.0...v0.25.0
