@@ -6,6 +6,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-20
+
 ### Changed
 - Phones can race either way up again. Starting a race no longer goes full screen or asks you to
   turn the phone sideways. Held sideways, the briefing and the race still lay out to fit.
@@ -264,7 +266,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 ### Fixed
 - Leaderboard and lap submission on the live site.
 
-[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.12.0...v0.13.0
