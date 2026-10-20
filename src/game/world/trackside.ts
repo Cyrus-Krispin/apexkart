@@ -7,6 +7,7 @@ import type { TrackModel } from '../track';
 import type { Lamp } from '../floodlights';
 import type { GroundPainter } from './ground';
 import { hashString, Land, rng } from './common';
+import { KERB_PROFILE, KERB_WIDTH, kerbRuns, kerbWidthAt } from '../kerbs';
 
 function canvasTex(w: number, h: number, draw: (g: CanvasRenderingContext2D) => void, repeat = true) {
   const c = document.createElement('canvas');
@@ -81,45 +82,38 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
     kerbTex.wrapT = THREE.RepeatWrapping;
     const pos: number[] = [];
     const uv: number[] = [];
-    const isCorner = (i: number) => Math.abs(t.curv[((i % t.n) + t.n) % t.n]) > 0.028;
-    const seen = new Uint8Array(t.n);
-    // Profile across the kerb: offset from edge (m) and height (m).
-    const prof: [number, number][] = [
-      [-0.05, 0.035],
-      [0.35, 0.1],
-      [1.0, 0.08],
-      [1.15, 0.02],
-    ];
-    for (let i = 0; i < t.n; i++) {
-      if (seen[i] || !isCorner(i)) continue;
-      let a = i;
-      while (isCorner(a - 1) && a > i - t.n) a--;
-      let b = i;
-      while (isCorner(b + 1) && b < a + t.n) b++;
-      for (let k = a; k <= b; k++) seen[((k % t.n) + t.n) % t.n] = 1;
-      for (const side of [-1, 1]) {
-        let prev: number[][] | null = null;
-        for (let k = a - 5; k <= b + 6; k++) {
-          const q = ((k % t.n) + t.n) % t.n;
-          const [nx, nz] = t.normal(q);
-          const v = (k * t.length) / t.n / 1.6;
-          const row = prof.map(([o, y]) => [t.px[q] + nx * side * (hw + o), y, t.pz[q] + nz * side * (hw + o), (o + 0.05) / 1.2, v]);
-          if (prev) {
-            for (let p = 0; p < prof.length - 1; p++) {
-              const A = prev[p];
-              const B = prev[p + 1];
-              const C = row[p + 1];
-              const D = row[p];
-              // Winding so the top faces up on either side of the track.
-              const tri = side > 0 ? [A, D, C, A, C, B] : [A, B, C, A, C, D];
-              for (const v3 of tri) {
-                pos.push(v3[0], v3[1], v3[2]);
-                uv.push(v3[3], v3[4]);
-              }
+    // Where the kerbs go is data shared with the physics (src/game/kerbs.ts): inside kerbs
+    // from turn-in to just past the apex, outside kerbs on corner exits, none on kinks or on
+    // another section of the lap.
+    for (const run of kerbRuns(t)) {
+      const side = run.side;
+      let prev: number[][] | null = null;
+      for (let k = run.i0; k <= run.i1; k++) {
+        const q = k % t.n;
+        const [nx, nz] = t.normal(q);
+        const v = (k * t.length) / t.n / 1.6;
+        const w = kerbWidthAt(t, q, side) / KERB_WIDTH;
+        // Ramp the ends down so a strip starts and stops flush with the ground (no open ends).
+        const ramp = Math.min(1, (k - run.i0 + 0.35) / 2.2, (run.i1 - k + 0.35) / 2.2);
+        const row = KERB_PROFILE.map(([o, y]) => {
+          const off = hw + (o < 0 ? o : o * w);
+          return [t.px[q] + nx * side * off, o < 0 ? y : Math.max(0.012, y * ramp), t.pz[q] + nz * side * off, (o + 0.05) / 1.2, v];
+        });
+        if (prev) {
+          for (let p = 0; p < KERB_PROFILE.length - 1; p++) {
+            const A = prev[p];
+            const B = prev[p + 1];
+            const C = row[p + 1];
+            const D = row[p];
+            // Winding so the top faces up on either side of the track.
+            const tri = side > 0 ? [A, D, C, A, C, B] : [A, B, C, A, C, D];
+            for (const v3 of tri) {
+              pos.push(v3[0], v3[1], v3[2]);
+              uv.push(v3[3], v3[4]);
             }
           }
-          prev = row;
         }
+        prev = row;
       }
     }
     if (pos.length) {
