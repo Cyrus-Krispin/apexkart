@@ -955,6 +955,7 @@ export class Race {
   // Scratch objects reused every frame (no per-frame allocations, so no GC hitches).
   private readonly v = { fwd: new THREE.Vector3(), pos: new THREE.Vector3(), look: new THREE.Vector3(), tmp: new THREE.Vector3(), up: new THREE.Vector3(0, 1, 0) };
   private prev = { x: 0, z: 0, h: 0 };
+  private body = { vf: 0, acc: 0 }; // low-passed longitudinal acceleration for the body pitch
   private alpha = 1; // how far between the last two physics steps this frame sits
   private viewW = 1;
   private viewH = 1;
@@ -972,9 +973,15 @@ export class Race {
     const heading = this.prev.h + dh * a;
     k.root.position.set(x, 0, z);
     k.root.rotation.y = heading;
-    k.body.rotation.z += (THREE.MathUtils.clamp(p.yawRate * p.forwardSpeed * 0.004, -0.07, 0.07) - k.body.rotation.z) * Math.min(1, dt * 8);
-    k.body.rotation.x += ((this.throttle ? -0.012 : 0.01) - k.body.rotation.x) * Math.min(1, dt * 5);
-    k.body.position.y = p.surface === 'grass' ? Math.sin(this.simT * 40) * 0.012 : p.surface === 'kerb' ? Math.sin(this.simT * 70) * 0.02 : 0;
+    // Body motion from the real accelerations (render only): dive under braking, squat on the power,
+    // roll that only saturates near 3 g, and on the kerb a bob at the stripe rate that follows speed.
+    const vf = p.forwardSpeed;
+    if (dt > 0) this.body.acc += (THREE.MathUtils.clamp((vf - this.body.vf) / dt, -40, 40) - this.body.acc) * (1 - Math.exp(-dt * 50));
+    this.body.vf = vf;
+    k.body.rotation.z += (THREE.MathUtils.clamp(p.yawRate * vf * 0.0028, -0.08, 0.08) - k.body.rotation.z) * Math.min(1, dt * 8);
+    k.body.rotation.x += (THREE.MathUtils.clamp(-0.0035 * this.body.acc, -0.025, 0.04) - k.body.rotation.x) * Math.min(1, dt * 8);
+    const stripe = Math.sin((Math.PI * p.s) / 0.8) > 0 ? 1 : -1;
+    k.body.position.y = p.surface === 'grass' ? Math.sin(this.simT * 40) * 0.012 : p.surface === 'kerb' ? stripe * 0.014 * Math.min(1, p.speed / 10) : 0;
     for (const f of k.frontPivots) f.rotation.y = -p.steerAngle * 1.2;
     for (const w of k.wheels) w.rotation.x = p.wheelSpin;
     const live = this.state === 'grid' || this.state === 'racing';
