@@ -105,9 +105,16 @@
 .io-rules b { font-family: var(--ui); font-weight: 700; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text); }
 
 .io-foot { grid-area: foot; display: grid; gap: 10px; padding: 12px max(var(--px), env(safe-area-inset-right, 0px)) max(20px, env(safe-area-inset-bottom, 0px)) 0; }
-.io-go { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 54px; margin: 0; padding: 0 16px; border-radius: var(--radius); background: var(--panel); border: 1.5px solid var(--line-2); font-family: var(--ui); font-weight: 700; font-size: 15px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-2); text-align: center; }
-.intro-ov.ready .io-go { background: var(--green); border-color: var(--green); color: #05170b; font-style: italic; font-weight: 800; font-size: 22px; }
-.intro-ov.ready .io-go .live-dot { display: none; }
+.io-go { height: 62px; font-size: 26px; }
+.io-go-sub { font-family: var(--mono); font-style: normal; font-weight: 500; font-size: 11px; letter-spacing: 0; text-transform: uppercase; opacity: 0.65; }
+.io-go-sub:empty { display: none; }
+.intro-ov.ready .io-go { animation: io-pulse 1.8s var(--ease) infinite; }
+/* Read-only: the medal you're chasing and the setup you picked on the circuit page */
+.io-tgt { display: flex; align-items: center; gap: 8px; margin: 0; font-family: var(--ui); font-weight: 700; font-size: 18px; letter-spacing: 0.04em; text-transform: uppercase; }
+.io-tgt .medal { width: 12px; height: 12px; }
+.io-tgt .mono { font-weight: 500; font-size: 17px; letter-spacing: -0.02em; color: var(--text-2); }
+.io-setup { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+.io-setup span { padding: 5px 10px; border-radius: 3px; background: var(--panel); font-family: var(--ui); font-weight: 700; font-size: 14px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-2); }
 @keyframes io-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(43, 212, 107, 0.45); } 60% { box-shadow: 0 0 0 12px rgba(43, 212, 107, 0); } }
 
 /* ---------- HUD */
@@ -141,21 +148,6 @@
 .h-timing footer b.invalid { color: var(--muted); }
 
 /* Ghost gap: top centre. You're the dot; the ghost of your best lap is the middle. */
-.h-gap { position: absolute; top: var(--top); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; width: 380px; height: 40px; padding: 0 12px; background: var(--hud); border-radius: var(--radius); }
-.h-gap-who { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
-.h-gap-who i { flex: none; width: 4px; height: 16px; border-radius: 1px; }
-.h-gap-who b { font-family: var(--display); font-weight: 800; font-style: italic; font-size: 17px; letter-spacing: 0.02em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.h-gap-bar { position: relative; flex: 1; min-width: 40px; height: 4px; border-radius: 2px; background: var(--panel-3); }
-.h-gap-bar::before { content: ''; position: absolute; left: 50%; top: -6px; width: 2px; height: 16px; margin-left: -1px; background: var(--text); border-radius: 1px; }
-.h-gap-bar i { position: absolute; left: 50%; top: 0; width: 50%; height: 100%; transform-origin: left; opacity: 0.55; }
-.h-gap-bar em { position: absolute; left: 50%; top: -4px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; }
-.h-delta { min-width: 60px; text-align: right; font-size: 18px; font-weight: 600; letter-spacing: -0.03em; }
-.h-gap.fast .h-gap-bar i, .h-gap.fast .h-gap-bar em { background: var(--green); }
-.h-gap.fast .h-gap-bar em { box-shadow: 0 0 8px var(--green); }
-.h-gap.fast .h-delta { color: var(--green); }
-.h-gap.slow .h-gap-bar i, .h-gap.slow .h-gap-bar em { background: var(--yellow); }
-.h-gap.slow .h-gap-bar em { box-shadow: 0 0 8px var(--yellow); }
-.h-gap.slow .h-delta { color: var(--yellow); }
 
 /* Top right: the next medal and how far off it you are, then the live timing tower. */
 .h-right { position: absolute; top: var(--top); right: var(--r); width: 268px; display: grid; gap: 6px; }
@@ -164,7 +156,6 @@
 .h-tdl { font-size: 30px; font-weight: 600; letter-spacing: -0.04em; line-height: 1.05; }
 .h-tdl.fast { color: var(--green); }
 .h-tdl.slow { color: var(--yellow); }
-.h-tsub { font-size: 11px; }
 
 .h-tower { background: var(--hud); border-radius: var(--radius); overflow: hidden; }
 .h-tower header { display: flex; justify-content: space-between; align-items: center; height: 32px; padding: 0 10px; background: rgba(6, 7, 8, 0.75); font-family: var(--ui); font-size: 13px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
@@ -206,6 +197,11 @@
 .lc-secs .yellow { background: var(--yellow); color: var(--carbon); }
 
 .h-map { position: absolute; left: var(--l); bottom: var(--b); width: 180px; height: 180px; background: var(--hud); border-radius: var(--radius); }
+.h-map canvas { display: block; width: 100%; height: 100%; }
+/* The one moving number: the gap to your best lap, on top of the map. Green ahead, red behind. */
+.h-dl { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); padding: 3px 10px 4px; border-radius: 4px; background: rgba(6, 7, 8, 0.88); font-size: 22px; font-weight: 600; letter-spacing: -0.03em; line-height: 1; white-space: nowrap; box-shadow: 0 0 0 1px var(--line-2); }
+.h-dl.fast { color: var(--green); }
+.h-dl.slow { color: #ff5a4f; }
 
 /* Speed: low in the middle */
 .h-speed { position: absolute; left: 50%; bottom: var(--b); transform: translateX(-50%); display: grid; justify-items: center; gap: 6px; }
@@ -340,7 +336,6 @@
 
 @media (max-width: 900px) {
   .h-lapcard { display: none; }
-  .h-gap { width: 300px; }
   .h-banner span { font-size: 24px; min-height: 46px; }
   .h-banner.is-go span { font-size: 54px; padding: 2px 44px 4px; }
   .h-banner.is-info span, .h-banner.is-warn span { font-size: 19px; }
@@ -368,7 +363,6 @@
 
 /* Medium widths: no room between the side panels, so the ghost gap goes under the lap panel */
 @media (min-width: 641px) and (max-width: 1079px) {
-  .h-gap { top: calc(var(--top) + 160px); left: var(--l); transform: none; width: 290px; }
   .h-lapcard { top: calc(var(--top) + 208px); }
   .h-toasts { top: 44%; }
 }
@@ -377,13 +371,11 @@
 @media (min-width: 900px) and (hover: hover) {
   .hud { --map: clamp(200px, 17vw, 260px); }
   .h-map { top: var(--top); bottom: auto; left: 50%; transform: translateX(-50%); width: var(--map); height: var(--map); box-shadow: inset 0 0 0 1px var(--line); }
-  .h-gap { top: calc(var(--top) + var(--map) + 8px); }
   .h-lights { top: calc(var(--top) + var(--map) + 56px); }
   .h-banner { top: calc(var(--top) + var(--map) + 62px); } /* GO takes the lights' place */
   .h-toasts { top: auto; bottom: calc(var(--b) + 132px); } /* race control, along the bottom above the speed */
 }
 @media (min-width: 900px) and (max-width: 1079px) and (hover: hover) {
-  .h-gap { top: calc(var(--top) + 160px); }
   .h-lights { top: calc(var(--top) + var(--map) + 10px); }
   .h-banner { top: calc(var(--top) + var(--map) + 16px); }
 }
@@ -399,14 +391,11 @@
   .h-sectors { padding: 3px 8px 7px; gap: 2px; }
   .h-sectors .sec { height: 18px; }
   .h-sectors .sec span { font-size: 10.5px; }
+  .h-timing footer { display: none; } /* last and best: in the pause menu and on the circuit page */
   .h-timing footer div { display: grid; gap: 1px; padding: 4px 8px 5px; }
   .h-timing footer .pw-k { font-size: 10px; }
   .h-timing footer b { font-size: 11.5px; }
 
-  .h-gap { gap: 8px; height: 32px; padding: 0 8px; }
-  .h-gap .pw-k { font-size: 10.5px; }
-  .h-gap-who { display: none; }
-  .h-delta { min-width: 48px; font-size: 15px; }
 
   .h-tools { top: var(--top); right: var(--r); bottom: auto; gap: 4px; }
   .h-tools button { width: 38px; height: 38px; }
@@ -417,7 +406,6 @@
   .h-target { padding: 6px 9px 7px; }
   .h-target > .pw-k { font-size: 10.5px; gap: 5px; letter-spacing: 0.1em; }
   .h-tdl { font-size: 24px; }
-  .h-tsub { font-size: 9.5px; }
 
   .h-map { left: var(--l); bottom: auto; width: 96px; height: 96px; }
   .h-lights { top: 28%; gap: 6px; padding: 7px 9px; }
@@ -443,7 +431,6 @@
 /* Upright phones: timing down the left, tools and the medal target on the right, controls along
    the bottom with the speed just above them */
 @media (max-width: 640px) {
-  .h-gap { top: calc(var(--top) + 136px); left: var(--l); transform: none; width: min(186px, calc(50vw - 18px)); }
   .h-map { top: calc(var(--top) + 176px); }
   .h-lights { top: 33%; }
   .h-banner { top: 33%; }
@@ -465,7 +452,6 @@
 /* A phone held sideways: the speed sits low in the middle, on the road between the thumbs, and
    the briefing goes into two columns with START under the right thumb */
 @media (pointer: coarse) and (max-height: 520px) {
-  .h-gap { top: var(--top); left: 50%; transform: translateX(-50%); width: min(300px, calc(100vw - 2 * 210px)); }
   .h-map { top: calc(var(--top) + 140px); width: 80px; height: 80px; }
   .h-toasts { top: calc(var(--top) + 40px); }
   .h-speed { bottom: calc(env(safe-area-inset-bottom, 0px) + 10px); }
@@ -484,12 +470,11 @@
   .io-name { font-size: 24px; margin-top: 2px; }
   .io-art { flex: 1; height: auto; }
   .io-art .track-art { inset: 4px; width: calc(100% - 8px); height: calc(100% - 8px); }
-  .io-ctl { order: -2; } .io-tod { order: -1; } /* what you'll race with first */
   .io-meta { gap: 2px 12px; margin-top: 2px; font-size: 12.5px; }
   .io-load { font-size: 11px; }
   .io-panel { overflow-y: auto; padding: 0 max(var(--px), env(safe-area-inset-right, 0px)) 6px 0; gap: 12px; }
   .io-foot { position: static; margin: 0; padding: 8px max(var(--px), env(safe-area-inset-right, 0px)) max(10px, env(safe-area-inset-bottom, 0px)) 0; background: none; border: 0; gap: 8px; }
-  .io-go { min-height: 48px; }
+  .io-go { height: 54px; font-size: 22px; }
 }
 /* Multiplayer: the race overlay's standings take the top right; the tool buttons go below them */
 @media (pointer: coarse) and (max-height: 520px) and (min-width: 641px) {

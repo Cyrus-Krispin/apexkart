@@ -13,8 +13,8 @@ import { openLayoutEditor } from './editorScreen';
 import { api, type BoardResponse, type CommunityLayout, type DailyResponse, type Dir, type Driver, type FeedResponse } from '../net/api';
 import { localPB, saveTimePref, timePref, type TimePref } from '../game/prefs';
 import { controlsPref, saveControlsPref, type ControlScheme } from '../game/input';
-import { earnedMedal, targets } from '../game/medals';
 import { isNightAt } from '../game/sun';
+import { earnedMedal, targets } from '../game/medals';
 import { primeAudio } from '../game/audio';
 import { distM, loadWorld, localeCountry, type Venue, type WorldIndex } from './world';
 import { circuitCode, stripeStyle } from './pitwall';
@@ -737,7 +737,7 @@ export class Atlas {
     const t = this.tracks.get(this.dailyId() ?? '');
     this.el.daily.innerHTML = V.dailyBar(t ? { t, msLeft: msLeftToday(), streak: dailyStreak(), board: this.daily?.track === t.id ? this.daily : null, me: this.o.driver.pid } : null);
     this.el.dailyClock = this.el.daily.querySelector('[data-el=dailyClock]') as HTMLElement;
-    if (this.selected && this.isDaily(this.selected, this.dir) && !this.closeEditor) this.renderPit();
+    if (this.selected && this.isDaily(this.selected, this.dir) && !this.closeEditor) this.renderDailyBoard();
   }
 
   private tickClock() {
@@ -756,7 +756,7 @@ export class Atlas {
     this.o.onRace(t, dir, this.isDaily(t, dir), rival);
   }
 
-  /** START: straight onto the grid. This tap is the only one, so it also unlocks the race's sound. */
+  /** RACE: onto the grid, where you set up the session and press Start. Unlock the sound on the way. */
   private start(rival?: string) {
     const t = this.selected;
     if (!t) return;
@@ -873,7 +873,16 @@ export class Atlas {
       return;
     }
     if (act === 'race') return this.start(this.rival?.pid);
-    if (act === 'challenge') return void this.shareChallenge();
+    if (act === 'challenge') {
+      if (!this.selected || !localPB(this.selected.id, this.dir)) return this.toast('Set a lap first, then challenge a friend to beat it.');
+      return void this.shareChallenge();
+    }
+    const lb = t.closest<HTMLElement>('[data-lb]')?.dataset.lb;
+    if (lb) {
+      this.el.lb?.classList.toggle('today', lb === 'today');
+      this.el.lb?.querySelectorAll<HTMLElement>('[data-lb]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.lb === lb)));
+      return;
+    }
     if (act === 'friends') {
       location.hash = '#/room';
       return;
@@ -894,17 +903,17 @@ export class Atlas {
       }
       return;
     }
+    // Setup: kept on this device, used by the next race (and changeable from the pause menu mid-race).
     const time = t.closest<HTMLElement>('[data-time]')?.dataset.time as TimePref | undefined;
-    if (time) {
-      saveTimePref(time);
-      this.renderPit();
-      return;
-    }
+    if (time) return this.setupPick('[data-time]', 'time', time, () => saveTimePref(time));
     const ctl = t.closest<HTMLElement>('[data-controls]')?.dataset.controls as ControlScheme | undefined;
-    if (ctl) {
-      saveControlsPref(ctl);
-      this.renderPit();
-    }
+    if (ctl) return this.setupPick('[data-controls]', 'controls', ctl, () => saveControlsPref(ctl));
+  }
+
+  /** Mark a setup choice in place (no re-render, so the page doesn't jump) and save it. */
+  private setupPick(sel: string, key: string, value: string, save: () => void) {
+    save();
+    this.el.pit.querySelectorAll<HTMLElement>(sel).forEach((b) => b.setAttribute('aria-pressed', String(b.dataset[key] === value)));
   }
 
   /** Open a tower row: a known circuit's pit board, or load a venue's layouts first. */
@@ -1031,29 +1040,36 @@ export class Atlas {
     if (!t) return;
     const record = this.feed?.records[`${t.id}|${this.dir}`]?.ms;
     const siblings = [...this.tracks.values()].filter((x) => x.id !== t.id && distM(x.center, t.center) < 800);
-    const mine = this.board?.entries.find((e) => e.pid === this.o.driver.pid);
+    const daily = this.isDaily(t, this.dir);
     this.el.pit.innerHTML = V.pit({
       t,
       shape: shapeOf(t),
       code: circuitCode(t.name),
       dir: this.dir,
       pb: localPB(t.id, this.dir),
-      rank: mine?.rank ?? null,
       live: this.liveOf(t.id),
       siblings,
       shapeOf,
       countryName: t.country ? this.countryName(t.country) : undefined,
-      nightNow: isNightAt(t.center),
-      medals: { targets: targets(record, t.lengthM), earned: earnedMedal(t.id, this.dir) },
-      daily: this.isDaily(t, this.dir) ? V.dailyBoard(this.daily?.track === t.id ? this.daily : null, this.o.driver.pid, msLeftToday()) : undefined,
+      medals: targets(record, t.lengthM),
+      daily,
       challenge: this.rival && this.rival.pid !== this.o.driver.pid ? { name: this.rival.name, ms: this.rival.ms } : undefined,
-      time: timePref(),
-      controls: controlsPref(),
       lapS: (record ?? t.lengthM * 80) / 1000,
+      time: timePref(),
+      nightNow: isNightAt(t.center),
+      controls: controlsPref(),
     });
     this.el.pit.querySelectorAll<HTMLElement>('[data-el]').forEach((e) => (this.el[e.dataset.el!] = e));
     this.pitRecord = record;
     if (this.board) this.renderBoard();
+    if (daily) this.renderDailyBoard();
+  }
+
+  /** Today's board on the daily circuit's page. */
+  private renderDailyBoard() {
+    const t = this.selected;
+    if (!t || !this.el.dDaily?.isConnected) return;
+    this.el.dDaily.innerHTML = V.dailyBoard(this.daily?.track === t.id ? this.daily : null, this.o.driver.pid, msLeftToday());
   }
   private pitRecord: number | undefined;
 
@@ -1063,8 +1079,7 @@ export class Atlas {
     this.el.dCount.textContent = b.count;
     this.el.dLive.innerHTML = b.live;
     this.el.dBoard.innerHTML = b.list;
-    const mine = this.board.entries.find((e) => e.pid === this.o.driver.pid);
-    if (this.el.pitRank?.isConnected) this.el.pitRank.textContent = `P${mine?.rank ?? '–'}`;
+    if (this.el.pitRank?.isConnected) this.el.pitRank.innerHTML = b.rank;
   }
 
   /** A challenge link (#/t/ID/DIR/vs/PID): look up whose lap it is. */

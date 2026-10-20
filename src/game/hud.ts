@@ -19,7 +19,6 @@ export interface SessionStats {
 
 const SPEED_SEGMENTS = 24;
 /** The ghost gap bar runs out at this many seconds either side. */
-const GAP_RANGE = 1.5;
 
 const ICON = {
   gauge: '<svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 16a8 8 0 1116 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 16l4-5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
@@ -67,9 +66,7 @@ export class Hud {
   private hintTimer = 0;
   private lightsTimer = 0;
   private boardSig = '';
-  // What the medal target panel projects from: your best, the live delta to it, and the target.
-  private bestMs: number | null = null;
-  private deltaS: number | null = null;
+  // The medal target panel: the next medal and its time.
   private goal: { medal: Medal; ms: number } | null = null;
 
   constructor(
@@ -91,18 +88,10 @@ export class Hud {
         </footer>
       </section>
 
-      <section class="h-gap" data-el="gap" hidden>
-        <span class="pw-k">Ghost</span>
-        <span class="h-gap-who"><i style="background:${escapeHtml(o.color)}"></i><b data-el="deltaLbl"></b></span>
-        <span class="h-gap-bar"><i data-el="gapFill"></i><em data-el="gapDot"></em></span>
-        <span class="h-delta mono" data-el="delta"></span>
-      </section>
-
       <div class="h-right">
         <section class="h-target" data-el="target" hidden>
           <span class="pw-k"><i class="medal" data-el="targetDot"></i><span data-el="targetK"></span></span>
           <b class="h-tdl mono" data-el="targetDl"></b>
-          <span class="pw-k h-tsub" data-el="targetSub"></span>
         </section>
 
         <section class="h-tower" data-el="tower">
@@ -113,7 +102,10 @@ export class Hud {
       </div>
       <div class="h-lapcard" data-el="lapcard"></div>
 
-      <canvas class="h-map" data-el="minimap"></canvas>
+      <div class="h-map">
+        <canvas data-el="minimap" aria-hidden="true"></canvas>
+        <b class="h-dl mono" data-el="delta" hidden title="Gap to your best lap"></b>
+      </div>
 
       <section class="h-speed">
         <div class="h-hint" data-el="hint"></div>
@@ -204,21 +196,12 @@ export class Hud {
     this.$.time.classList.toggle('invalid', invalid);
   }
 
-  /** The gap to your best lap's ghost: the bar along the top, and what the target panel projects. */
-  delta(seconds: number | null, label = 'vs your best') {
-    this.deltaS = seconds;
-    this.$.gap.hidden = seconds === null;
-    if (seconds !== null) {
-      const side = seconds < 0 ? 'fast' : 'slow';
-      this.text('delta', signed(seconds, 2));
-      this.text('deltaLbl', label.replace(/^vs\s+/i, ''));
-      this.cls('gap', `h-gap ${side}`);
-      // You're the dot, the ghost is the middle: ahead of it is to the right.
-      const x = Math.max(-1, Math.min(1, -seconds / GAP_RANGE));
-      this.$.gapDot.style.left = `${(50 + x * 50).toFixed(1)}%`;
-      this.$.gapFill.style.transform = `scaleX(${x.toFixed(3)})`;
-    }
-    this.paintTarget();
+  /** The gap to your best lap: one number on the minimap, green when you're ahead, red behind. */
+  delta(seconds: number | null) {
+    this.$.delta.hidden = seconds === null;
+    if (seconds === null) return;
+    this.text('delta', signed(seconds, 2));
+    this.cls('delta', `h-dl mono ${seconds < 0 ? 'fast' : 'slow'}`);
   }
 
   /** times[k] set when sector k is complete; `current` sector fills by `progress` 0..1. */
@@ -244,10 +227,8 @@ export class Hud {
   }
 
   best(ms: number | null) {
-    this.bestMs = ms;
     this.text('best', ms === null ? '–:––.–––' : formatMs(ms));
     this.$.best.classList.toggle('pb', ms !== null);
-    this.paintTarget();
   }
 
   /** The next medal to chase and its time; null hides the panel (all won, or not a time trial). */
@@ -256,27 +237,14 @@ export class Hud {
     this.paintTarget();
   }
 
-  /**
-   * The medal target panel: how far your lap is from the next medal. Mid-lap that's your best plus
-   * the live gap to its ghost (projected); between laps it's your best; with no lap yet, the time.
-   */
+  /** The medal target panel: the next medal and the time it takes. The only moving number is the gap on the map. */
   private paintTarget() {
     const g = this.goal;
     this.$.target.hidden = !g;
     if (!g) return;
     this.cls('targetDot', `medal ${g.medal}`);
-    if (this.bestMs === null) {
-      this.text('targetK', `${MEDAL_NAME[g.medal]} medal`);
-      this.text('targetDl', formatMs(g.ms));
-      this.text('targetSub', 'Target');
-      this.cls('targetDl', 'h-tdl mono');
-      return;
-    }
-    const gap = (this.bestMs + (this.deltaS ?? 0) * 1000 - g.ms) / 1000;
-    this.text('targetK', `${MEDAL_NAME[g.medal]} ${formatMs(g.ms)}`);
-    this.text('targetDl', signed(gap, 2));
-    this.text('targetSub', this.deltaS === null ? 'Your best' : 'Projected');
-    this.cls('targetDl', `h-tdl mono ${gap <= 0 ? 'fast' : 'slow'}`);
+    this.text('targetK', `${MEDAL_NAME[g.medal]} medal`);
+    this.text('targetDl', formatMs(g.ms));
   }
 
   speed(kmh: number, frac: number) {

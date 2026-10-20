@@ -7,9 +7,9 @@ import { cornersInRaceOrder } from '../track/shape';
 import { trackArt, rotationLabel, type ArtOptions } from './trackArt';
 import { escapeHtml as esc, formatMs, timeAgo, type BoardResponse, type DailyResponse, type Dir, type FeedItem } from '../net/api';
 import { MEDALS, MEDAL_NAME, type Medal, type Targets } from '../game/medals';
+import { stripeStyle } from './pitwall';
 import type { ControlScheme } from '../game/input';
 import type { TimePref } from '../game/prefs';
-import { stripeStyle } from './pitwall';
 
 export { esc, formatMs };
 
@@ -31,7 +31,6 @@ export const ICON = {
   pin: `<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="8" cy="8" r="2" fill="currentColor"/></svg>`,
 };
 
-const MEDAL_SHORT: Record<Medal, string> = { bronze: 'BRNZ', silver: 'SILV', gold: 'GOLD', platinum: 'PLAT' };
 const km = (m: number) => (m / 1000).toFixed(2);
 const gap = (ms: number) => `${ms < 0 ? '−' : '+'}${(Math.abs(ms) / 1000).toFixed(3)}`;
 const pad2 = (n: number) => String(n).padStart(2, '0');
@@ -101,18 +100,18 @@ export interface PitData {
   code: string;
   dir: Dir;
   pb: number | null;
-  rank: number | null; // your place on the board
   live: number;
   siblings: TrackData[]; // other layouts at the venue
   shapeOf: (t: TrackData) => TrackShape;
   countryName?: string;
-  nightNow: boolean; // at the circuit, right now
-  medals: { targets: Targets; earned: Medal | null };
-  daily?: string; // the daily board html when this is today's circuit
+  medals: Targets;
+  daily: boolean; // today's daily circuit: the leaderboard gets a Today tab
   challenge?: { name?: string; ms?: number };
-  time: TimePref;
-  controls: ControlScheme;
   lapS: number; // seconds per lap for the live dots
+  // Setup: everything you can choose before a race lives here, on the circuit page.
+  time: TimePref;
+  nightNow: boolean; // at the circuit right now, for "Live"
+  controls: ControlScheme;
 }
 
 /** The next medal to chase and how far off it you are. */
@@ -121,11 +120,17 @@ export function nextMedal(pb: number | null, t: Targets): { m: Medal; gap: numbe
   return null; // platinum done
 }
 
+const ICON_FRIENDS = `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="9" cy="8" r="3.4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M2.8 19.5c.6-3.4 3.1-5.3 6.2-5.3s5.6 1.9 6.2 5.3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M15.5 4.9a3.3 3.3 0 0 1 0 6.3M17.6 14.6c2 .7 3.3 2.4 3.7 4.9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
+const ICON_SHARE = `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 3.5v11M7.5 8 12 3.5 16.5 8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 12.5v6.5h14v-6.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
+/**
+ * The circuit page: everything before a race on one page. The track, you (best, place, medals),
+ * the leaderboard, and the setup (direction, time of day, controls). RACE takes you to the grid,
+ * which only loads and starts: there's nothing to set there.
+ */
 export function pit(d: PitData): string {
   const { t, shape } = d;
-  const rot = rotationLabel(shape, d.dir === 'rev');
   const turns = cornersInRaceOrder(shape, d.dir === 'rev').length;
-  const nx = nextMedal(d.pb, d.medals.targets);
   const where = [d.countryName, t.location?.split(',')[0]].filter(Boolean).join(' · ') || 'OpenStreetMap';
   const fixable = !t.preset || !!t.corrected;
   const fwd = rotationLabel(shape, false);
@@ -139,9 +144,9 @@ export function pit(d: PitData): string {
     <div class="pit-name">
       <span class="pw-stripe big" style="${stripeStyle(t.country)}"></span>
       <div class="pit-name-t">
-        <p class="label">${esc(where)}</p>
+        <p class="label">${d.daily ? '<b class="pit-daily-tag">TODAY’S DAILY</b> ' : ''}${esc(where)}</p>
         <h1 class="display">${esc(t.name)}</h1>
-        <p class="pit-meta mono">${km(t.lengthM)} KM · ${turns} TURNS · ${rot.icon} ${rot.label.toUpperCase()} · ${d.nightNow ? 'NIGHT' : 'DAY'} THERE NOW</p>
+        <p class="pit-meta mono">${km(t.lengthM)} KM · ${turns} TURNS</p>
       </div>
     </div>
     ${
@@ -150,12 +155,7 @@ export function pit(d: PitData): string {
         : ''
     }
     <div class="pit-track graph-paper">
-      ${art(shape, { w: 560, h: 380, pad: 34, reverse: d.dir === 'rev', turns: true, arrows: true, road: true, sectors: true, live: d.live, lapS: d.lapS })}
-      <div class="pit-dir pw-tabs" role="group" aria-label="Direction">
-        <button data-dir="fwd" aria-pressed="${d.dir === 'fwd'}">${fwd.icon} ${fwd.label}</button>
-        <button data-dir="rev" aria-pressed="${d.dir === 'rev'}">${rev.icon} ${rev.label}</button>
-      </div>
-      <div class="pit-legend"><span><i class="p"></i>S1</span><span><i class="g"></i>S2</span><span><i class="y"></i>S3</span>${d.live ? `<span><i class="w"></i>${d.live} ON TRACK</span>` : ''}</div>
+      ${art(shape, { w: 560, h: 380, pad: 30, reverse: d.dir === 'rev', turns: true, arrows: true, road: true, sectors: true, live: d.live, lapS: d.lapS })}
     </div>
     ${
       d.siblings.length
@@ -170,93 +170,116 @@ export function pit(d: PitData): string {
     }
   </div>
   <div class="pit-side">
-    <div class="pw-board" aria-label="Your pit board">
-      <div class="pw-board-in">
-        <div class="pw-board-row"><span>${esc(d.code)}</span><span class="y">${Math.round(t.lengthM)}M</span></div>
-        <div class="pw-board-row"><span data-el="pitRank">P${d.rank ?? '–'}</span><span class="sm">${d.pb ? formatMs(d.pb) : 'NO TIME'}</span></div>
-        <div class="pw-board-row">${
-          nx
-            ? `<span class="y">${MEDAL_SHORT[nx.m]}</span><span class="sm">${nx.gap !== null ? gap(nx.gap) : formatMs(d.medals.targets[nx.m])}</span>`
-            : `<span class="y">PLAT ✓</span><span class="sm">${d.pb ? formatMs(d.pb) : ''}</span>`
-        }</div>
+    ${you(d.pb, d.medals)}
+    <section class="pit-lb${d.daily ? ' has-today today' : ''}" data-el="lb">
+      <header class="pit-lb-h">
+        <span class="label">LEADERBOARD <span class="mono" data-el="dCount"></span></span>
+        ${d.daily ? `<div class="pw-tabs soft pit-lb-tabs" role="group" aria-label="Leaderboard"><button data-lb="all" aria-pressed="false">ALL TIME</button><button data-lb="today" aria-pressed="true">TODAY</button></div>` : ''}
+      </header>
+      <div class="pit-cls lb-all" data-el="dBoard"><p class="pit-empty">Loading times…</p></div>
+      ${d.daily ? `<div class="pit-cls lb-today" data-el="dDaily"><p class="pit-empty">Loading today’s times…</p></div>` : ''}
+      <p class="pit-on" data-el="dLive"></p>
+    </section>
+    <section class="pit-setup" aria-label="Setup">
+      <span class="label">SETUP</span>
+      <div class="pit-set">
+        <span class="pw-k">Direction</span>
+        <div class="pw-tabs soft" role="group" aria-label="Direction">
+          <button data-dir="fwd" aria-pressed="${d.dir === 'fwd'}">${fwd.icon} ${fwd.label}</button>
+          <button data-dir="rev" aria-pressed="${d.dir === 'rev'}">${rev.icon} ${rev.label}</button>
+        </div>
+        <span class="pw-k">Time</span>
+        <div class="pw-tabs soft" role="group" aria-label="Time of day">${(['live', 'day', 'night'] as const)
+          .map((k) => `<button data-time="${k}" aria-pressed="${d.time === k}">${k === 'live' ? `Live <small>${d.nightNow ? 'night' : 'day'}</small>` : k === 'day' ? 'Day' : 'Night'}</button>`)
+          .join('')}</div>
+        <span class="pw-k">Controls</span>
+        <div class="pw-tabs soft" role="group" aria-label="Controls">${(['simple', 'classic'] as const)
+          .map((k) => `<button data-controls="${k}" aria-pressed="${d.controls === k}">${k === 'simple' ? 'Simple <small>auto gas</small>' : 'Classic'}</button>`)
+          .join('')}</div>
       </div>
-    </div>
-    <p class="label">MEDAL TARGETS</p>
-    ${medalGrid(d.medals.targets, d.pb)}
-    ${d.daily ?? ''}
-    <p class="label pit-cls-h">CLASSIFICATION <span class="mono" data-el="dCount"></span></p>
-    <div class="pit-cls" data-el="dBoard"><p class="pit-empty">Loading times…</p></div>
-    <p class="pit-on" data-el="dLive"></p>
-    <p class="label">SESSION</p>
-    <div class="pw-tabs pit-sess" role="group" aria-label="Session">
-      <button class="on" aria-pressed="true">TIME TRIAL</button>
-      <button data-act="friends">RACE FRIENDS</button>
-      <button data-act="challenge">CHALLENGE</button>
-    </div>
-    <div class="pit-set">
-      <span class="label">TIME OF DAY</span>
-      <div class="pw-tabs soft" role="group" aria-label="Time of day">${(['live', 'day', 'night'] as const)
-        .map((k) => `<button data-time="${k}" aria-pressed="${d.time === k}">${k === 'live' ? `LIVE · ${d.nightNow ? 'NIGHT' : 'DAY'}` : k.toUpperCase()}</button>`)
-        .join('')}</div>
-      <span class="label">CONTROLS</span>
-      <div class="pw-tabs soft" role="group" aria-label="Controls">${(['simple', 'classic'] as const)
-        .map((k) => `<button data-controls="${k}" aria-pressed="${d.controls === k}">${k.toUpperCase()}</button>`)
-        .join('')}</div>
-    </div>
+    </section>
     ${fixable ? `<button class="pit-fix" data-act="edit">Layout looks wrong? <b>Fix it</b></button>` : ''}
     <div class="pit-go">
-      <button class="btn go lg block" data-act="race">START ${esc(d.code)} <kbd>↵</kbd></button>
+      <button class="btn go lg pit-start" data-act="race">RACE ${esc(d.code)} <span class="arrow">›</span></button>
+      <button class="btn pit-icon" data-act="friends" aria-label="Race friends here" title="Race friends">${ICON_FRIENDS}</button>
+      <button class="btn pit-icon" data-act="challenge" aria-label="Challenge a friend to beat your lap" title="Challenge a friend"${d.pb ? '' : ' aria-disabled="true"'}>${ICON_SHARE}</button>
     </div>
   </div>`;
 }
 
-export function medalGrid(t: Targets, pb: number | null): string {
+/**
+ * You at this circuit: your best and place, and a medal ladder. The four medals sit evenly from
+ * bronze to platinum (record pace) and you sit between the two you're between, so the next medal
+ * and how close it is read at a glance.
+ */
+export function you(pb: number | null, t: Targets): string {
+  const stops = MEDALS.map((m) => t[m]); // slowest to fastest
+  const at = (ms: number) => {
+    if (ms >= stops[0]) return 0;
+    for (let k = 1; k < stops.length; k++) if (ms >= stops[k]) return (k - 1 + (stops[k - 1] - ms) / (stops[k - 1] - stops[k] || 1)) / (stops.length - 1);
+    return 1;
+  };
   const nx = nextMedal(pb, t);
-  return `<div class="pit-med">${MEDALS.map((m) => {
-    const won = !!pb && pb <= t[m];
-    return `<div class="${won ? 'won' : ''}${nx?.m === m ? ' nx' : ''}"><i class="medal ${m}"></i><span>${MEDAL_SHORT[m]}</span><b class="mono">${formatMs(t[m])}</b><em class="mono">${won ? '✓' : pb ? gap(pb - t[m]) : ''}</em></div>`;
-  }).join('')}</div>`;
+  const marker = pb ? at(pb) : null;
+  const behind = pb !== null && pb > t.bronze;
+  const note = !pb
+    ? `Set a lap to start on the medals. <b>Bronze is ${formatMs(t.bronze)}</b>.`
+    : nx
+      ? `<i class="medal ${nx.m}"></i> <b>${MEDAL_NAME[nx.m]}</b> is ${formatMs(t[nx.m])}: find <b class="mono">${((nx.gap ?? 0) / 1000).toFixed(3)}s</b>`
+      : `<i class="medal platinum"></i> <b>All medals won.</b> Platinum is record pace.`;
+  return `<section class="pit-you">
+    <div class="you-top">
+      <div><span class="label">YOUR BEST</span><b class="you-best mono${pb ? '' : ' none'}">${pb ? formatMs(pb) : 'No time yet'}</b></div>
+      <div class="you-pos"><span class="label">POSITION</span><b data-el="pitRank">–</b></div>
+    </div>
+    <div class="ladder${behind ? ' behind' : ''}" aria-hidden="true">
+      <div class="ld-rail"><i class="ld-fill" style="transform:scaleX(${(marker ?? 0).toFixed(3)})"></i></div>
+      ${MEDALS.map((m, k) => `<span class="ld-stop${pb && pb <= t[m] ? ' won' : ''}${nx?.m === m ? ' next' : ''}" style="left:${((k / (MEDALS.length - 1)) * 100).toFixed(1)}%"><i class="medal ${m}"></i><em class="mono">${formatMs(t[m])}</em></span>`).join('')}
+      ${marker !== null ? `<span class="ld-you" style="left:${(marker * 100).toFixed(1)}%">YOU</span>` : ''}
+    </div>
+    <p class="you-next">${note}</p>
+  </section>`;
 }
 
-/** The classification: top ten, gaps to the leader, a ghost button on every lap but yours. */
-export function classification(b: BoardResponse, me: string): { count: string; live: string; list: string } {
+/** Leaderboard rows: place, colour, name, time, gap, and a ghost to race on every lap but yours. */
+export function classification(b: BoardResponse, me: string): { count: string; live: string; list: string; rank: string } {
   const lead = b.entries[0]?.ms;
   const mine = b.entries.find((e) => e.pid === me);
   return {
-    count: b.total ? `· ${b.total} DRIVER${b.total > 1 ? 'S' : ''}` : '',
+    count: b.total ? `· ${b.total}` : '',
+    rank: mine ? `P${mine.rank}<small>/${b.total}</small>` : '–',
     live: b.onTrack.length ? `<i class="live-dot"></i>ON TRACK: ${b.onTrack.map((o) => `<span><i style="background:${esc(o.color)}"></i>${esc(o.name)}</span>`).join('')}` : '',
     list: b.entries.length
-      ? `${b.entries
+      ? b.entries
           .map(
             (e, k) => `<div class="cls-row${e.pid === me ? ' you' : ''}">
               <span class="cls-p">${e.rank}</span>
               <span class="cls-bar" style="background:${esc(e.color)}"></span>
               <span class="cls-n">${esc(e.name)}${e.pid === me ? ' <em>YOU</em>' : ''}</span>
               <b class="mono${k === 0 ? ' p' : ''}">${formatMs(e.ms)}</b>
-              <span class="cls-gap mono">${k ? gap(e.ms - lead) : 'REC'}</span>
-              ${e.pid === me ? '<span></span>' : `<button class="cls-ghost" data-rival="${esc(e.pid)}" aria-label="Race ${esc(e.name)}'s ghost">GHOST</button>`}
+              <span class="cls-gap mono">${k ? gap(e.ms - lead) : ''}</span>
+              ${e.pid === me ? '<span></span>' : `<button class="cls-ghost" data-rival="${esc(e.pid)}" aria-label="Race ${esc(e.name)}'s ghost" title="Race their ghost">${ICON.ghost}</button>`}
             </div>`,
           )
-          .join('')}${mine ? `<button class="pit-share" data-act="challenge">Challenge a friend to beat your ${formatMs(mine.ms)} →</button>` : ''}`
+          .join('')
       : '<p class="pit-empty">No times yet. Set the benchmark.</p>',
   };
 }
 
+/** Today's board on the daily circuit. */
 export function dailyBoard(board: DailyResponse | null, me: string, msLeft: number): string {
-  const rows = board?.entries.slice(0, 5) ?? [];
-  return `<div class="pit-daily">
-    <div class="pit-daily-h"><span class="chq"></span><b>DAILY CIRCUIT</b><span class="mono">ENDS ${clock(msLeft)}</span></div>
-    ${
-      rows.length
-        ? rows
-            .map(
-              (e) =>
-                `<div class="cls-row${e.pid === me ? ' you' : ''}"><span class="cls-p">${e.rank}</span><span class="cls-bar" style="background:${esc(e.color)}"></span><span class="cls-n">${esc(e.name)}${e.pid === me ? ' <em>YOU</em>' : ''}</span><b class="mono">${formatMs(e.ms)}</b><span></span><span></span></div>`,
-            )
-            .join('')
-        : '<p class="pit-empty">Nobody has set a time today. Your first clean lap leads.</p>'
-    }
-  </div>`;
+  const rows = board?.entries.slice(0, 10) ?? [];
+  const lead = rows[0]?.ms;
+  return `<p class="pit-today-h mono">RESETS IN ${clock(msLeft)}</p>${
+    rows.length
+      ? rows
+          .map(
+            (e, k) =>
+              `<div class="cls-row${e.pid === me ? ' you' : ''}"><span class="cls-p">${e.rank}</span><span class="cls-bar" style="background:${esc(e.color)}"></span><span class="cls-n">${esc(e.name)}${e.pid === me ? ' <em>YOU</em>' : ''}</span><b class="mono${k === 0 ? ' p' : ''}">${formatMs(e.ms)}</b><span class="cls-gap mono">${k ? gap(e.ms - lead) : ''}</span><span></span></div>`,
+          )
+          .join('')
+      : '<p class="pit-empty">Nobody has set a time today. Your first clean lap leads.</p>'
+  }`;
 }
 
 // ------------------------------------------------------------------ search

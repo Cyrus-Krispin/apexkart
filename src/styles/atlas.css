@@ -61,6 +61,9 @@
 .pp-medals b { font-size: 13px; }
 .pp-medals .m-bronze { --m: var(--bronze); } .pp-medals .m-silver { --m: var(--silver); } .pp-medals .m-gold { --m: var(--gold); } .pp-medals .m-platinum { --m: var(--platinum); }
 .pp-none { margin: 0; font-size: 13px; color: var(--muted); }
+.pp-link { display: flex; justify-content: space-between; align-items: center; min-height: 44px; padding: 0 12px; border-radius: var(--radius); background: var(--panel-2); text-decoration: none; font-family: var(--ui); font-weight: 700; font-size: 15px; letter-spacing: 0.04em; text-transform: uppercase; }
+.pp-link .mono { font-size: 12px; color: var(--muted); text-transform: none; }
+.pp-link:hover { background: var(--panel-3); }
 
 /* ---------- The tower */
 .pw-towercol { grid-area: tower; display: flex; flex-direction: column; gap: 8px; min-height: 0; padding: 10px max(12px, env(safe-area-inset-right, 0px)) 0 max(12px, env(safe-area-inset-left, 0px)); }
@@ -163,66 +166,95 @@
 .pit-chal b { font-family: var(--display); font-weight: 800; font-style: italic; font-size: 18px; color: var(--yellow); }
 .pit-chal span { font-size: 13.5px; color: var(--text-2); }
 
-.pit-track { position: relative; padding: 46px 10px 34px; border-radius: 6px; border: 1px solid var(--line); }
-.pit-track .track-art { max-height: 42vh; }
-.pit-dir { position: absolute; top: 8px; left: 8px; right: 8px; }
-.pit-dir > button { height: 30px; font-size: 13px; }
-.pit-legend { position: absolute; left: 12px; bottom: 9px; display: flex; flex-wrap: wrap; gap: 4px 14px; font-family: var(--ui); font-weight: 700; font-size: 11.5px; letter-spacing: 0.1em; color: var(--muted); }
-.pit-legend i { display: inline-block; width: 14px; height: 4px; margin-right: 6px; vertical-align: middle; border-radius: 1px; }
-.pit-legend i.p { background: var(--purple); } .pit-legend i.g { background: var(--green); } .pit-legend i.y { background: var(--yellow); }
-.pit-legend i.w { width: 7px; height: 7px; border-radius: 50%; background: #fff; }
+.pit-daily-tag { color: var(--yellow); font-weight: 800; }
+
+/* The track, and the direction under it */
+.pit-track { position: relative; padding: 14px 10px; border-radius: 8px; border: 1px solid var(--line); }
+.pit-track .track-art { max-height: 44vh; }
 
 .pit-sibs { display: grid; gap: 6px; }
 .pit-sib-row { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
-.sib { flex: none; display: grid; justify-items: center; gap: 2px; width: 92px; padding: 6px 4px; background: var(--panel); border-radius: 3px; color: var(--muted); }
+.sib { flex: none; display: grid; justify-items: center; gap: 2px; width: 92px; padding: 6px 4px; background: var(--panel); border-radius: 4px; color: var(--muted); }
 .sib .track-art { width: 72px; height: 44px; }
 .sib .track-art .ta-line { stroke: var(--text-2); }
 .sib .mono { font-size: 11px; }
 .sib.on { box-shadow: inset 0 0 0 2px var(--yellow); color: var(--text); }
 
-.pit-side > .label { margin: 4px 0 -4px; }
-.pit-med { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
-.pit-med > div { display: grid; grid-template-columns: 9px minmax(0, 1fr); gap: 2px 6px; align-items: center; padding: 7px; background: var(--panel); border-radius: 3px; }
-.pit-med span { font-family: var(--ui); font-weight: 700; font-size: 12.5px; letter-spacing: 0.1em; color: var(--muted); }
-.pit-med b { grid-column: 1 / -1; font-size: 13px; font-weight: 500; }
-.pit-med em { grid-column: 1 / -1; font-style: normal; font-size: 11px; color: var(--dim); min-height: 13px; }
-.pit-med .won { background: #17241b; }
-.pit-med .won em { color: var(--green); }
-.pit-med .nx { box-shadow: inset 0 0 0 1.5px var(--yellow); }
-.pit-med .nx em { color: var(--yellow); }
+/* You at this circuit: best and place, then the medal ladder */
+.pit-you { display: grid; gap: 18px; padding: 16px 16px 14px; background: var(--panel); border-radius: 8px; }
+.you-top { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; }
+.you-top > div { display: grid; gap: 4px; }
+.you-best { font-size: 30px; font-weight: 600; letter-spacing: -0.04em; line-height: 1; color: var(--green); }
+.you-best.none { font-family: var(--ui); font-size: 22px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; color: var(--muted); }
+.you-pos { text-align: right; justify-items: end; }
+.you-pos b { font-family: var(--display); font-weight: 800; font-style: italic; font-size: 30px; line-height: 1; }
+.you-pos small { font-size: 16px; color: var(--muted); font-style: normal; margin-left: 2px; }
 
-.pit-cls-h .mono { letter-spacing: 0; color: var(--dim); }
-.pit-cls, .pit-daily { display: grid; gap: 3px; }
-.cls-row { display: grid; grid-template-columns: 28px 4px minmax(0, 1fr) auto 58px 58px; gap: 8px; align-items: center; height: 32px; background: var(--panel); border-radius: 3px; font-family: var(--ui); font-weight: 700; font-size: 15.5px; letter-spacing: 0.02em; text-transform: uppercase; }
-.cls-p { height: 100%; display: grid; place-items: center; background: var(--panel-3); border-radius: 3px 0 0 3px; font-style: italic; }
-.cls-bar { width: 4px; height: 20px; border-radius: 1px; }
+.ladder { position: relative; height: 54px; margin: 0 14px; }
+.ld-rail { position: absolute; left: 0; right: 0; top: 10px; height: 4px; border-radius: 2px; background: var(--panel-3); overflow: hidden; }
+.ld-fill { position: absolute; inset: 0; transform-origin: left; background: linear-gradient(90deg, var(--bronze), var(--silver), var(--gold), var(--platinum)); }
+.ld-stop { position: absolute; top: 0; display: grid; justify-items: center; gap: 8px; transform: translateX(-50%); }
+.ld-stop .medal { width: 24px; height: 24px; border: 3px solid var(--panel); box-shadow: 0 0 0 1.5px var(--m); background: var(--panel-2); }
+.ld-stop.won .medal { background: var(--m); }
+.ld-stop.next .medal { box-shadow: 0 0 0 2px var(--yellow); }
+.ld-stop em { font-style: normal; font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+.ld-stop.won em { color: var(--text-2); }
+.ld-stop.next em { color: var(--yellow); }
+.ld-stop:first-of-type { transform: translateX(-30%); }
+.ld-stop:last-of-type { transform: translateX(-70%); }
+.ld-you { position: absolute; top: -19px; transform: translateX(-50%); padding: 1px 5px; border-radius: 3px; background: var(--text); color: var(--carbon); font-family: var(--ui); font-weight: 800; font-size: 10.5px; letter-spacing: 0.1em; }
+.ld-you::after { content: ''; position: absolute; left: 50%; bottom: -4px; margin-left: -4px; border: 4px solid transparent; border-bottom: 0; border-top-color: var(--text); }
+.ladder.behind .ld-you { background: var(--muted); }
+.ladder.behind .ld-you::after { border-top-color: var(--muted); }
+.you-next { margin: 0; font-size: 14.5px; line-height: 1.45; color: var(--text-2); }
+.you-next b { color: var(--text); font-weight: 600; }
+.you-next .medal { width: 10px; height: 10px; vertical-align: 0; }
+
+/* Leaderboard */
+.pit-lb { display: grid; gap: 8px; }
+.pit-lb-h { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 34px; }
+.pit-lb-h .mono { letter-spacing: 0; color: var(--dim); }
+.pit-lb-tabs { flex: none; }
+.pit-lb-tabs > button { height: 32px; font-size: 12.5px; padding: 0 10px; }
+.pit-lb .lb-today { display: none; }
+.pit-lb.today .lb-today { display: grid; }
+.pit-lb.today .lb-all { display: none; }
+.pit-today-h { margin: 0 0 2px; font-size: 11.5px; color: var(--muted); }
+.pit-cls { display: grid; gap: 4px; }
+.cls-row { display: grid; grid-template-columns: 30px 4px minmax(0, 1fr) auto 62px 40px; gap: 10px; align-items: center; height: 40px; background: var(--panel); border-radius: 4px; font-family: var(--ui); font-weight: 700; font-size: 16px; letter-spacing: 0.02em; text-transform: uppercase; }
+.cls-p { height: 100%; display: grid; place-items: center; background: var(--panel-3); border-radius: 4px 0 0 4px; font-style: italic; }
+.cls-bar { width: 4px; height: 22px; border-radius: 1px; }
 .cls-n { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .cls-n em { margin-left: 4px; font-style: normal; font-size: 11.5px; letter-spacing: 0.1em; color: var(--yellow); }
-.cls-row b { font-size: 13px; font-weight: 500; }
+.cls-row b { font-size: 14px; font-weight: 500; }
 .cls-row b.p { color: var(--purple-text); }
-.cls-gap { font-size: 11.5px; color: var(--muted); text-align: right; }
-.cls-ghost { height: 24px; margin-right: 4px; border: 1px solid var(--line-3); border-radius: 3px; font-family: var(--ui); font-weight: 700; font-size: 11.5px; letter-spacing: 0.08em; color: var(--text-2); text-align: center; }
-.cls-ghost:hover { border-color: var(--purple); color: var(--purple-text); }
+.cls-gap { font-size: 12px; color: var(--muted); text-align: right; }
+.cls-ghost { display: grid; place-items: center; width: 34px; height: 34px; margin-right: 3px; border-radius: 4px; color: var(--muted); }
+.cls-ghost svg { width: 17px; height: 17px; }
+.cls-ghost:hover { background: var(--panel-3); color: var(--purple-text); }
 .cls-row.you { background: #2a2410; box-shadow: inset 3px 0 0 var(--yellow); }
-.pit-share { justify-self: start; margin-top: 4px; font-family: var(--ui); font-weight: 700; font-size: 14px; letter-spacing: 0.04em; color: var(--yellow); }
 .pit-on { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-family: var(--ui); font-weight: 700; font-size: 13px; letter-spacing: 0.06em; color: var(--text-2); }
 .pit-on:empty { display: none; }
 .pit-on span { display: inline-flex; align-items: center; gap: 5px; }
 .pit-on span i { width: 4px; height: 14px; border-radius: 1px; }
-.pit-empty { margin: 0; padding: 10px 0; font-size: 14px; color: var(--muted); }
-.pit-daily { padding: 8px; background: rgba(255, 214, 10, 0.06); border: 1px solid rgba(255, 214, 10, 0.35); border-radius: var(--radius); }
-.pit-daily-h { display: flex; align-items: center; gap: 10px; height: 26px; margin-bottom: 3px; font-family: var(--display); font-style: italic; }
-.pit-daily-h .chq { width: 20px; height: 20px; background-size: 10px 10px; align-self: center; }
-.pit-daily-h b { font-weight: 800; font-size: 17px; color: var(--yellow); }
-.pit-daily-h .mono { margin-left: auto; font-style: normal; font-size: 12px; color: var(--muted); }
+.pit-empty { margin: 0; padding: 12px 0; font-size: 14.5px; color: var(--muted); }
 
-.pit-set { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 12px; align-items: center; margin-top: 4px; }
-.pit-set .pw-tabs > button { height: 34px; font-size: 13.5px; }
-.pit-fix { justify-self: start; min-height: 32px; font-size: 13.5px; color: var(--muted); }
-.pit-fix b { color: var(--yellow); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+/* Setup: the only place to choose anything before a race */
+.pit-setup { display: grid; gap: 12px; padding: 14px 16px 16px; background: var(--panel); border-radius: 8px; }
+.pit-set { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 8px 12px; align-items: center; }
+.pit-set .pw-k { font-size: 11.5px; }
+.pit-set .pw-tabs > button { height: 40px; font-size: 13.5px; background: var(--panel-2); }
+.pit-set .pw-tabs > button[aria-pressed='true'] { background: var(--panel-3); }
+.pit-set .pw-tabs small { font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; opacity: 0.65; }
+.pit-fix { justify-self: center; align-self: center; min-height: 40px; font-size: 13.5px; color: var(--muted); }
+.pit-fix b { color: var(--text-2); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
 
-.pit-go { position: sticky; bottom: 0; z-index: 3; display: grid; gap: 8px; margin: 0 -16px; padding: 18px 16px calc(12px + env(safe-area-inset-bottom, 0px)); background: linear-gradient(transparent, var(--carbon) 32%); }
-.pit-go .btn kbd { margin-left: 6px; }
+/* Start, with racing friends and a challenge link beside it */
+.pit-go { position: sticky; bottom: 0; z-index: 3; display: flex; gap: 8px; margin: 0 -16px; padding: 18px 16px calc(12px + env(safe-area-inset-bottom, 0px)); background: linear-gradient(transparent, var(--carbon) 30%); }
+.pit-start { flex: 1; min-width: 0; }
+.pit-start kbd { margin-left: 6px; }
+.pit-icon { flex: none; width: 56px; height: 56px; padding: 0; }
+.pit-icon[aria-disabled='true'] { opacity: 0.4; }
 
 /* ---------- Live timing sheet */
 .pw-live {
@@ -265,6 +297,22 @@
 
 /* ---------- Phones */
 @media (max-width: 760px) {
+  /* Calmer on a phone: fewer things in the header, bigger rows, one line per circuit. */
+  .pw-top { gap: 6px; }
+  .top-right .ver-chip { display: none; }
+  .lp-k { display: none; }
+  .pw-towercol { gap: 10px; padding-top: 12px; }
+  .tw-tabs > button { height: 42px; font-size: 15px; }
+  .tw-head { display: none; }
+  .tw-list { gap: 6px; }
+  .tw-row { height: 58px; grid-template-columns: 38px 5px minmax(0, 1fr) auto 34px; gap: 10px; }
+  .tw-row .pw-pos { font-size: 19px; }
+  .tw-id .pw-code { width: 48px; font-size: 22px; }
+  .tw-nm { font-size: 16.5px; }
+  .tw-nm small { display: none; }
+  .tw-best .pw-t { font-size: 13.5px; }
+  .tw-row .pw-lv.z { visibility: hidden; }
+  .pit-main, .pit-side { gap: 16px; }
   .pw-search { display: none; }
   .pw-icon.ps-open { display: grid; margin-left: auto; }
   .search-open .pw-search { display: flex; position: absolute; left: 10px; right: 10px; bottom: 8px; max-width: none; height: 40px; z-index: 2; }
@@ -276,12 +324,11 @@
 @media (max-width: 420px) {
   .pw-logo { font-size: 20px; }
   .pw-logo .chq { display: none; }
-  .lp-on { display: none; }
   .tw-id .pw-code { width: 40px; font-size: 19px; }
-  .tw-head { grid-template-columns: 34px minmax(0, 1fr) 80px 36px; }
-  .tw-row { grid-template-columns: 34px 5px minmax(0, 1fr) 80px 36px; }
-  .cls-row { grid-template-columns: 26px 4px minmax(0, 1fr) auto 52px 54px; gap: 6px; font-size: 14.5px; }
-  .pit-med > div { padding: 6px 5px; }
+  .tw-row { grid-template-columns: 34px 5px minmax(0, 1fr) auto 30px; gap: 8px; }
+  .tw-id .pw-code { width: 42px; font-size: 20px; }
+  .cls-row { grid-template-columns: 28px 4px minmax(0, 1fr) auto 40px; gap: 8px; font-size: 15px; }
+  .cls-gap { display: none; }
 }
 
 /* ---------- Tablets: tower and pit board side by side */
@@ -302,11 +349,13 @@
   .pw-pit { display: grid; grid-template-columns: minmax(0, 1fr) 360px; overflow: hidden; }
   .pit-name h1 { font-size: clamp(28px, 2.5vw, 46px); }
   .pit-go { margin: auto -16px 0; padding: 12px 16px 14px; background: var(--carbon-2); border-top: 1px solid var(--line); }
+  .pit-icon { height: 56px; }
   .pit-main, .pit-side { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
   .pit-main { padding-bottom: 20px; }
   .pit-side { border-left: 1px solid var(--line); padding-top: 16px; }
-  .pit-track { flex: 1; min-height: 340px; display: grid; align-items: center; }
-  .pit-track .track-art { max-height: calc(100vh - 330px); }
+  .pit-track { flex: 1; min-height: 320px; display: grid; align-items: center; }
+  .pit-track .track-art { max-height: calc(100vh - 360px); }
+  .pit-side { gap: 16px; }
   .pit-go { margin-top: auto; }
   .pw-toast { bottom: 60px; }
   .pw-search { max-width: 520px; }

@@ -1,6 +1,7 @@
 import { escapeHtml, saveDriver, type Driver } from '../net/api';
 import { kartIcon } from './trackArt';
 import { MEDALS, MEDAL_NAME, medalCounts } from '../game/medals';
+import { APP_VERSION } from './changelog';
 
 export const LIVERIES = ['#ff4d00', '#141414', '#f2eee5', '#e5383b', '#ffc600', '#16a34a', '#0ea5e9', '#2f4bff', '#8b5cf6', '#ec4899'];
 
@@ -50,7 +51,8 @@ export class ProfileMenu {
         <input maxlength="16" value="${escapeHtml(this.driver.name)}" spellcheck="false" autocomplete="off" /></label>
       <div class="pp-field"><span class="label">Livery</span>
         <div class="pp-swatches">${LIVERIES.map((c) => `<button style="--c:${c}" data-c="${c}" class="${c === this.driver.color ? 'on' : ''}" aria-label="Livery ${c}"></button>`).join('')}</div></div>
-      ${this.medalRow()}`;
+      ${this.medalRow()}
+      <a class="pp-link" href="#/changelog">What’s new <span class="mono">v${APP_VERSION}</span></a>`;
     const input = this.pop.querySelector('input')!;
     input.addEventListener('input', () => {
       const v = cleanDriverName(input.value);
