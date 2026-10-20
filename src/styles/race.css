@@ -86,6 +86,8 @@
 .io-times .pw-t.io-rec { color: var(--purple-text); }
 .io-times .pw-t.none { color: var(--dim); font-family: var(--ui); font-weight: 700; font-size: 18px; letter-spacing: 0.06em; text-transform: uppercase; }
 .io-block { display: grid; gap: 8px; }
+.io-ctl .pw-k [data-el='scheme'] { color: var(--text); }
+.io-ctl .pw-k em { margin-left: 8px; font-style: normal; font-weight: 600; letter-spacing: 0.04em; text-transform: none; color: var(--dim); }
 .io-med { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
 .io-med > div { display: grid; grid-template-columns: 9px 1fr; align-items: center; gap: 3px 6px; padding: 7px 8px; background: var(--panel); border-radius: 3px; }
 .io-med span { font-family: var(--ui); font-weight: 700; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
@@ -113,7 +115,7 @@
 .io-tgt { display: flex; align-items: center; gap: 8px; margin: 0; font-family: var(--ui); font-weight: 700; font-size: 18px; letter-spacing: 0.04em; text-transform: uppercase; }
 .io-tgt .medal { width: 12px; height: 12px; }
 .io-tgt .mono { font-weight: 500; font-size: 17px; letter-spacing: -0.02em; color: var(--text-2); }
-.io-tgt em { font-style: normal; font-size: 13px; color: var(--muted); text-transform: none; }
+.io-tgt em.mono { font-style: normal; font-weight: 400; font-size: 13px; letter-spacing: 0; color: var(--muted); text-transform: none; }
 @keyframes io-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(43, 212, 107, 0.45); } 60% { box-shadow: 0 0 0 12px rgba(43, 212, 107, 0); } }
 
 /* ---------- HUD */
