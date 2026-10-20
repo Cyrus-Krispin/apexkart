@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { LatLon, TrackData } from '../track/osm';
-import { analyzeShape } from '../track/shape';
+import { analyzeShape } from '../track/shape.js'; // .js: api/lap.ts loads this file under plain Node ESM
 
 const R = 6378137;
 const SPACING = 1; // metres between centreline samples
@@ -334,6 +334,45 @@ export class TrackModel {
         }
     return true;
   }
+}
+
+/**
+ * Replays a lap's ghost (frames every `dt` s from the line, as Race records them) under the game's
+ * own rules: continuous progress, the track limits, no jumps, the whole lap, sector splits that
+ * match, no shorter than the track allows. null for a clean lap, else why not. api/lap.ts runs it
+ * on every leaderboard lap, on the circuit the lap was driven on.
+ */
+export function judgeLap(t: TrackModel, frames: { x: number; z: number }[], dt: number, sectors?: number[]): string | null {
+  if (frames.length < 20) return 'too short';
+  const L = t.length;
+  const tol = 0.3; // ghost positions are rounded to 0.1 m and the submitted geometry to ~1 cm
+  let near = t.closest(frames[0].x, frames[0].z);
+  if (Math.min(near.s, L - near.s) > 15 || near.dist > t.limit + tol) return 'does not start at the line';
+  let progress = near.s > L / 2 ? near.s - L : near.s; // metres from the line, continuous
+  let prevS = near.s;
+  let path = 0;
+  const gate: (number | null)[] = [null, null]; // time progress passed L/3 and 2L/3
+  for (let k = 1; k < frames.length; k++) {
+    const step = Math.hypot(frames[k].x - frames[k - 1].x, frames[k].z - frames[k - 1].z);
+    if (step > 45 * dt) return 'jumps'; // 45 m/s: well above the kart's top speed (27 m/s)
+    path += step;
+    near = t.follow(frames[k].x, frames[k].z, near.i);
+    if (near.dist > t.limit + tol) return `track limits at ${Math.round(Math.max(0, progress))} m`;
+    let ds = near.s - prevS;
+    if (ds > L / 2) ds -= L;
+    else if (ds < -L / 2) ds += L;
+    for (let g = 0; g < 2; g++) {
+      const b = (L * (g + 1)) / 3;
+      if (gate[g] === null && progress < b && progress + ds >= b) gate[g] = (k - 1 + (b - progress) / Math.max(1e-6, ds)) * dt;
+    }
+    progress += ds;
+    prevS = near.s;
+  }
+  if (progress < L - 15) return 'does not finish the lap';
+  if (gate[0] === null || gate[1] === null) return 'misses a sector';
+  if (sectors?.length === 3 && (Math.abs(gate[0] * 1000 - sectors[0]) > 250 || Math.abs(gate[1] * 1000 - sectors[0] - sectors[1]) > 250)) return 'sectors do not match';
+  if (path < t.minLapLength) return 'shorter than the track allows';
+  return null;
 }
 
 /**
