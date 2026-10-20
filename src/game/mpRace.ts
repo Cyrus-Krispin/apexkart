@@ -7,8 +7,11 @@ import { FINISH_GRACE_MS, type GridSlot, type PoseTuple, type RoomState } from '
 import type { RoomClient } from '../net/room';
 import { gridPose, type RaceAddon, type RaceContext, type RaceMode } from './raceMode';
 import type { KartPhysics } from './kart';
+import { LaunchHint, TowIndicator } from './hud';
 
 const SEND_MS = 50; // 20 Hz
+const RELAY_CHECK_MS = 500; // how often to ask which links are relayed (their karts are ghosts)
+const TOW_DRAG = 0.35; // a full slipstream takes this share off your air drag: +2-4 km/h on a straight
 const LIGHTS_LEAD = 3.5; // s before lights out that the first red light comes on (Race: SYNC_GO - 0.9)
 
 /**
@@ -68,6 +71,10 @@ export class MultiplayerRace implements RaceAddon {
   private final = false;
   private lastSend = 0;
   private lastHud = 0;
+  private lastRelayCheck = 0;
+  private towNow = 0; // slipstream strength this step, 0..1
+  private towChip!: TowIndicator;
+  private launchHint!: LaunchHint;
   private lastLap = 1;
   private offs: (() => void)[] = [];
 
@@ -87,11 +94,13 @@ export class MultiplayerRace implements RaceAddon {
     // Everyone waits on their grid slot until their first pose arrives.
     this.o.grid.forEach((g, i) => g.mid !== this.o.room.mid && this.karts.add(g.mid, g.name, g.color, gridPose(ctx.track, i)));
     this.overlay = new RaceOverlay(ctx.hud, { lobby: () => this.o.onLobby() });
+    this.towChip = new TowIndicator(ctx.hud);
+    this.launchHint = new LaunchHint(ctx.hud);
     const room = this.o.room;
     this.offs.push(
       room.on('pose', (mid, p) => p[9] === this.o.race && this.karts.push(mid, p)),
       room.on('ctl', (mid, m) => {
-        if (m.k === 'fin' && m.race === this.o.race) this.remoteFin.set(mid, m.ms);
+        if (m.k === 'fin' && m.race === this.o.race) this.setRemoteFin(mid, m.ms);
         if (m.k === 'bye') {
           this.gone.add(mid);
           this.karts.setGone(mid, true);
@@ -110,14 +119,20 @@ export class MultiplayerRace implements RaceAddon {
       else this.gone.add(g.mid);
       this.karts.setGone(g.mid, !here);
     }
-    for (const p of s.players) if (p.fin?.r === this.o.race) this.remoteFin.set(p.mid, p.fin.ms);
+    for (const p of s.players) if (p.fin?.r === this.o.race) this.setRemoteFin(p.mid, p.fin.ms);
     // Server closed the race (everyone done, or the grace period ran out).
     if (s.cfg.race !== this.o.race || s.cfg.phase === 'lobby') {
       this.final = true;
       const last = s.cfg.last;
-      if (last?.race === this.o.race) for (const r of last.rows) this.remoteFin.set(r.mid, r.ms);
+      if (last?.race === this.o.race) for (const r of last.rows) this.setRemoteFin(r.mid, r.ms);
       if (this.finishMs === undefined) this.finishMs = null; // out of time
     }
+  }
+
+  /** Someone took the flag (ms) or retired (null): their kart is a ghost from now on. */
+  private setRemoteFin(mid: string, ms: number | null) {
+    this.remoteFin.set(mid, ms);
+    this.karts.setFinished(mid);
   }
 
   tick(dt: number) {
@@ -131,7 +146,14 @@ export class MultiplayerRace implements RaceAddon {
         this.crossSimT = this.ctx.simT - dt * (1 - frac);
       }
     }
-    this.karts.collide(phys);
+    // Contact: no ghosts before the lights; after your flag everyone passes through you.
+    this.karts.setLocal(phys, dt, this.ctx.state === 'racing', this.finishMs !== undefined || this.crossSimT !== null);
+    // The state just stepped is one step newer than ctx.physTime (Race lowers it after tick()).
+    const now = this.o.room.clock.at(this.ctx.physTime + dt * 1000);
+    this.karts.collide(phys, now);
+    // Slipstream for the next step: only here, so a time trial's drag is always exactly 1.
+    this.towNow = this.karts.tow(phys, now);
+    phys.dragScale = 1 - TOW_DRAG * this.towNow;
   }
 
   frame(dt: number) {
@@ -161,7 +183,13 @@ export class MultiplayerRace implements RaceAddon {
       room.localPose = pose;
     }
 
+    if (perf - this.lastRelayCheck >= RELAY_CHECK_MS) {
+      this.lastRelayCheck = perf;
+      this.karts.setRelayed(room.mesh.relayPeers());
+    }
     this.karts.update(dt, now, ctx.viewW, ctx.viewH);
+    this.towChip.set(this.towNow, dt);
+    this.launchHint.update(ctx.state === 'grid');
 
     const lap = this.currentLap();
     if (lap > this.lastLap && this.finishMs === undefined) {
@@ -248,6 +276,7 @@ export class MultiplayerRace implements RaceAddon {
     this.offs.forEach((f) => f());
     this.karts?.dispose();
     this.overlay?.dispose();
+    this.towChip?.dispose();
     this.o.room.localPose = null;
   }
 }

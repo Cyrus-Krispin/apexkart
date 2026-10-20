@@ -8,6 +8,7 @@ import * as THREE from 'three';
 export interface Lamp {
   pos: THREE.Vector3; // lamp head
   dir: THREE.Vector3; // unit aim, towards the track
+  beam?: boolean; // false: something (a building) stands in the beam, so draw no light cone for it
 }
 
 /** One floodlight, shared by the baked map and the real lights so they match exactly. */
@@ -217,6 +218,46 @@ export interface RigOptions {
   pool: number; // plain lights following the nearest poles
   shadow: number; // shadow map size for the one shadow-casting floodlight, 0 for none
   glare: number; // lamp-head sprite opacity
+  cones: boolean; // faint light cones under the lamp heads (Medium and High)
+}
+
+const CONE_ANGLE = 0.42; // the visible beam's half-angle (the light itself spreads much wider)
+
+/** Faint additive beams under the lamp heads: bright at the lens, fading down the cone and at its silhouette. */
+function coneMaterial() {
+  return new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+    fog: false,
+    uniforms: { coneColor: { value: new THREE.Color(LAMP.color).multiplyScalar(0.06) } },
+    vertexShader: /* glsl */ `
+      varying float vT;
+      varying vec3 vN;
+      varying vec3 vView;
+      void main() {
+        vT = -position.y; // 0 at the lens, 1 at the end of the beam
+        mat4 m = modelMatrix * instanceMatrix;
+        vec4 w = m * vec4(position, 1.0);
+        vN = normalize(mat3(m) * normal);
+        vView = cameraPosition - w.xyz;
+        gl_Position = projectionMatrix * viewMatrix * w;
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform vec3 coneColor;
+      varying float vT;
+      varying vec3 vN;
+      varying vec3 vView;
+      void main() {
+        float d = max(length(vView), 1e-3);
+        float facing = abs(dot(normalize(vN), vView / d));
+        float t = clamp(vT, 0.0, 1.0); // (pow of a hair below zero is NaN, which bloom smears over the screen)
+        float a = facing * facing * pow(1.0 - t, 1.6) * smoothstep(0.0, 0.06, t);
+        a *= smoothstep(4.0, 16.0, d) * (1.0 - smoothstep(110.0, 240.0, d)); // never fills the screen, fades far off
+        gl_FragColor = vec4(coneColor * a, 1.0);
+      }`,
+  });
 }
 
 /** The night rig: baked pools, real lights near the kart and glare sprites on every lamp head. */
@@ -226,6 +267,9 @@ export class Floodlights {
   private pool: Slot[] = [];
   private shadow: Slot | null = null;
   private glare: THREE.Points | null = null;
+  private cones: THREE.InstancedMesh | null = null;
+  private coneMat = coneMaterial();
+  private conesOn = false;
   private glareMat = new THREE.PointsMaterial({ size: 5.5, map: glowTexture(), color: 0xfff0dc, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false });
   private baked: THREE.DataTexture | null = null;
   private empty = new THREE.DataTexture(new Uint16Array(4), 1, 1, THREE.RGBAFormat, THREE.HalfFloatType);
@@ -285,6 +329,35 @@ export class Floodlights {
     this.glare = new THREE.Points(geo, this.glareMat);
     this.glare.frustumCulled = false;
     this.group.add(this.glare);
+
+    // One instanced, open cone per lamp, apex at the lens, reaching down to the ground along its aim.
+    if (this.cones) {
+      this.group.remove(this.cones);
+      this.cones.geometry.dispose();
+      this.cones.dispose();
+      this.cones = null;
+    }
+    const beams = lamps.filter((l) => l.beam !== false);
+    if (beams.length) {
+      const cone = new THREE.ConeGeometry(Math.tan(CONE_ANGLE), 1, 18, 1, true).translate(0, -0.5, 0);
+      cone.deleteAttribute('uv');
+      const mesh = new THREE.InstancedMesh(cone, this.coneMat, beams.length);
+      const q = new THREE.Quaternion();
+      const m = new THREE.Matrix4();
+      const down = new THREE.Vector3(0, -1, 0);
+      const at = new THREE.Vector3();
+      beams.forEach((l, i) => {
+        const len = Math.min(LAMP.distance * 0.5, l.pos.y / Math.max(0.2, -l.dir.y)) * 0.92;
+        q.setFromUnitVectors(down, l.dir);
+        at.copy(l.pos).addScaledVector(l.dir, 0.25);
+        mesh.setMatrixAt(i, m.compose(at, q, new THREE.Vector3(len, len, len)));
+      });
+      mesh.computeBoundingSphere();
+      mesh.visible = this.conesOn;
+      mesh.renderOrder = 2; // after the glare-free see-through things, before the glare sprites matter
+      this.cones = mesh;
+      this.group.add(mesh);
+    }
   }
 
   /** Rebuild the real lights for a quality level. Changes light counts, so shaders recompile. */
@@ -302,6 +375,7 @@ export class Floodlights {
         l.shadow.camera.far = LAMP.distance;
         l.shadow.bias = -0.0006;
         l.shadow.normalBias = 0.03;
+        l.shadow.radius = 2;
       }
       this.group.add(l, l.target);
       return { light: l, lamp: -1, w: 0, want: false };
@@ -310,6 +384,8 @@ export class Floodlights {
     this.shadow = o.shadow ? make(o.shadow) : null;
     state.slots = THREE.MathUtils.clamp(this.slots().length, 1, MAX_SLOTS);
     this.glareMat.opacity = o.glare;
+    this.conesOn = o.cones;
+    if (this.cones) this.cones.visible = o.cones;
   }
 
   private slots(): Slot[] {
@@ -399,6 +475,9 @@ export class Floodlights {
   dispose() {
     for (const s of this.slots()) s.light.dispose();
     this.glare?.geometry.dispose();
+    this.cones?.geometry.dispose();
+    this.cones?.dispose();
+    this.coneMat.dispose();
     this.glareMat.map?.dispose();
     this.glareMat.dispose();
     this.baked?.dispose();

@@ -6,6 +6,60 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-10-21
+
+### Changed
+- **Clouds**: soft cumulus drift slowly across the day sky, lit on the sun side, with faint clouds at
+  night. Kart paint reflects them.
+- **The world has an edge**: a ring of low-poly hills with a tree line, fading into haze, so the
+  ground no longer meets the sky in a hard line.
+- **Steadier shadows**: no more crawling or shimmering edges while you drive, softer edges, and day
+  shadows keep a little sky colour.
+- **Grass**: crisper close up, with mowing stripes that follow the track and a thin seam where the
+  concrete meets the grass (Medium and High).
+- **Things sit on the ground**: a soft shadow under your kart, and darker ground at the foot of tyre
+  walls, boards and buildings.
+- **Night**: faint light beams under the floodlights (Medium and High).
+- **Kerbs** have rubber marks on the edge the tyres hit, and 1 m stripes.
+- **Phones on Low quality** do about a third less graphics work for the main picture, with simpler
+  world materials.
+
+## [0.27.0] - 2026-10-21
+
+### Added
+- **Instant flying-lap restart** in time trials: press Backspace, gamepad Select, or ↺ in the lap
+  panel. You're put about 150 m before the line at a sensible speed, with no lights, and the next
+  time you cross the line starts a clean timed lap.
+- **Chase a target**: a new Chase setting in the pause menu picks whose lap the gap beside your lap
+  time is measured against: your best, the board lap nearest your next medal, the driver one place
+  above you, or a challenge's rival. That ghost's name tag gets a yellow ring, and your choice is
+  remembered on this device.
+
+### Fixed
+- The gap beside your lap time no longer creeps up and snaps back every 10 m, and it's no longer cut
+  off on phones.
+- On phones, the map credit no longer sits over the pause menu's stats.
+
+## [0.26.0] - 2026-10-21
+
+### Added
+- **Slipstream in multiplayer**: tuck in behind another kart for a tow worth 2–4 km/h on a straight,
+  with a small Tow sign beside your speed. Time-trial ghosts never give a tow, so leaderboards are
+  unaffected.
+- With Classic controls, the multiplayer grid tells you to hold Gas: you launch at lights out.
+
+### Changed
+- **Kart-to-kart contact makes sense**: a bump costs the hitter and gives the kart in front a sensible
+  amount of speed, with a thump, a buzz and a small camera kick, instead of bouncing you both apart.
+  Karts you can't fairly hit pass through you, drawn see-through: anyone who has finished, a laggy
+  player, someone who just reset, or a kart that's stuck.
+- **The multiplayer grid is rows of two**, so every slot sits on the straight on every circuit in
+  both directions. The back of the grid no longer starts in the first corner.
+
+### Fixed
+- The cool-down lap the game drives for you after the flag stays on the track, with no "Lap invalid"
+  messages.
+
 ## [0.25.0] - 2026-10-21
 
 ### Added
@@ -446,7 +500,10 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 ### Fixed
 - Leaderboard and lap submission on the live site.
 
-[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.25.0...HEAD
+[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.28.0...HEAD
+[0.28.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.27.0...v0.28.0
+[0.27.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.26.0...v0.27.0
+[0.26.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.22.0...v0.23.0

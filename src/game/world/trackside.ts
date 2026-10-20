@@ -9,6 +9,7 @@ import { GROUND, type GroundPainter } from './ground';
 import { hashString, Land, rng } from './common';
 import { trackQuery } from '../trackQuery';
 import { APRON_WIDTH, bigStops, KERB_PROFILE, KERB_WIDTH, kerbRuns, kerbWidthAt } from '../kerbs';
+import type { MaterialFactory, WorldMaterial } from './materials';
 
 function canvasTex(w: number, h: number, draw: (g: CanvasRenderingContext2D) => void, repeat = true) {
   const c = document.createElement('canvas');
@@ -48,7 +49,7 @@ const SPONSORS: [string, string, string][] = [
 
 export interface Trackside {
   group: THREE.Group;
-  emissive: THREE.MeshStandardMaterial[]; // floodlight heads (night/bloom)
+  emissive: WorldMaterial[]; // floodlight heads (night/bloom)
   lamps: Lamp[]; // floodlight heads, aimed at the track
 }
 
@@ -140,13 +141,27 @@ export function wallRuns(t: TrackModel, ground: GroundPainter | null): { side: n
   return out;
 }
 
-export function buildTrackside(track: TrackModel, ground: GroundPainter | null, seed: string, aniso: number): Trackside {
+/** A local rectangle's corners in world x/z, for painting its contact shadow on the ground. */
+function footprint(m: THREE.Matrix4, x0: number, x1: number, z0: number, z1: number): [number, number][] {
+  const v = new THREE.Vector3();
+  return [
+    [x0, z0],
+    [x1, z0],
+    [x1, z1],
+    [x0, z1],
+  ].map(([x, z]) => {
+    v.set(x, 0, z).applyMatrix4(m);
+    return [v.x, v.z] as [number, number];
+  });
+}
+
+export function buildTrackside(track: TrackModel, ground: GroundPainter | null, seed: string, aniso: number, mat: MaterialFactory): Trackside {
   const group = new THREE.Group();
   const rand = rng(hashString(seed + ':side'));
   const t = track;
   const hw = t.halfWidth;
   const wallOff = hw + t.runoff + 0.65; // inner face, where the kart body meets the physics barrier
-  const emissive: THREE.MeshStandardMaterial[] = [];
+  const emissive: WorldMaterial[] = [];
   const lamps: Lamp[] = [];
   const at = (i: number, side: number, off: number): [number, number] => {
     const q = ((i % t.n) + t.n) % t.n;
@@ -159,20 +174,44 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
     const c = ground.classAt(x, z);
     return c !== Land.Building && c !== Land.Water;
   };
+  // A floodlight's visible beam (night, Medium/High) only where no building stands in it: a pole can
+  // stand behind a building that sits between it and the track.
+  const beamClear = (head: THREE.Vector3, dir: THREE.Vector3) => {
+    if (!ground) return true;
+    for (let d = 1; d < 30; d += 1) {
+      const y = head.y + dir.y * d;
+      if (y < 0.3) break;
+      if (ground.classAt(head.x + dir.x * d, head.z + dir.z * d) === Land.Building) return false;
+    }
+    return true;
+  };
 
   // ---------------------------------------------------------------- kerbs (raised)
   {
-    // Left half: the kerb's red and white stripes. Right half: the concrete apron, with a darker
-    // lip at its outer edge so it meets the grass with a crisp line.
-    const kerbTex = canvasTex(64, 64, (g) => {
+    // Left half: the kerb's red and white stripes, with rubber grime along the edge the tyres hit.
+    // Right half: the concrete apron, with a darker lip at its outer edge so it meets the grass
+    // with a crisp line.
+    const kerbTex = canvasTex(128, 128, (g) => {
       g.fillStyle = '#d8262c';
-      g.fillRect(0, 0, 32, 32);
+      g.fillRect(0, 0, 64, 64);
       g.fillStyle = '#f3f1ea';
-      g.fillRect(0, 32, 32, 32);
+      g.fillRect(0, 64, 64, 64);
+      // Grime: darkest at the track-side lip, gone ~0.35 m in, with a few streaks along the kerb.
+      const grd = g.createLinearGradient(0, 0, 18, 0);
+      grd.addColorStop(0, 'rgba(22,22,24,0.62)');
+      grd.addColorStop(0.45, 'rgba(22,22,24,0.26)');
+      grd.addColorStop(1, 'rgba(22,22,24,0)');
+      g.fillStyle = grd;
+      g.fillRect(0, 0, 18, 128);
+      const r = rng(77);
+      for (let k = 0; k < 26; k++) {
+        g.fillStyle = `rgba(22,22,24,${0.08 + r() * 0.14})`;
+        g.fillRect(2 + r() * 20, r() * 128, 1 + r() * 2, 10 + r() * 40);
+      }
       g.fillStyle = GROUND.apron;
-      g.fillRect(32, 0, 28, 64);
+      g.fillRect(64, 0, 56, 128);
       g.fillStyle = '#8c8678';
-      g.fillRect(60, 0, 4, 64);
+      g.fillRect(120, 0, 8, 128);
     });
     kerbTex.wrapT = THREE.RepeatWrapping;
     kerbTex.wrapS = THREE.ClampToEdgeWrapping;
@@ -191,7 +230,7 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
         // Where another section runs alongside, stop halfway so two aprons never overlap.
         const hit = tq.nearestOther(t.px[q] + nx * side * (hw + w), t.pz[q] + nz * side * (hw + w), q, hw + APRON_WIDTH + 0.05, 30);
         if (hit) w = Math.max(0.2, Math.min(w, (hw + w + hit.dist) / 2 - hw));
-        const v = (k * t.length) / t.n / 1.6;
+        const v = (k * t.length) / t.n / 2; // a red and a white stripe, 1 m each
         const row = [
           [-0.1, 36 / 64],
           [w - 0.12, 57 / 64],
@@ -203,7 +242,7 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
             const B = prev[p + 1];
             const C = row[p + 1];
             const D = row[p];
-            const tri = side > 0 ? [A, D, C, A, C, B] : [A, B, C, A, C, D];
+            const tri = side > 0 ? [A, B, C, A, C, D] : [A, D, C, A, C, B];
             for (const v3 of tri) {
               pos.push(v3[0], v3[1], v3[2]);
               uv.push(v3[3], v3[4]);
@@ -222,7 +261,7 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
       for (let k = run.i0; k <= run.i1; k++) {
         const q = k % t.n;
         const [nx, nz] = t.normal(q);
-        const v = (k * t.length) / t.n / 1.6;
+        const v = (k * t.length) / t.n / 2; // a red and a white stripe, 1 m each
         const w = kerbWidthAt(t, q, side) / KERB_WIDTH;
         // Ramp the ends down so a strip starts and stops flush with the ground (no open ends).
         const ramp = Math.min(1, (k - run.i0 + 0.35) / 2.2, (run.i1 - k + 0.35) / 2.2);
@@ -236,8 +275,8 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
             const B = prev[p + 1];
             const C = row[p + 1];
             const D = row[p];
-            // Winding so the top faces up on either side of the track.
-            const tri = side > 0 ? [A, D, C, A, C, B] : [A, B, C, A, C, D];
+            // Wound so the top faces up (counter-clockwise from above) on either side of the track.
+            const tri = side > 0 ? [A, B, C, A, C, D] : [A, D, C, A, C, B];
             for (const v3 of tri) {
               pos.push(v3[0], v3[1], v3[2]);
               uv.push(v3[3], v3[4]);
@@ -252,8 +291,9 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
       g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
       g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
       g.computeVertexNormals();
-      const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: kerbTex, roughness: 0.55, side: THREE.DoubleSide }));
-      m.receiveShadow = true; // 10 cm kerbs and a flat apron: their shadow pass isn't worth it
+      // Every face is wound to face up (see above): front faces only, half the raster work.
+      const m = new THREE.Mesh(g, mat({ map: kerbTex, roughness: 0.55 }));
+      m.receiveShadow = true; // 10 cm kerbs and a flat apron: they cast no shadow (not worth the pass)
       group.add(m);
     }
   }
@@ -302,7 +342,17 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
     };
     // Each run is walked with the track on its right, so the belt's front face (A->B->C) faces
     // the track and its texture runs left to right as seen from the kart: no mirrored text.
+    const feet: [number, number][][] = [];
     for (const { pts } of wallRuns(t, ground)) {
+      // The wall's foot for the painted contact shadow: its centreline, T/2 behind the inner face.
+      feet.push(
+        pts.map(([x, z], k) => {
+          const [ax, az] = pts[Math.max(0, k - 1)];
+          const [bx, bz] = pts[Math.min(pts.length - 1, k + 1)];
+          const L = Math.hypot(bx - ax, bz - az) || 1;
+          return [x + ((bz - az) / L) * T * 0.5, z - ((bx - ax) / L) * T * 0.5] as [number, number];
+        }),
+      );
       let u = 0;
       const corner = (k: number, ox: number, oz: number) => {
         const [x, z] = pts[k];
@@ -332,11 +382,12 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
       g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
       g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
       g.computeVertexNormals();
-      const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: belt, roughness: 0.7 }));
+      const m = new THREE.Mesh(g, mat({ map: belt, roughness: 0.7 }));
       m.castShadow = true;
       m.receiveShadow = true;
       group.add(m);
     }
+    ground?.contactLines(feet, T + 1.3, 0.42);
   }
 
   // ---------------------------------------------------------------- floodlights
@@ -367,7 +418,8 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
           poles.push(pole);
           placed.push([x, z]);
           const head = new THREE.Vector3(0, 8.7, 1.3).applyMatrix4(pole);
-          lamps.push({ pos: head, dir: new THREE.Vector3(t.px[i], 0, t.pz[i]).sub(head).normalize() });
+          const dir = new THREE.Vector3(t.px[i], 0, t.pz[i]).sub(head).normalize();
+          lamps.push({ pos: head, dir, beam: beamClear(head, dir) });
           lastS = s;
           k++;
           done = true;
@@ -382,8 +434,8 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
         tint(new THREE.BoxGeometry(0.12, 0.12, 1.6).translate(0, 8.9, 0.6), '#9aa0a6'),
         tint(new THREE.BoxGeometry(1.4, 0.5, 0.3).translate(0, 8.9, 1.3), '#2a2a2c'),
       ])!;
-      const poleMesh = new THREE.InstancedMesh(poleGeo, new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.6, roughness: 0.4 }), poles.length);
-      const lampMat = new THREE.MeshStandardMaterial({ color: 0xfff6e0, emissive: 0xfff1d0, emissiveIntensity: 0.6 });
+      const poleMesh = new THREE.InstancedMesh(poleGeo, mat({ vertexColors: true, metalness: 0.6, roughness: 0.4 }), poles.length);
+      const lampMat = mat({ color: 0xfff6e0, emissive: 0xfff1d0, emissiveIntensity: 0.6 });
       emissive.push(lampMat);
       const lamp = new THREE.InstancedMesh(new THREE.PlaneGeometry(1.2, 0.35).rotateX(Math.PI / 2 + 0.35).translate(0, 8.64, 1.3), lampMat, poles.length);
       poles.forEach((m, i) => {
@@ -456,8 +508,8 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
       }
     }
     if (faces.length) {
-      const fm = new THREE.Mesh(mergeGeometries(faces)!, new THREE.MeshStandardMaterial({ map: atlas, roughness: 0.5 }));
-      const bm = new THREE.Mesh(mergeGeometries(frames)!, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7 }));
+      const fm = new THREE.Mesh(mergeGeometries(faces)!, mat({ map: atlas, roughness: 0.5 }));
+      const bm = new THREE.Mesh(mergeGeometries(frames)!, mat({ vertexColors: true, roughness: 0.7 }));
       fm.castShadow = bm.castShadow = true;
       group.add(fm, bm);
     }
@@ -484,6 +536,7 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
     );
     const boards: THREE.BufferGeometry[] = [];
     const legs: THREE.BufferGeometry[] = [];
+    const hoardFeet: [number, number][][] = [];
     const per = Math.round(6 / (t.length / t.n));
     let k = 0;
     for (let i = 0; i < t.n; i += per) {
@@ -506,6 +559,12 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
         for (let q = 0; q < uvA.count; q++) uvA.setY(q, uvA.getY(q) > 0.5 ? v1 : v0);
         plane.rotateY(yaw).translate(x, 1.05, z);
         boards.push(plane);
+        const ax = Math.cos(yaw) * 2.8;
+        const az = -Math.sin(yaw) * 2.8;
+        hoardFeet.push([
+          [x - ax, z - az],
+          [x + ax, z + az],
+        ]);
         const back = new THREE.BoxGeometry(5.7, 1.1, 0.08).rotateY(yaw).translate(x - nx * side * -0.05, 1.05, z - nz * side * -0.05);
         legs.push(tint(back, '#2a2a2c'));
         for (const lx of [-2.4, 2.4]) {
@@ -514,13 +573,14 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
       }
     }
     if (boards.length) {
-      const bm = new THREE.Mesh(mergeGeometries(boards)!, new THREE.MeshStandardMaterial({ map: atlas, roughness: 0.5 }));
+      const bm = new THREE.Mesh(mergeGeometries(boards)!, mat({ map: atlas, roughness: 0.5 }));
       bm.castShadow = true;
       group.add(bm);
-      const lm = new THREE.Mesh(mergeGeometries(legs)!, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7 }));
+      const lm = new THREE.Mesh(mergeGeometries(legs)!, mat({ vertexColors: true, roughness: 0.7 }));
       lm.castShadow = true;
       group.add(lm);
     }
+    ground?.contactLines(hoardFeet, 1.1, 0.22);
   }
 
   // ---------------------------------------------------------------- grandstand + pits at start/finish
@@ -564,8 +624,9 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
       for (const cx of [-L / 2 + 0.4, -L / 6, L / 6, L / 2 - 0.4]) parts.push(tint(new THREE.CylinderGeometry(0.14, 0.14, 7, 8).translate(cx, 3.5, -rows * 0.9 + 0.5), '#55575c'));
       parts.push(tint(new THREE.BoxGeometry(L + 2, 0.25, rows * 0.9 + 2.4).rotateX(-0.08).translate(0, 7.0, -rows * 0.45 + 0.4), '#f2eee5'));
       parts.push(tint(new THREE.BoxGeometry(L + 2, 0.7, 0.12).translate(0, 6.7, 1.6), '#ff4d00'));
-      const stand = new THREE.Mesh(mergeGeometries(parts)!, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 }));
+      const stand = new THREE.Mesh(mergeGeometries(parts)!, mat({ vertexColors: true, roughness: 0.8 }));
       stand.applyMatrix4(frame(standSide, -4, wallOff + 2.6));
+      ground?.contactShapes([footprint(frame(standSide, -4, wallOff + 2.6), -L / 2, L / 2, -rows * 0.9 - 0.2, 0.45)], 0.9, 0.4);
       stand.castShadow = true;
       stand.receiveShadow = true;
       group.add(stand);
@@ -586,7 +647,7 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
           seats.push(base.clone().multiply(local));
           colors.push(new THREE.Color(shirts[Math.floor(rand() * shirts.length)]));
         }
-      const crowd = new THREE.InstancedMesh(new THREE.CapsuleGeometry(0.19, 0.32, 2, 6), new THREE.MeshStandardMaterial({ roughness: 0.8 }), seats.length);
+      const crowd = new THREE.InstancedMesh(new THREE.CapsuleGeometry(0.19, 0.32, 2, 6), mat({ roughness: 0.8 }), seats.length);
       seats.forEach((m, i) => {
         crowd.setMatrixAt(i, m);
         crowd.setColorAt(i, colors[i]);
@@ -614,12 +675,12 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
       const len = 30;
       const pit = new THREE.Group();
       const body = new THREE.Mesh(new THREE.BoxGeometry(len, 4.4, 8), [
-        new THREE.MeshStandardMaterial({ color: 0xe2ddd0 }),
-        new THREE.MeshStandardMaterial({ color: 0xe2ddd0 }),
-        new THREE.MeshStandardMaterial({ color: 0x8d8a83 }),
-        new THREE.MeshStandardMaterial({ color: 0x8d8a83 }),
-        new THREE.MeshStandardMaterial({ map: doors, roughness: 0.7 }),
-        new THREE.MeshStandardMaterial({ color: 0xd8d2c4 }),
+        mat({ color: 0xe2ddd0 }),
+        mat({ color: 0xe2ddd0 }),
+        mat({ color: 0x8d8a83 }),
+        mat({ color: 0x8d8a83 }),
+        mat({ map: doors, roughness: 0.7 }),
+        mat({ color: 0xd8d2c4 }),
       ]);
       body.position.set(0, 2.2, -4);
       body.castShadow = body.receiveShadow = true;
@@ -635,13 +696,14 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
         g.textBaseline = 'middle';
         g.fillText('APEXKART · PIT', 256, 30);
       }, false);
-      const signMesh = new THREE.Mesh(new THREE.PlaneGeometry(14, 1.75), new THREE.MeshStandardMaterial({ map: sign, emissive: 0xffffff, emissiveMap: sign, emissiveIntensity: 0.25 }));
+      const signMesh = new THREE.Mesh(new THREE.PlaneGeometry(14, 1.75), mat({ map: sign, emissive: 0xffffff, emissiveMap: sign, emissiveIntensity: 0.25 }));
       signMesh.position.set(0, 5.4, 0.02);
       pit.add(signMesh);
-      const signBack = new THREE.Mesh(new THREE.BoxGeometry(14.2, 1.9, 0.2), new THREE.MeshStandardMaterial({ color: 0x141414 }));
+      const signBack = new THREE.Mesh(new THREE.BoxGeometry(14.2, 1.9, 0.2), mat({ color: 0x141414 }));
       signBack.position.set(0, 5.4, -0.11);
       pit.add(signBack);
       pit.applyMatrix4(frame(pitSide, 10, wallOff + 3));
+      ground?.contactShapes([footprint(frame(pitSide, 10, wallOff + 3), -len / 2, len / 2, -8, 0)], 1.0, 0.42);
       group.add(pit);
     }
   }
@@ -649,6 +711,7 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
   // ---------------------------------------------------------------- marshal posts at the big corners
   {
     const parts: THREE.BufferGeometry[] = [];
+    const posts: [number, number][][] = [];
     let last = -999;
     for (let i = 0; i < t.n; i++) {
       const c = Math.abs(t.curv[i]);
@@ -665,16 +728,18 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
       const yaw = Math.atan2(-nx * side, -nz * side);
       const m = new THREE.Matrix4().compose(new THREE.Vector3(x, 0, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw), new THREE.Vector3(1, 1, 1));
       parts.push(tint(new THREE.BoxGeometry(1.6, 2.1, 1.6).translate(0, 1.05, 0), '#f2eee5').applyMatrix4(m));
+      posts.push(footprint(m, -0.8, 0.8, -0.8, 0.8));
       parts.push(tint(new THREE.BoxGeometry(2.0, 0.18, 2.0).translate(0, 2.2, 0), '#ff4d00').applyMatrix4(m));
       parts.push(tint(new THREE.BoxGeometry(1.2, 0.6, 0.05).translate(0, 1.4, 0.81), '#2c3843').applyMatrix4(m));
       parts.push(tint(new THREE.CylinderGeometry(0.03, 0.03, 2.4, 5).translate(0.9, 1.2, 0.9), '#9aa0a6').applyMatrix4(m));
       parts.push(tint(new THREE.BoxGeometry(0.02, 0.45, 0.65).translate(0.9, 2.1, 1.25), '#ffc600').applyMatrix4(m));
     }
     if (parts.length) {
-      const m = new THREE.Mesh(mergeGeometries(parts)!, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7 }));
+      const m = new THREE.Mesh(mergeGeometries(parts)!, mat({ vertexColors: true, roughness: 0.7 }));
       m.castShadow = true;
       group.add(m);
     }
+    ground?.contactShapes(posts, 0.6, 0.4);
   }
 
   void aniso;

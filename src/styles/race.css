@@ -276,6 +276,7 @@
 .h-loading { position: absolute; bottom: calc(var(--b) + 110px); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 5px 12px; border-radius: 3px; background: var(--hud); font-family: var(--ui); font-weight: 700; font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-2); white-space: nowrap; }
 .h-loading::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--yellow); animation: live 1.2s infinite; }
 .h-attrib { position: absolute; bottom: 3px; left: 50%; transform: translateX(-50%); font-family: var(--mono); font-size: 9.5px; color: rgba(242, 243, 245, 0.55); white-space: nowrap; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6); }
+.hud.paused .h-attrib { display: none; } /* on phones it sat over the pause menu's stats; the scene it credits is behind the menu anyway */
 
 /* ---------- Pause: the pit wall */
 .h-pause { position: absolute; inset: 0; display: flex; overflow-y: auto; padding: max(16px, env(safe-area-inset-top, 0px)) 16px max(16px, env(safe-area-inset-bottom, 0px)); background: rgba(6, 7, 8, 0.8); pointer-events: auto; animation: h-fade 0.2s; }
@@ -511,4 +512,53 @@
   .h-stuck { gap: 6px; }
   .h-reset { font-size: 18px; }
   .h-stuck-tip { padding: 4px 8px; font-size: 12px; }
+}
+
+/* ---------- Lane G (time trial): the flying-lap restart in the lap panel's header, where a race
+   shows the direction arrow (hud.ts, race.ts restartLap). Small and out of the thumbs' way; on touch
+   its hit area runs down over the lap time (nothing to press there) to about 44px. */
+.h-relap {
+  position: relative; display: inline-flex; align-items: center; gap: 6px; height: 100%; margin: 0 -12px 0 auto; padding: 0 12px 0 10px;
+  color: var(--text-2); touch-action: manipulation; transition: color 0.15s, background-color 0.15s;
+}
+.h-relap svg { flex: none; width: 16px; height: 16px; }
+.h-relap kbd { height: 16px; min-width: 18px; padding: 0 3px; font-family: var(--ui); font-size: 14px; line-height: 1; }
+@media (hover: hover) { .h-relap:hover { color: var(--text); background: rgba(242, 243, 245, 0.08); } }
+.h-relap:active svg { transform: rotate(-40deg); }
+@media (hover: none) and (pointer: coarse) {
+  .h-relap kbd { display: none; }
+  .h-relap::after { content: ''; position: absolute; inset: 0 0 -18px -8px; }
+  .h-relap svg { width: 18px; height: 18px; }
+}
+@media (max-width: 640px), (pointer: coarse) and (max-height: 520px) {
+  .h-relap { margin-right: -8px; padding: 0 10px 0 10px; }
+}
+
+/* ---------- Lane G (time trial): Chase in the pause menu (whose lap the gap is to), and the ring on
+   that ghost's tag. The value can be a long name: it gives way to the label, with an ellipsis. */
+.hp-toggles [data-el='chaseToggle'] { grid-template-columns: 20px auto minmax(0, 1fr) 10px; }
+.hp-toggles [data-el='chaseToggle'] b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+.ghost-tag.chase { box-shadow: inset 0 0 0 1.5px var(--yellow); }
+/* Phones: the lap time and the gap beside it fit the lap panel (the gap ran ~18px past its edge). */
+@media (max-width: 640px), (pointer: coarse) and (max-height: 520px) {
+  .h-time-row { gap: 5px; padding-right: 6px; }
+  .h-time { font-size: 23px; }
+  .h-dl { font-size: 14px; padding: 2px 5px 3px; }
+}
+
+/* ---------- Tow (Lane D: hud.ts TowIndicator, multiplayer only). A small chip beside the speed,
+   there only while you're in another kart's slipstream; the chevrons fill with how much of it you
+   have. Blue: air, not an action or a timing colour. */
+.h-speed-box { position: relative; }
+.h-tow {
+  position: absolute; left: calc(100% + 8px); top: 50%; display: flex; align-items: center; gap: 4px; padding: 5px 9px 5px 9px; border-radius: 3px;
+  background: var(--hud); transform: translate(-4px, -50%); opacity: 0; transition: opacity 0.25s var(--ease), transform 0.25s var(--ease); pointer-events: none;
+  font-family: var(--ui); font-weight: 700; font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--blue); white-space: nowrap;
+}
+.h-tow.on { opacity: 1; transform: translate(0, -50%); }
+.h-tow i { width: 6px; height: 6px; margin-right: -1px; border: solid var(--panel-3); border-width: 2px 2px 0 0; transform: rotate(45deg); }
+.h-tow span { margin-left: 3px; }
+.h-tow[data-n='1'] i:first-child, .h-tow[data-n='2'] i:nth-child(-n + 2), .h-tow[data-n='3'] i { border-color: var(--blue); }
+@media (max-width: 640px), (pointer: coarse) and (max-height: 520px) {
+  .h-tow { left: calc(100% + 6px); padding: 4px 7px; font-size: 12px; }
 }
