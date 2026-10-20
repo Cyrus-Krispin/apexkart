@@ -44,7 +44,7 @@ spec is [docs/pit-wall.md](docs/pit-wall.md); tokens and shared components live 
   to your PB, track limits (four wheels off), cut detection that follows the road you're on,
   wrong-way detection, and five red lights before the start.
 - **Ghosts**: race against your own PB and the top three drivers on the leaderboard, with
-  name tags.
+  name tags. **Chase** (pause menu) picks whose lap the live gap is measured against.
 - **Multiplayer**: create a room, share the link or code, and race friends live (up to 8, N laps,
   synchronised start from a two-wide grid, kart-to-kart contact, slipstream, positions and results).
   Peer-to-peer over WebRTC; see [MULTIPLAYER.md](MULTIPLAYER.md).
@@ -93,6 +93,7 @@ In every scheme:
 | Action | Keys |
 | --- | --- |
 | Reset onto track | `R` or the Reset button that appears when you're stuck (invalidates the lap), gamepad Y |
+| Restart the lap (time trial) | `Backspace`, gamepad Select, or ↺ in the lap panel |
 | Camera | `C` |
 | Ghosts on/off | `G` |
 | Mute | `M` |

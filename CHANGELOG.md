@@ -6,6 +6,20 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+### Added
+- **Instant flying-lap restart** in time trials: press Backspace, gamepad Select, or ↺ in the lap
+  panel. You're put about 150 m before the line at a sensible speed, with no lights, and the next
+  time you cross the line starts a clean timed lap.
+- **Chase a target**: a new Chase setting in the pause menu picks whose lap the gap beside your lap
+  time is measured against: your best, the board lap nearest your next medal, the driver one place
+  above you, or a challenge's rival. That ghost's name tag gets a yellow ring, and your choice is
+  remembered on this device.
+
+### Fixed
+- The gap beside your lap time no longer creeps up and snaps back every 10 m, and it's no longer cut
+  off on phones.
+- On phones, the map credit no longer sits over the pause menu's stats.
+
 ## [0.26.0] - 2026-10-21
 
 ### Added
