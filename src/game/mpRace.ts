@@ -7,9 +7,11 @@ import { FINISH_GRACE_MS, type GridSlot, type PoseTuple, type RoomState } from '
 import type { RoomClient } from '../net/room';
 import { gridPose, type RaceAddon, type RaceContext, type RaceMode } from './raceMode';
 import type { KartPhysics } from './kart';
+import { TowIndicator } from './hud';
 
 const SEND_MS = 50; // 20 Hz
 const RELAY_CHECK_MS = 500; // how often to ask which links are relayed (their karts are ghosts)
+const TOW_DRAG = 0.35; // a full slipstream takes this share off your air drag: +2-4 km/h on a straight
 const LIGHTS_LEAD = 3.5; // s before lights out that the first red light comes on (Race: SYNC_GO - 0.9)
 
 /**
@@ -70,6 +72,8 @@ export class MultiplayerRace implements RaceAddon {
   private lastSend = 0;
   private lastHud = 0;
   private lastRelayCheck = 0;
+  private towNow = 0; // slipstream strength this step, 0..1
+  private towChip!: TowIndicator;
   private lastLap = 1;
   private offs: (() => void)[] = [];
 
@@ -89,6 +93,7 @@ export class MultiplayerRace implements RaceAddon {
     // Everyone waits on their grid slot until their first pose arrives.
     this.o.grid.forEach((g, i) => g.mid !== this.o.room.mid && this.karts.add(g.mid, g.name, g.color, gridPose(ctx.track, i)));
     this.overlay = new RaceOverlay(ctx.hud, { lobby: () => this.o.onLobby() });
+    this.towChip = new TowIndicator(ctx.hud);
     const room = this.o.room;
     this.offs.push(
       room.on('pose', (mid, p) => p[9] === this.o.race && this.karts.push(mid, p)),
@@ -142,7 +147,11 @@ export class MultiplayerRace implements RaceAddon {
     // Contact: no ghosts before the lights; after your flag everyone passes through you.
     this.karts.setLocal(phys, dt, this.ctx.state === 'racing', this.finishMs !== undefined || this.crossSimT !== null);
     // The state just stepped is one step newer than ctx.physTime (Race lowers it after tick()).
-    this.karts.collide(phys, this.o.room.clock.at(this.ctx.physTime + dt * 1000));
+    const now = this.o.room.clock.at(this.ctx.physTime + dt * 1000);
+    this.karts.collide(phys, now);
+    // Slipstream for the next step: only here, so a time trial's drag is always exactly 1.
+    this.towNow = this.karts.tow(phys, now);
+    phys.dragScale = 1 - TOW_DRAG * this.towNow;
   }
 
   frame(dt: number) {
@@ -177,6 +186,7 @@ export class MultiplayerRace implements RaceAddon {
       this.karts.setRelayed(room.mesh.relayPeers());
     }
     this.karts.update(dt, now, ctx.viewW, ctx.viewH);
+    this.towChip.set(this.towNow, dt);
 
     const lap = this.currentLap();
     if (lap > this.lastLap && this.finishMs === undefined) {
@@ -263,6 +273,7 @@ export class MultiplayerRace implements RaceAddon {
     this.offs.forEach((f) => f());
     this.karts?.dispose();
     this.overlay?.dispose();
+    this.towChip?.dispose();
     this.o.room.localPose = null;
   }
 }

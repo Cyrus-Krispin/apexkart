@@ -197,6 +197,9 @@ export interface KartHit {
 const WALL_MU = 0.5;
 const WALL_E = 0.2;
 const WALL_LOSS = 0.15;
+// In a slipstream (dragScale < 1) the engine also pulls on past its usual top speed, by this many
+// m/s per unit of drag saved, so the lower drag can show: +2-4 km/h on a straight.
+const TOW_REV = 4;
 
 /** Arcade kart dynamics on a flat plane, constrained by the track's barriers. */
 export class KartPhysics {
@@ -235,6 +238,12 @@ export class KartPhysics {
    * Never set in a time trial.
    */
   kartHit: KartHit | null = null;
+  /**
+   * Air drag multiplier: below 1 in another kart's slipstream (set by the multiplayer add-on, from
+   * real karts only, never ghosts), exactly 1 otherwise, so a time trial is untouched. 1 minus this
+   * is how much tow you have (for wind streaks).
+   */
+  dragScale = 1;
   private gripLossT = 0; // after a hard wall hit: the tyres take a moment to bite again
 
   readonly vmax = 27; // ~97 km/h
@@ -304,11 +313,13 @@ export class KartPhysics {
     const kerb = this.surface === 'kerb';
     const vmax = grass ? 11 : this.vmax;
 
-    // Longitudinal
-    const engine = c.throttle * (vf < vmax ? 11 * (1 - Math.max(0, vf) / vmax) + 2.2 : 0);
+    // Longitudinal. dragScale is exactly 1 outside a slipstream, so cut = vmax and the drag term
+    // are bit-for-bit what they always were.
+    const cut = grass ? vmax : vmax + (1 - this.dragScale) * TOW_REV;
+    const engine = c.throttle * (vf < cut ? 11 * (1 - Math.max(0, vf) / vmax) + 2.2 : 0);
     let accel = engine;
     if (c.brake > 0) accel -= vf > 0.5 ? 22 * c.brake : vf > -6 ? 6 * c.brake : 0; // brake, then reverse slowly
-    accel -= 0.0028 * vf * Math.abs(vf) + (grass ? 2.5 * Math.sign(vf) + 0.12 * vf : 0.35 * Math.sign(vf));
+    accel -= 0.0028 * this.dragScale * vf * Math.abs(vf) + (grass ? 2.5 * Math.sign(vf) + 0.12 * vf : 0.35 * Math.sign(vf));
     if (c.throttle === 0 && c.brake === 0 && Math.abs(vf) < 0.4) vf = 0;
     else vf += accel * dt;
 

@@ -112,6 +112,11 @@ Lifecycle and rules (housekeeping runs lazily inside any request that loads the 
     format didn't change.
   - Safety net: a contact still closing after two impulses means the other side isn't resolving
     it (you're a ghost to them), so the karts pass through rather than one shoving the other.
+- **Slipstream** (`RemoteKarts.tow`): within 14 m behind another kart and 1.4 m of its line, both
+  over 14 m/s, your air drag falls by up to 35% (`KartPhysics.dragScale`, exactly 1 outside
+  multiplayer), worth +2–4 km/h on a straight. Only from karts you could hit (never a ghost,
+  never a pose over 250 ms old), and never from time-trial ghosts. A small **Tow** chip beside the
+  speed shows it (`hud.ts` `TowIndicator`).
 - **Progress / laps**: `MultiplayerRace` integrates distance along the centreline. It wraps at the
   line and ignores jumps no kart could make in one step, so going back and forth over the line or
   cutting across the infield earns nothing. The flag is at `laps × length`, and the crossing

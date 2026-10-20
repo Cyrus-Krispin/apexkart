@@ -51,6 +51,12 @@ const CRAWL_SPEED = 3; // m/s: below this for longer than CRAWL_T (theirs or you
 const CRAWL_T = 2; // s ...a kart is stuck or beached, not racing: it isn't a wall
 const CLEAR = 0.15; // m: a kart that was a ghost while overlapping stays one until this far apart
 const GHOST_OPACITY = 0.45;
+// Slipstream (tow): behind another kart, within TOW_LEN of it and TOW_HALF_W of its line, both
+// faster than TOW_SPEED. Strength 0..1 falls off linearly with distance and with the side offset.
+const TOW_LEN = 14; // m behind its centre
+const TOW_MIN = 1.5; // m: any nearer and you're touching
+const TOW_HALF_W = 1.4; // m either side of its line
+const TOW_SPEED = 14; // m/s, both karts; full strength from TOW_SPEED + 2
 
 interface Snap {
   t: number; // sender's server-synced ms
@@ -471,6 +477,33 @@ export class RemoteKarts {
       r.touching = true;
     }
     if (hit > HIT_MIN) phys.bump = Math.min(1, phys.bump + hit / 12);
+  }
+
+  /**
+   * How much of a slipstream you're in, 0..1, behind the karts you can race against (never a
+   * ghost, never a pose older than 250 ms: those are where they were, not where they are). `now`
+   * is the server time of your physics state, as for collide().
+   */
+  tow(phys: KartPhysics, now: number): number {
+    if (!this.racing || this.localGhost) return 0;
+    const v = phys.speed;
+    if (v <= TOW_SPEED) return 0;
+    let best = 0;
+    for (const r of this.karts.values()) {
+      if (!r.shown || r.gone || !r.snap || r.ghost || r.clearing || now - r.snap.t > MAX_AGE) continue;
+      const o = target(r.snap, now);
+      const pace = THREE.MathUtils.clamp((Math.min(v, Math.hypot(o.vx, o.vz)) - TOW_SPEED) / 2, 0, 1);
+      if (pace <= 0) continue;
+      const fx = Math.sin(o.h);
+      const fz = Math.cos(o.h);
+      const dx = phys.x - o.x;
+      const dz = phys.z - o.z;
+      const behind = -(dx * fx + dz * fz);
+      const side = Math.abs(-dx * fz + dz * fx);
+      if (behind <= TOW_MIN || behind >= TOW_LEN || side >= TOW_HALF_W) continue;
+      best = Math.max(best, (1 - behind / TOW_LEN) * (1 - side / TOW_HALF_W) * pace);
+    }
+    return best;
   }
 
   /** Debug / tests: what contact sees of each kart. */
