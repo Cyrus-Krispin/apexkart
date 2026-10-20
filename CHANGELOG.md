@@ -6,6 +6,24 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+### Added
+- **Slipstream in multiplayer**: tuck in behind another kart for a tow worth 2–4 km/h on a straight,
+  with a small Tow sign beside your speed. Time-trial ghosts never give a tow, so leaderboards are
+  unaffected.
+- With Classic controls, the multiplayer grid tells you to hold Gas: you launch at lights out.
+
+### Changed
+- **Kart-to-kart contact makes sense**: a bump costs the hitter and gives the kart in front a sensible
+  amount of speed, with a thump, a buzz and a small camera kick, instead of bouncing you both apart.
+  Karts you can't fairly hit pass through you, drawn see-through: anyone who has finished, a laggy
+  player, someone who just reset, or a kart that's stuck.
+- **The multiplayer grid is rows of two**, so every slot sits on the straight on every circuit in
+  both directions. The back of the grid no longer starts in the first corner.
+
+### Fixed
+- The cool-down lap the game drives for you after the flag stays on the track, with no "Lap invalid"
+  messages.
+
 ## [0.25.0] - 2026-10-21
 
 ### Added

@@ -46,7 +46,8 @@ spec is [docs/pit-wall.md](docs/pit-wall.md); tokens and shared components live 
 - **Ghosts**: race against your own PB and the top three drivers on the leaderboard, with
   name tags.
 - **Multiplayer**: create a room, share the link or code, and race friends live (up to 8, N laps,
-  synchronised start, positions and results). Peer-to-peer over WebRTC; see [MULTIPLAYER.md](MULTIPLAYER.md).
+  synchronised start from a two-wide grid, kart-to-kart contact, slipstream, positions and results).
+  Peer-to-peer over WebRTC; see [MULTIPLAYER.md](MULTIPLAYER.md).
 - **Live leaderboard**: per-track top 10, "who's on track now" presence, and a global feed
   of the latest laps.
 - **Timing tower** (`src/ui/atlas.ts`): the home screen ranks circuits like a timing screen.

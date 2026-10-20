@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { TrackModel } from './track';
 import { buildTrackScene, type TrackScene } from './trackMesh';
-import { buildKart, KartPhysics, type KartVisual } from './kart';
+import { buildKart, KartPhysics, type KartHit, type KartVisual } from './kart';
 import { availableSchemes, controlsPref, Input, saveControlsPref, SCHEME_LABEL, type ControlScheme } from './input';
 import { KartAudio } from './audio';
 import { KartFx, type FxFrame } from './fx';
@@ -20,6 +20,7 @@ import { decodeGhost, encodeGhost, sampleGhost, GHOST_DT, type GhostData, type G
 import type { TrackData } from '../track/osm';
 import { api, formatMs, type BoardResponse, type Dir, type Driver } from '../net/api';
 import { gridPose, type RaceContext, type RaceMode } from './raceMode';
+import { autopilot } from './autopilot';
 
 export interface RaceOptions {
   track: TrackData;
@@ -150,6 +151,7 @@ export class Race {
   private nextSyncAt = 0;
   private minimap!: { bg: HTMLCanvasElement; map: (x: number, z: number) => [number, number] };
   private fx!: KartFx; // particles and skid marks
+  private bumpHit: KartHit | null = null; // the hardest kart-to-kart contact since the last frame (multiplayer)
   autopilot = false;
 
   constructor(private opts: RaceOptions) {
@@ -907,19 +909,13 @@ export class Race {
     this.fx.sense(this.phys, c, dt, this.simT);
     this.throttle = c.throttle;
     this.opts.mode?.addon?.tick?.(dt);
+    const kh = this.phys.kartHit; // set by the multiplayer addon's contact step
+    if (kh && kh.closing > (this.bumpHit?.closing ?? 0)) this.bumpHit = kh;
   }
 
-  /** Pure-pursuit driver: steer at a look-ahead point, brake for curvature ahead. */
+  /** The built-in driver (src/game/autopilot.ts): pure pursuit at a speed planned from the road ahead. */
   private autoControls() {
-    const p = this.phys;
-    const t = this.track;
-    const look = t.at(p.s + 5 + p.speed * 0.45);
-    let ang = Math.atan2(look.x - p.x, look.z - p.z) - p.heading;
-    ang = Math.atan2(Math.sin(ang), Math.cos(ang));
-    let k = 0;
-    for (let d = 0; d < 35; d += 2) k = Math.max(k, Math.abs(t.curv[t.at(p.s + d + p.speed * 0.3).i]));
-    const vTarget = Math.min(p.vmax, Math.sqrt((2.1 * 9.81) / Math.max(k, 1e-3)));
-    return { throttle: p.speed < vTarget ? 1 : 0, brake: p.speed > vTarget + 1.5 ? 1 : 0, steer: THREE.MathUtils.clamp(-ang * 3, -1, 1), drift: false };
+    return autopilot(this.phys, this.track);
   }
 
   private timing(dt: number) {
@@ -1065,6 +1061,7 @@ export class Race {
   private invalidate(reason: string, again = false) {
     if ((this.invalid && !again) || this.lapStart === null) return;
     this.invalid = true;
+    if (this.autopilot) return; // the game is driving (the cool-down lap): not your lap to lose
     this.hud.banner(`Lap invalid · ${reason}`, 'warn', 2);
   }
 
@@ -1384,6 +1381,13 @@ export class Race {
         this.haptics.impact(fb.impact);
         this.kickCamera(fb.impact, fb.nx, fb.nz);
       }
+      if (this.bumpHit) {
+        // Another kart: a softer thump and kick than a tyre wall, away from the kart that hit you.
+        const h = this.bumpHit;
+        this.audio.impact(h.closing * 0.8);
+        this.haptics.impact(h.closing);
+        this.kickCamera(h.closing * 0.6, -h.nx, -h.nz);
+      }
       this.haptics.kerb(fb.kerb, p.speed);
       const pb = this.pb?.ms ?? null;
       if (pb !== this.pbSeen && this.pbSeen !== undefined && pb !== null) this.haptics.personalBest();
@@ -1391,6 +1395,7 @@ export class Race {
       const cockpit = CAMS[this.camMode].id === 'hood';
       this.audio.update({ speed: p.speed, vmax: p.vmax, throttle: this.throttle, squeal: fb.squeal, kerb: fb.kerb, grass: fb.grass, scrape: fb.scrape, cockpit });
     }
+    this.bumpHit = null;
 
     const { fwd, pos, look, tmp, up } = this.v;
     fwd.set(Math.sin(heading), 0, Math.cos(heading));

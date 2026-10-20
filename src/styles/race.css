@@ -512,3 +512,20 @@
   .h-reset { font-size: 18px; }
   .h-stuck-tip { padding: 4px 8px; font-size: 12px; }
 }
+
+/* ---------- Tow (Lane D: hud.ts TowIndicator, multiplayer only). A small chip beside the speed,
+   there only while you're in another kart's slipstream; the chevrons fill with how much of it you
+   have. Blue: air, not an action or a timing colour. */
+.h-speed-box { position: relative; }
+.h-tow {
+  position: absolute; left: calc(100% + 8px); top: 50%; display: flex; align-items: center; gap: 4px; padding: 5px 9px 5px 9px; border-radius: 3px;
+  background: var(--hud); transform: translate(-4px, -50%); opacity: 0; transition: opacity 0.25s var(--ease), transform 0.25s var(--ease); pointer-events: none;
+  font-family: var(--ui); font-weight: 700; font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--blue); white-space: nowrap;
+}
+.h-tow.on { opacity: 1; transform: translate(0, -50%); }
+.h-tow i { width: 6px; height: 6px; margin-right: -1px; border: solid var(--panel-3); border-width: 2px 2px 0 0; transform: rotate(45deg); }
+.h-tow span { margin-left: 3px; }
+.h-tow[data-n='1'] i:first-child, .h-tow[data-n='2'] i:nth-child(-n + 2), .h-tow[data-n='3'] i { border-color: var(--blue); }
+@media (max-width: 640px), (pointer: coarse) and (max-height: 520px) {
+  .h-tow { left: calc(100% + 6px); padding: 4px 7px; font-size: 12px; }
+}
