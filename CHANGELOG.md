@@ -6,6 +6,23 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+### Changed
+- **Kerbs sit where a real kart track has them**: on the inside of each corner from turn-in to just
+  past the apex, on the outside of corner exits, and round the outside of hairpins. Kinks and
+  straights no longer get kerbs, fast corners do, and each direction gets its own.
+- **A crisp concrete strip lines the track edge** instead of a blurry painted band.
+- **The road has more to read**: grid boxes with slot numbers at the start, a subtle rubbered racing
+  line, and braking marks into the big corners.
+- **3-2-1 braking boards** stand before the biggest stops.
+
+### Fixed
+- Where the track crosses or merges with itself, the road is one clean surface: no flickering
+  speckle, and no edge lines painted across the other road.
+- Kerbs, start-gantry posts and tyre walls no longer stand on another part of the track where the
+  layout runs close to itself.
+- Sponsor names on the tyre walls read the right way round, and stray bits of wall in infields and
+  at tight corners are gone.
+
 ## [0.22.0] - 2026-10-21
 
 ### Fixed
