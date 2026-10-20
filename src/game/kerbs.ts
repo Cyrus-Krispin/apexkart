@@ -311,3 +311,62 @@ export function kerbMask(t: TrackModel): Uint8Array {
 export function hasKerb(t: TrackModel, i: number, side: number): boolean {
   return (kerbMask(t)[wrap(i, t.n)] & (side > 0 ? 2 : 1)) !== 0;
 }
+
+/** A corner that needs a big stop: worth braking boards and braking marks. */
+export interface BigStop {
+  corner: number; // index into corners()
+  turnIn: number; // sample index (may run past n - 1)
+  side: -1 | 1; // outside of the corner, where karts line up before turning in
+  brakeFrom: number; // sample where braking starts (rough speed model), before turnIn
+  dv: number; // speed shed, m/s
+  approach: number; // metres of run-up from the previous corner's exit
+}
+
+const stopCache = new WeakMap<TrackModel, BigStop[]>();
+
+/**
+ * Corners reached at speed and taken slowly, from a rough speed model of a kart round the lap
+ * (top speed 27 m/s, ~1.5 G in corners, ~1 G braking, ~0.35 G accelerating).
+ */
+export function bigStops(t: TrackModel): BigStop[] {
+  const cached = stopCache.get(t);
+  if (cached) return cached;
+  const n = t.n;
+  const ds = t.length / n;
+  const cs = corners(t);
+  const v = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    let acc = 0;
+    for (let d = -6; d <= 6; d++) acc += t.curv[wrap(i + d, n)];
+    const k = Math.abs(acc / 13 / ds);
+    v[i] = Math.min(27, Math.sqrt(15 / Math.max(k, 1e-6)));
+  }
+  for (let pass = 0; pass < 2; pass++) {
+    for (let m = 2 * n - 1; m >= 0; m--) {
+      const i = m % n;
+      v[i] = Math.min(v[i], Math.sqrt(v[(i + 1) % n] ** 2 + 2 * 10 * ds));
+    }
+    for (let m = 0; m < 2 * n; m++) {
+      const i = m % n;
+      v[i] = Math.min(v[i], Math.sqrt(v[(i - 1 + n) % n] ** 2 + 2 * 3.5 * ds));
+    }
+  }
+  const out: BigStop[] = [];
+  cs.forEach((c, ci) => {
+    const prev = cs[(ci - 1 + cs.length) % cs.length];
+    const approach = cs.length > 1 ? wrap(c.turnIn - prev.exit, n) * ds : t.length;
+    let vMin = Infinity;
+    for (let q = c.turnIn; q <= c.exit; q++) vMin = Math.min(vMin, v[wrap(q, n)]);
+    // Braking starts at the speed peak before the corner.
+    let peak = c.turnIn;
+    const back = Math.min(Math.round(approach / ds), Math.round(80 / ds));
+    for (let q = c.turnIn; q >= c.turnIn - back; q--) if (v[wrap(q, n)] > v[wrap(peak, n)] + 0.01) peak = q;
+    const dv = v[wrap(peak, n)] - vMin;
+    if (dv < 10 || approach < 50 || (c.turnIn - peak) * ds < 15) return;
+    out.push({ corner: ci, turnIn: c.turnIn, side: (c.turn > 0 ? -1 : 1) as -1 | 1, brakeFrom: peak, dv, approach });
+  });
+  // The biggest few only: boards and marks at every corner would be clutter.
+  const big = out.sort((p, q) => q.dv - p.dv).slice(0, 4).sort((p, q) => wrap(p.turnIn, n) - wrap(q.turnIn, n));
+  stopCache.set(t, big);
+  return big;
+}
