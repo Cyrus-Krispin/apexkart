@@ -31,6 +31,7 @@ const ICON = {
   sound: '<svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path d="M16 8.5a5 5 0 010 7M18.5 6a8.5 8.5 0 010 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   left: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   right: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  flag: '<svg viewBox="0 0 24 24" width="18" height="18"><path d="M6 21V4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M6 4.5h11.5l-2.6 4 2.6 4H6" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>',
   reset: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.5 9.5A7 7 0 1 1 5 14" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/><path d="M4.5 4.5v5h5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 };
 
@@ -67,12 +68,13 @@ export class Hud {
   private hintTimer = 0;
   private lightsTimer = 0;
   private boardSig = '';
+  private flashTimers: number[] = [];
   // The medal target panel: the next medal and its time.
   private goal: { medal: Medal; ms: number } | null = null;
 
   constructor(
     container: HTMLElement,
-    o: { trackName: string; dirLabel: string; dirIcon: string; color: string },
+    o: { trackName: string; dirLabel: string; dirIcon: string; color: string; lapRestart?: boolean },
     private onAction: (act: string) => void,
   ) {
     const code = escapeHtml(circuitCode(o.trackName));
@@ -81,7 +83,13 @@ export class Hud {
     this.root.innerHTML = `
       <div class="h-left">
       <section class="h-timing">
-        <header><span class="pw-code">${code}</span><span class="h-lapno"><span class="pw-k">Lap</span><b class="mono" data-el="lap">OUT</b></span><span class="h-dir" title="${o.dirLabel}">${o.dirIcon}</span></header>
+        <header><span class="pw-code">${code}</span><span class="h-lapno"><span class="pw-k">Lap</span><b class="mono" data-el="lap">OUT</b></span>${
+          // A time trial puts a flying-lap restart where the direction arrow sits in a race (the
+          // direction is on the grid and in the pause menu).
+          o.lapRestart
+            ? `<button class="h-relap" data-act="relap" title="Restart the lap (Backspace)" aria-label="Restart the lap: a flying start just before the line">${ICON.reset}<kbd>⌫</kbd></button>`
+            : `<span class="h-dir" title="${o.dirLabel}">${o.dirIcon}</span>`
+        }</header>
         <div class="h-time-row"><div class="h-time mono" data-el="time">0:00.000</div><b class="h-dl mono" data-el="delta" hidden title="Gap to your best lap"></b></div>
         <div class="h-sectors" data-el="sectors">${[1, 2, 3].map((k) => `<div class="sec"><i></i><span class="mono">S${k}</span></div>`).join('')}</div>
         <footer>
@@ -155,6 +163,7 @@ export class Hud {
                 <button data-act="controls" data-el="controlsToggle"></button>
                 <button data-act="mute" data-el="muteToggle"></button>
                 <button data-act="ghosts" data-el="ghostToggle"></button>
+                <button data-act="chase" data-el="chaseToggle" hidden></button>
                 <button data-act="cam" data-el="camToggle"></button>
                 <button data-act="quality" data-el="qualityToggle"></button>
                 <button data-act="time" data-el="timeToggle"></button>
@@ -171,8 +180,10 @@ export class Hud {
     this.touch = this.$.touch;
     this.speedSegs = [...this.$.segs.children] as HTMLElement[];
     this.root.addEventListener('click', (e) => {
-      const act = (e.target as HTMLElement).closest<HTMLElement>('[data-act]')?.dataset.act;
+      const el = (e.target as HTMLElement).closest<HTMLElement>('[data-act]');
+      const act = el?.dataset.act;
       if (act) this.onAction(act);
+      if (act === 'relap') el!.blur(); // Space brakes: it mustn't press this button again
     });
   }
 
@@ -197,11 +208,16 @@ export class Hud {
     this.$.time.classList.toggle('invalid', invalid);
   }
 
-  /** The gap to your best lap: one number beside the lap time, green when you're ahead, red behind. */
+  /** Whose lap the gap beside the lap time is to (its tooltip). */
+  deltaFor(label: string) {
+    this.$.delta.title = `Gap to ${label}`;
+  }
+
+  /** The gap to the lap you chase (your best unless you pick another): one number beside the lap time, green when you're ahead, red behind. */
   delta(seconds: number | null) {
     this.$.delta.hidden = seconds === null;
     if (seconds === null) return;
-    this.text('delta', signed(seconds, 2));
+    this.text('delta', signed(seconds, Math.abs(seconds) >= 9.995 ? 1 : 2)); // never wider than +9.99
     this.cls('delta', `h-dl mono ${seconds < 0 ? 'fast' : 'slow'}`);
   }
 
@@ -220,6 +236,18 @@ export class Hud {
       const txt = t !== undefined ? (t / 1000).toFixed(final ? 3 : 2) : `S${k + 1}`;
       if (label.textContent !== txt) label.textContent = txt;
     }
+  }
+
+  /** A sector just completed: its chip flashes in its colour with the gap to your best sector for a moment. */
+  sectorFlash(k: number, color: SectorColor, delta: number) {
+    const el = this.$.sectors.children[k] as HTMLElement | undefined;
+    if (!el) return;
+    el.removeAttribute('data-flash');
+    void el.offsetWidth; // restart the animation
+    el.dataset.dl = signed(delta, 3);
+    el.dataset.flash = color || 'yellow';
+    clearTimeout(this.flashTimers[k]);
+    this.flashTimers[k] = window.setTimeout(() => el.removeAttribute('data-flash'), 1600);
   }
 
   last(ms: number | null, valid = true) {
@@ -408,12 +436,18 @@ export class Hud {
     }
   }
 
-  toggles(o: { controls: string; muted: boolean; ghosts: boolean; cam: string; quality: string; night: boolean; time: string }) {
+  /** chase: whose lap the gap is to (time trials; null hides the row). */
+  toggles(o: { controls: string; muted: boolean; ghosts: boolean; cam: string; quality: string; night: boolean; time: string; chase: string | null }) {
     const row = (icon: string, label: string, value: string, off = false) =>
       `${icon}<span>${label}</span><b class="${off ? 'off' : ''}">${escapeHtml(value)}</b><i aria-hidden="true">›</i>`;
     this.$.controlsToggle.innerHTML = row(ICON.wheel, 'Controls', o.controls);
     this.$.muteToggle.innerHTML = row(ICON.sound, 'Sound', o.muted ? 'Off' : 'On', o.muted);
     this.$.ghostToggle.innerHTML = row(ICON.ghost, 'Ghosts', o.ghosts ? 'On' : 'Off', !o.ghosts);
+    this.$.chaseToggle.hidden = o.chase === null;
+    if (o.chase !== null) {
+      this.$.chaseToggle.innerHTML = row(ICON.flag, 'Chase', o.chase);
+      this.$.chaseToggle.title = `The gap beside the lap time is to: ${o.chase}`;
+    }
     this.$.camToggle.innerHTML = row(ICON.cam, 'Camera', o.cam);
     this.$.qualityToggle.innerHTML = row(ICON.gauge, 'Graphics', o.quality);
     this.$.timeToggle.innerHTML = row(o.night ? ICON.moon : ICON.sun, 'Time of day', o.time);
@@ -430,5 +464,79 @@ export class Hud {
     clearTimeout(this.hintTimer);
     clearTimeout(this.lightsTimer);
     this.root.remove();
+  }
+}
+
+// ---------- Tow (Lane D, multiplayer only)
+
+/**
+ * A small chip beside the speed while you're in another kart's slipstream: three chevrons that
+ * fill with how much of it you have, and the word Tow. Nothing in the middle of the screen; it
+ * fades in after a moment in the tow and out a moment after, so a brief pass doesn't flicker it.
+ */
+export class TowIndicator {
+  private el: HTMLElement | null;
+  private onT = 0; // s in the tow
+  private offT = 0; // s out of it
+  private n = 0; // chevrons lit (0 = hidden)
+
+  constructor(hudRoot: HTMLElement) {
+    const box = hudRoot.querySelector<HTMLElement>('.h-speed-box');
+    this.el = box && document.createElement('div');
+    if (!box || !this.el) return;
+    this.el.className = 'h-tow';
+    this.el.setAttribute('aria-hidden', 'true');
+    this.el.innerHTML = '<i></i><i></i><i></i><span>Tow</span>';
+    box.appendChild(this.el);
+  }
+
+  /** Strength 0..1 (MultiplayerRace, every frame). */
+  set(strength: number, dt: number) {
+    if (!this.el) return;
+    const want = strength < 0.06 ? 0 : strength < 0.3 ? 1 : strength < 0.55 ? 2 : 3;
+    if (want) {
+      this.onT += dt;
+      this.offT = 0;
+    } else {
+      this.offT += dt;
+      this.onT = 0;
+    }
+    // Shows after 0.15 s in the tow, then follows it; hides 0.4 s after it ends.
+    const n = want ? (this.n || this.onT >= 0.15 ? want : 0) : this.offT >= 0.4 ? 0 : this.n;
+    if (n === this.n) return;
+    this.n = n;
+    if (n) this.el.dataset.n = String(n);
+    this.el.classList.toggle('on', n > 0);
+  }
+
+  dispose() {
+    this.el?.remove();
+  }
+}
+
+// ---------- Launch hint (Lane D, multiplayer only)
+
+/**
+ * Classic controls on a multiplayer grid: the kart only launches at lights out if you're already
+ * holding Gas (Simple players launch by themselves), so the grid's controls reminder says so.
+ * Once the lights go out the usual reminder is back.
+ */
+export class LaunchHint {
+  private el: HTMLElement | null;
+  private on = false;
+  private html = touchDevice() ? 'Hold Gas: you launch at lights out' : 'Hold Gas <kbd>W</kbd> · you launch at lights out';
+
+  constructor(private root: HTMLElement) {
+    this.el = root.querySelector<HTMLElement>('[data-el="hint"]');
+  }
+
+  /** Every frame: `grid` while waiting for the lights. */
+  update(grid: boolean) {
+    if (!this.el) return;
+    const scheme = this.root.dataset.controls as ControlScheme | undefined;
+    const want = grid && scheme === 'classic';
+    if (want && this.el.innerHTML !== this.html) this.el.innerHTML = this.html; // (again, if the controls changed)
+    else if (!want && this.on && scheme) this.el.innerHTML = hintHtml(scheme);
+    this.on = want;
   }
 }

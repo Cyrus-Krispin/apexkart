@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { KERB, type Nearest, type Rejoin, type TrackModel } from './track';
+import { hasKerb } from './kerbs';
 
 export interface KartVisual {
   root: THREE.Group;
@@ -181,10 +182,25 @@ export interface Impact {
   nz: number;
 }
 
+/**
+ * Another kart touching this one (KartPhysics.kartHit; multiplayer only): for sound, haptics,
+ * sparks and the camera. Same shape as Impact, with the other kart in place of the wall.
+ */
+export interface KartHit {
+  closing: number; // closing speed between the two karts along the contact normal, m/s (> 0)
+  x: number; // contact point, on this kart's outline towards the other kart
+  z: number;
+  nx: number; // unit normal from the other kart towards this one
+  nz: number;
+}
+
 // Wall response: friction from the normal impulse, restitution, and a little extra loss on hard hits.
 const WALL_MU = 0.5;
 const WALL_E = 0.2;
 const WALL_LOSS = 0.15;
+// In a slipstream (dragScale < 1) the engine also pulls on past its usual top speed, by this many
+// m/s per unit of drag saved, so the lower drag can show: +2-4 km/h on a straight.
+const TOW_REV = 4;
 
 /** Arcade kart dynamics on a flat plane, constrained by the track's barriers. */
 export class KartPhysics {
@@ -212,10 +228,25 @@ export class KartPhysics {
   impact: Impact | null = null;
   /** Touching a wall this step. */
   onWall = false;
+  /** On a painted kerb, not just the concrete apron's kerb-grip band: rumble, sound and buzz follow it. */
+  onKerb = false;
   /** Seconds spent below walking pace with the pedals pressed (wedged, or beached). */
   stuckT = 0;
   /** The last lap position on this part of the lap's own asphalt: where a reset puts the kart. */
   goodS = 0;
+  /**
+   * Multiplayer kart-to-kart contact starting (RemoteKarts.collide, run by the multiplayer add-on
+   * right after each physics step), null otherwise. It's cleared by the next contact check, so it
+   * stays set for one step: whatever reads the kart after step() sees each contact exactly once.
+   * Never set in a time trial.
+   */
+  kartHit: KartHit | null = null;
+  /**
+   * Air drag multiplier: below 1 in another kart's slipstream (set by the multiplayer add-on, from
+   * real karts only, never ghosts), exactly 1 otherwise, so a time trial is untouched. 1 minus this
+   * is how much tow you have (for wind streaks).
+   */
+  dragScale = 1;
   private gripLossT = 0; // after a hard wall hit: the tyres take a moment to bite again
 
   readonly vmax = 27; // ~97 km/h
@@ -233,7 +264,7 @@ export class KartPhysics {
     this.locate(); // s and offset right away, not at the next step
     this.rejoin = null;
     this.impact = null;
-    this.onWall = false;
+    this.onWall = this.onKerb = false;
     this.gripLossT = 0;
     this.stuckT = 0;
     this.goodS = this.s;
@@ -285,11 +316,13 @@ export class KartPhysics {
     const kerb = this.surface === 'kerb';
     const vmax = grass ? 11 : this.vmax;
 
-    // Longitudinal
-    const engine = c.throttle * (vf < vmax ? 11 * (1 - Math.max(0, vf) / vmax) + 2.2 : 0);
+    // Longitudinal. dragScale is exactly 1 outside a slipstream, so cut = vmax and the drag term
+    // are bit-for-bit what they always were.
+    const cut = grass ? vmax : vmax + (1 - this.dragScale) * TOW_REV;
+    const engine = c.throttle * (vf < cut ? 11 * (1 - Math.max(0, vf) / vmax) + 2.2 : 0);
     let accel = engine;
     if (c.brake > 0) accel -= vf > 0.5 ? 22 * c.brake : vf > -6 ? 6 * c.brake : 0; // brake, then reverse slowly
-    accel -= 0.0028 * vf * Math.abs(vf) + (grass ? 2.5 * Math.sign(vf) + 0.12 * vf : 0.35 * Math.sign(vf));
+    accel -= 0.0028 * this.dragScale * vf * Math.abs(vf) + (grass ? 2.5 * Math.sign(vf) + 0.12 * vf : 0.35 * Math.sign(vf));
     if (c.throttle === 0 && c.brake === 0 && Math.abs(vf) < 0.4) vf = 0;
     else vf += accel * dt;
 
@@ -338,6 +371,7 @@ export class KartPhysics {
     // Asphalt is asphalt: another part of the lap's road grips like the road (where sections merge
     // or cross). Limits and the reset point still go by this part's own road.
     if (near.dist > hw && this.track.nearestOther(this.x, this.z, near.i, hw) >= 0) this.surface = 'track';
+    this.onKerb = this.surface === 'kerb' && hasKerb(this.track, near.i, near.offset > 0 ? 1 : -1);
     this.bump *= Math.exp(-dt * 6);
     this.impact = null;
     const touching = near.dist > wall;

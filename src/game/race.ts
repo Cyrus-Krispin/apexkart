@@ -1,9 +1,11 @@
 import * as THREE from 'three';
 import { TrackModel } from './track';
 import { buildTrackScene, type TrackScene } from './trackMesh';
-import { buildKart, KartPhysics, type KartVisual } from './kart';
+import { buildKart, KartPhysics, type KartHit, type KartVisual } from './kart';
 import { availableSchemes, controlsPref, Input, saveControlsPref, SCHEME_LABEL, type ControlScheme } from './input';
 import { KartAudio } from './audio';
+import { KartFx, type FxFrame } from './fx';
+import { Haptics } from './haptics';
 import { Atmosphere, resolveTime, type TimePref } from './atmosphere';
 import { awardMedal, earnedMedal, MEDAL_NAME, MEDALS, medalFor, targets } from './medals';
 import { recordDailyLap } from '../shared/daily';
@@ -16,8 +18,10 @@ import { rotationLabel } from '../ui/trackArt';
 import { analyzeShape } from '../track/shape';
 import { decodeGhost, encodeGhost, sampleGhost, GHOST_DT, type GhostData, type GhostFrame } from '../shared/ghost';
 import type { TrackData } from '../track/osm';
-import { api, formatMs, type BoardResponse, type Dir, type Driver } from '../net/api';
+import { api, formatMs, type BoardEntry, type BoardResponse, type Dir, type Driver } from '../net/api';
 import { gridPose, type RaceContext, type RaceMode } from './raceMode';
+import { speedProfile } from './speedProfile';
+import { autopilot } from './autopilot';
 
 export interface RaceOptions {
   track: TrackData;
@@ -49,6 +53,29 @@ interface Ghost {
   dt: number;
   visual: KartVisual;
   tag: HTMLDivElement;
+  /** Its lap time (ms) every `step` metres from the line (for the live delta), and the lap time. */
+  splits: number[];
+  step: number;
+  ms: number;
+}
+
+/** A lap to measure the live delta against: its time every `step` metres from the line. */
+type ChaseRef = { splits: number[]; step: number; ms: number };
+/** Ghost laps are timed every 2 m for the delta (their frames are 0.6-1.4 m apart). */
+const CHASE_STEP = 2;
+
+/** Time trials: whose lap the live delta is against (the pause menu's Chase). */
+type Chase = 'pb' | 'medal' | 'above' | 'rival';
+const CHASE_KEY = 'ak:chase';
+
+/** The device's choice. A challenge's rival is per race, so it's never the saved one. */
+function chasePref(): Chase {
+  try {
+    const v = localStorage.getItem(CHASE_KEY);
+    return v === 'medal' || v === 'above' ? v : 'pb';
+  } catch {
+    return 'pb';
+  }
 }
 
 const STEP = 1 / 120;
@@ -94,6 +121,8 @@ export class Race {
   private phys: KartPhysics;
   private input: Input;
   private audio = new KartAudio();
+  private haptics = new Haptics(() => this.audio.muted);
+  private pbSeen: number | null | undefined; // a new personal best buzzes once
   private ground!: THREE.Mesh;
   private root: HTMLElement;
   private hud: Hud;
@@ -134,8 +163,14 @@ export class Race {
   private camMode = 0;
   private camPos = new THREE.Vector3();
   private camLook = new THREE.Vector3();
+  /** Camera springs: impact kick offset (o, v), FOV punch, smooth shake, corner look-ahead, eased FOV. */
+  private cam = { ox: 0, oy: 0, oz: 0, vx: 0, vy: 0, vz: 0, fov: 0, fovV: 0, shake: 0, side: 0, fovBase: 62 };
   private showGhosts = localStorage.getItem('ak:ghosts') !== '0';
   private ghosts: Ghost[] = [];
+  /** Time trials: the lap to chase (FEEL-17), the ghost key it resolves to now, and its name. */
+  private chase: Chase = 'pb';
+  private chaseKey = 'pb';
+  private chaseLabel = 'Your best';
   private board: BoardResponse | null = null;
   private boardTimer = 0;
   private hintShown = false;
@@ -143,7 +178,8 @@ export class Race {
   private throttle = 0;
   private nextSyncAt = 0;
   private minimap!: { bg: HTMLCanvasElement; map: (x: number, z: number) => [number, number] };
-  private skid!: { geo: THREE.BufferGeometry; pos: Float32Array; i: number; prev: (THREE.Vector3 | null)[] };
+  private fx!: KartFx; // particles and skid marks
+  private bumpHit: KartHit | null = null; // the hardest kart-to-kart contact since the last frame (multiplayer)
   autopilot = false;
 
   constructor(private opts: RaceOptions) {
@@ -153,6 +189,7 @@ export class Race {
     this.pbKey = `ak:pb:${opts.track.id}:${opts.dir}`;
     localStorage.removeItem('ak:style'); // the satellite world is gone; every world is the stylised one
     if (opts.mode?.ghosts === false) this.showGhosts = false;
+    this.chase = opts.mode ? 'pb' : opts.rival ? 'rival' : chasePref(); // a challenge starts on its rival
     this.pb = this.loadPB();
     this.bestSectors = this.pb?.sectors.slice() ?? [];
 
@@ -165,7 +202,7 @@ export class Race {
     this.pipeline.quality = this.qualitySetting === 'auto' ? this.autoTier() : this.qualitySetting;
     this.root.appendChild(this.pipeline.renderer.domElement);
 
-    this.hud = new Hud(this.root, { trackName: opts.track.name, dirLabel: rot.label, dirIcon: rot.icon, color: opts.driver.color }, (a) => this.action(a));
+    this.hud = new Hud(this.root, { trackName: opts.track.name, dirLabel: rot.label, dirIcon: rot.icon, color: opts.driver.color, lapRestart: !opts.mode }, (a) => this.action(a));
     this.hud.setVisible(false);
     this.hud.best(this.pb?.ms ?? null);
     this.input = new Input(this.hud.touch, controlsPref());
@@ -198,7 +235,7 @@ export class Race {
     if (opts.rival && !opts.mode) this.loadRival(opts.rival);
     this.syncToggles();
     this.buildMinimap();
-    this.buildSkids();
+    this.fx = new KartFx(this.scene, this.track);
     this.resetToGrid();
     this.state = 'intro';
     this.applyMode();
@@ -615,21 +652,6 @@ export class Race {
     this.minimap = { bg, map };
   }
 
-  private buildSkids() {
-    const max = 3000;
-    const pos = new Float32Array(max * 6 * 3);
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    geo.setDrawRange(0, 0);
-    const mesh = new THREE.Mesh(
-      geo,
-      new THREE.MeshBasicMaterial({ color: 0x050505, transparent: true, opacity: 0.42, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }),
-    );
-    mesh.frustumCulled = false;
-    this.scene.add(mesh);
-    this.skid = { geo, pos, i: 0, prev: [null, null] };
-  }
-
   // ------------------------------------------------------------------ flow
 
   private begin() {
@@ -645,7 +667,7 @@ export class Race {
       const r = await api.ghost(this.opts.track.id, this.opts.dir, pid);
       if (!r.ghost || this.disposed) return;
       this.rival = { name: r.name, ms: r.ms, beaten: false };
-      this.setGhost('rival', `${r.name} · challenge`, r.color, r.ghost);
+      this.setGhost('rival', `${r.name} · challenge`, r.color, r.ghost, r.ms);
     } catch {
       /* race on without it */
     }
@@ -659,9 +681,11 @@ export class Race {
     }
     if (a === 'exit') this.opts.onExit();
     if (a === 'reset' && this.state === 'racing') this.recover();
+    if (a === 'relap') this.restartLap();
     if (a === 'pause') this.togglePause();
     if (a === 'mute') this.audio.toggleMute();
     if (a === 'ghosts') this.toggleGhosts();
+    if (a === 'chase') this.cycleChase();
     if (a === 'cam') this.camMode = (this.camMode + 1) % CAMS.length;
     if (a === 'quality') {
       const order: QualitySetting[] = ['auto', 'high', 'medium', 'low'];
@@ -733,7 +757,7 @@ export class Race {
     const q = this.qualitySetting === 'auto' ? `Auto · ${this.pipeline.quality}` : this.qualitySetting;
     const night = this.atmos?.time === 'night';
     const time = this.timeSetting === 'live' ? `Live · ${night ? 'Night' : 'Day'}` : night ? 'Night' : 'Day';
-    this.hud.toggles({ controls: SCHEME_LABEL[this.input.scheme], muted: this.audio.muted, ghosts: this.showGhosts, cam: CAMS[this.camMode].label, quality: q, night, time });
+    this.hud.toggles({ controls: SCHEME_LABEL[this.input.scheme], muted: this.audio.muted, ghosts: this.showGhosts, cam: CAMS[this.camMode].label, quality: q, night, time, chase: this.opts.mode ? null : this.chaseLabel });
   }
 
   private resetToGrid() {
@@ -759,6 +783,55 @@ export class Race {
     this.hud.sectors([], [], -1, 0);
     this.hud.hint(true);
     this.showStuck(false);
+    this.snapCamera();
+  }
+
+  /** The centreline speed profile (speedProfile.ts), worked out on the first flying-lap restart. */
+  private profile: Float32Array | null = null;
+
+  /**
+   * Time trial: straight onto a flying lap (Backspace, gamepad Select, or ↺ in the lap panel). The
+   * kart goes min(150 m, 15% of the lap) before the line, on the centreline, at 90% of the speed it
+   * could carry there (at most 22 m/s), so it's never launched into a braking zone. The lights are
+   * skipped. Nothing is timed until the line: crossing it starts lap 1 the usual way, so its timing,
+   * sectors, ghost recording, track limits and distance backstop all start at the line as before.
+   */
+  private restartLap() {
+    if (this.opts.mode || (this.state !== 'grid' && this.state !== 'racing')) return;
+    const L = this.track.length;
+    const s = L - Math.min(150, 0.15 * L);
+    this.profile ??= speedProfile(this.track.px, this.track.pz).v;
+    const p = this.phys;
+    p.place(s); // the track's heading there, standing still, no rejoin: not a cut
+    const v0 = Math.min(0.9 * this.profile[this.track.at(s).i], 22);
+    p.vx = Math.sin(p.heading) * v0;
+    p.vz = Math.cos(p.heading) * v0;
+    this.body.vf = v0; // no lurch of the body from the jump in speed
+    this.body.acc = 0;
+    this.lastS = p.s;
+    if (this.state === 'grid') {
+      // Lights out at once.
+      this.state = 'racing';
+      this.goTime = this.simT;
+      this.trackScene.lights.forEach((m) => (m.emissiveIntensity = 0));
+      this.hud.lights(null);
+      this.hud.hint(true, 4000);
+    }
+    // The lap in progress never happened (not counted, no lap card). The line starts lap 1.
+    this.lapStart = null;
+    this.lapNo = 0;
+    this.invalid = false;
+    this.sectorsHit = [false, false];
+    this.sectorTimes = [];
+    this.sectorColors = [];
+    this.ghostRec = [];
+    this.splits = [];
+    this.grassT = this.wrongWayT = 0;
+    this.showStuck(false);
+    this.hud.lap(null);
+    this.hud.lapTime(0, false);
+    this.hud.delta(null);
+    this.hud.sectors([], [], -1, 0);
     this.snapCamera();
   }
 
@@ -805,9 +878,10 @@ export class Race {
       if (this.input.consume('m')) this.action('mute');
       if (this.input.consume('g')) this.action('ghosts');
       if (this.input.consume('r') && this.state === 'racing') this.recover();
+      if (this.input.consume('Backspace')) this.restartLap();
     } else {
       // Keys pressed on the intro screen shouldn't leak into the race.
-      ['Escape', 'p', 'c', 'm', 'g', 'r'].forEach((k) => this.input.consume(k));
+      ['Escape', 'p', 'c', 'm', 'g', 'r', 'Backspace'].forEach((k) => this.input.consume(k));
     }
 
     if (this.state === 'grid' || this.state === 'racing') {
@@ -894,6 +968,7 @@ export class Race {
         this.trackScene.lights.forEach((m, k) => (m.emissiveIntensity = k < lit ? 4 : 0));
         this.hud.lights(lit);
         this.audio.beep(false);
+        this.haptics.light(false);
       }
       if (this.gridT >= this.goAt) {
         this.state = 'racing';
@@ -901,6 +976,7 @@ export class Race {
         this.trackScene.lights.forEach((m) => (m.emissiveIntensity = 0));
         this.hud.lights(null);
         this.audio.beep(true);
+        this.haptics.light(true);
         this.hud.banner('Go', 'go', 1.1);
         this.hud.hint(true, 4000);
       }
@@ -909,24 +985,18 @@ export class Race {
     }
     this.simT += dt;
     this.phys.step(dt, c);
-    this.audio.update(this.phys.speed, c.throttle, this.phys.slip, this.phys.surface === 'grass');
     if (this.state === 'racing') this.timing(dt);
-    this.updateSkids(c.drift);
+    this.sectorFlash();
+    this.fx.sense(this.phys, c, dt, this.simT);
     this.throttle = c.throttle;
     this.opts.mode?.addon?.tick?.(dt);
+    const kh = this.phys.kartHit; // set by the multiplayer addon's contact step
+    if (kh && kh.closing > (this.bumpHit?.closing ?? 0)) this.bumpHit = kh;
   }
 
-  /** Pure-pursuit driver: steer at a look-ahead point, brake for curvature ahead. */
+  /** The built-in driver (src/game/autopilot.ts): pure pursuit at a speed planned from the road ahead. */
   private autoControls() {
-    const p = this.phys;
-    const t = this.track;
-    const look = t.at(p.s + 5 + p.speed * 0.45);
-    let ang = Math.atan2(look.x - p.x, look.z - p.z) - p.heading;
-    ang = Math.atan2(Math.sin(ang), Math.cos(ang));
-    let k = 0;
-    for (let d = 0; d < 35; d += 2) k = Math.max(k, Math.abs(t.curv[t.at(p.s + d + p.speed * 0.3).i]));
-    const vTarget = Math.min(p.vmax, Math.sqrt((2.1 * 9.81) / Math.max(k, 1e-3)));
-    return { throttle: p.speed < vTarget ? 1 : 0, brake: p.speed > vTarget + 1.5 ? 1 : 0, steer: THREE.MathUtils.clamp(-ang * 3, -1, 1), drift: false };
+    return autopilot(this.phys, this.track);
   }
 
   private timing(dt: number) {
@@ -1025,6 +1095,41 @@ export class Race {
     if (s < L - 5) while (this.splits.length <= si) this.splits.push(lapT);
   }
 
+  // What timing() had at the end of the previous step, so a sector completed in this one can be shown.
+  private secSeen = { lap: 0, n: 0, start: null as number | null, invalid: false, times: [0, 0], best: [0, 0, 0] };
+
+  /** A sector just completed on a clean lap: flash its chip with the gap to your best sector, chime on purple. */
+  private sectorFlash() {
+    const s = this.secSeen;
+    const n = this.sectorTimes.length;
+    let k = -1;
+    let t = 0;
+    let color: SectorColor = '';
+    if (this.lapNo !== s.lap) {
+      // A new lap began, so timing() has already reset the sectors: S3 = lap time − S1 − S2.
+      if (s.start !== null && this.lapStart !== null && s.n === 2 && !s.invalid) {
+        k = 2;
+        t = (this.lapStart - s.start) * 1000 - s.times[0] - s.times[1];
+        const lead = this.board?.entries[0]?.sectors?.[2];
+        color = !s.best[2] || t <= s.best[2] ? (!lead || t <= lead ? 'purple' : 'green') : 'yellow';
+      }
+    } else if (n > s.n && !this.invalid) {
+      k = n - 1;
+      t = this.sectorTimes[k];
+      color = this.sectorColors[k];
+    }
+    if (k >= 0 && s.best[k] && !this.autopilot) {
+      this.hud.sectorFlash(k, color, (t - s.best[k]) / 1000);
+      if (color === 'purple') this.audio.chime();
+    }
+    s.lap = this.lapNo;
+    s.n = n;
+    s.start = this.lapStart;
+    s.invalid = this.invalid;
+    for (let i = 0; i < 2; i++) s.times[i] = this.sectorTimes[i] ?? 0;
+    for (let i = 0; i < 3; i++) s.best[i] = this.bestSectors[i] ?? 0;
+  }
+
   private sectorColor(k: number, t: number): SectorColor {
     const mine = this.bestSectors[k];
     const leader = this.board?.entries[0]?.sectors?.[k];
@@ -1037,6 +1142,7 @@ export class Race {
   private invalidate(reason: string, again = false) {
     if ((this.invalid && !again) || this.lapStart === null) return;
     this.invalid = true;
+    if (this.autopilot) return; // the game is driving (the cool-down lap): not your lap to lose
     this.hud.banner(`Lap invalid · ${reason}`, 'warn', 2);
   }
 
@@ -1083,7 +1189,7 @@ export class Race {
       this.savePB();
       this.hud.best(ms);
       this.hud.banner(prevPb === null ? 'First timed lap' : 'Personal best', 'pb', 2.2);
-      this.setGhost('pb', 'Your best', this.opts.driver.color, this.pb.ghost);
+      this.setGhost('pb', 'Your best', this.opts.driver.color, this.pb.ghost, ms);
       this.nextSyncAt = 0;
       this.submit();
     }
@@ -1208,9 +1314,12 @@ export class Race {
   private async syncBoardGhosts() {
     const me = this.opts.driver.pid;
     const top = (this.board?.entries ?? []).filter((e) => e.pid !== me && e.pid !== this.opts.rival).slice(0, 3);
+    // The lap you chase comes too, wherever it is on the board.
+    const chase = this.updateChase().entry;
+    if (chase && !top.includes(chase)) top.push(chase);
     const wanted = new Set(top.map((e) => `${e.pid}:${e.ms}`));
     for (const g of this.ghosts.filter((g) => g.key !== 'pb' && g.key !== 'rival' && !wanted.has(g.key))) this.removeGhost(g.key);
-    if (this.pb && !this.ghosts.some((g) => g.key === 'pb')) this.setGhost('pb', 'Your best', this.opts.driver.color, this.pb.ghost);
+    if (this.pb && !this.ghosts.some((g) => g.key === 'pb')) this.setGhost('pb', 'Your best', this.opts.driver.color, this.pb.ghost, this.pb.ms);
     for (const e of top) {
       const key = `${e.pid}:${e.ms}`;
       if (this.ghosts.some((g) => g.key === key)) continue;
@@ -1218,7 +1327,7 @@ export class Race {
       try {
         const r = await api.ghost(this.opts.track.id, this.opts.dir, e.pid);
         this.ghosts = this.ghosts.filter((g) => g.key !== key);
-        if (r.ghost && !this.disposed) this.setGhost(key, `P${e.rank} ${e.name}`, e.color, r.ghost);
+        if (r.ghost && !this.disposed) this.setGhost(key, `P${e.rank} ${e.name}`, e.color, r.ghost, e.ms);
       } catch {
         this.ghosts = this.ghosts.filter((g) => g.key !== key);
       }
@@ -1238,7 +1347,7 @@ export class Race {
     return { root, body: root, frontPivots: [], wheels: [], materials: [] };
   }
 
-  private setGhost(key: string, label: string, color: string, data: GhostData) {
+  private setGhost(key: string, label: string, color: string, data: GhostData, ms?: number) {
     this.removeGhost(key);
     const visual = this.ghostVisual(color);
     this.scene.add(visual.root);
@@ -1248,7 +1357,10 @@ export class Race {
     dot.style.background = color;
     tag.append(dot, label);
     this.hud.tags.appendChild(tag);
-    this.ghosts.push({ key, label, color, frames: decodeGhost(data), dt: data.dt, visual, tag });
+    const frames = decodeGhost(data);
+    const lapMs = ms ?? Math.round((frames.length - 1) * data.dt * 1000);
+    this.ghosts.push({ key, label, color, frames, dt: data.dt, visual, tag, splits: this.ghostSplits(frames, data.dt), step: CHASE_STEP, ms: lapMs });
+    this.updateChase();
   }
 
   private removeGhost(key: string) {
@@ -1257,6 +1369,125 @@ export class Race {
     if (g.visual) this.scene.remove(g.visual.root);
     g.tag?.remove();
     this.ghosts = this.ghosts.filter((x) => x !== g);
+  }
+
+  // ------------------------------------------------------------------ chase a target (FEEL-17)
+
+  /**
+   * A ghost lap's time (ms) every CHASE_STEP metres from the line: its frames walked along the lap
+   * with continuous progress (as judgeLap does), each split interpolated between the two frames
+   * either side of it. About a millisecond for a minute's lap.
+   */
+  private ghostSplits(frames: GhostFrame[], dt: number): number[] {
+    const t = this.track;
+    const L = t.length;
+    const out: number[] = [];
+    if (frames.length < 2) return out;
+    let near = t.closest(frames[0].x, frames[0].z);
+    let prog = near.s > L / 2 ? near.s - L : near.s; // metres from the line, continuous
+    let prevS = near.s;
+    if (prog >= 0) out.push(0); // the first frame is (just) past the line
+    for (let k = 1; k < frames.length; k++) {
+      near = t.follow(frames[k].x, frames[k].z, near.i);
+      let ds = near.s - prevS;
+      if (ds > L / 2) ds -= L;
+      else if (ds < -L / 2) ds += L;
+      prevS = near.s;
+      const from = prog;
+      prog += ds;
+      for (let b = out.length * CHASE_STEP; b <= prog && b < L - 5; b = out.length * CHASE_STEP) out.push((k - 1 + (b - from) / Math.max(1e-6, prog - from)) * dt * 1000);
+    }
+    return out;
+  }
+
+  /**
+   * What the chase choice points at now: the ghost's key, the board entry to fetch for it, and how
+   * it reads in the pause menu. Without one (no board yet, or nobody above you) it's your best.
+   */
+  private chaseTarget(): { key: string; label: string; entry?: BoardEntry } {
+    // Falling back to your best says why.
+    const best = (why?: string) => ({ key: 'pb', label: why ? (this.pb ? `${why} · your best` : why) : this.pb ? 'Your best' : 'Your best · no lap yet' });
+    if (this.opts.mode || this.chase === 'pb') return best();
+    if (this.chase === 'rival') return this.rival ? { key: 'rival', label: `Rival · ${this.rival.name}` } : best();
+    const me = this.opts.driver.pid;
+    const all = this.board?.entries ?? [];
+    const others = all.filter((e) => e.pid !== me);
+    if (!others.length) return best('No times yet');
+    // A challenge's rival on the board is the rival's ghost already.
+    const ghost = (e: BoardEntry, label: string) => (e.pid === this.opts.rival && this.rival ? { key: 'rival', label } : { key: `${e.pid}:${e.ms}`, label, entry: e });
+    if (this.chase === 'medal') {
+      // The board lap closest to the next medal's time (record pace once they're all won).
+      const have = earnedMedal(this.opts.track.id, this.opts.dir);
+      const next = MEDALS[(have ? MEDALS.indexOf(have) : -1) + 1] ?? null;
+      const goal = targets(all[0]?.ms, this.opts.track.lengthM)[next ?? 'platinum'];
+      const e = others.reduce((a, b) => (Math.abs(b.ms - goal) < Math.abs(a.ms - goal) ? b : a));
+      return ghost(e, `${next ? MEDAL_NAME[next] : 'Record'} · P${e.rank} ${e.name}`);
+    }
+    // The driver one place above you; off the board, the slowest lap faster than your best.
+    const mine = all.find((e) => e.pid === me);
+    const myMs = this.pb?.ms ?? Infinity;
+    const above = others.filter((e) => (mine ? e.rank < mine.rank : e.ms < myMs)).pop();
+    return above ? ghost(above, `P${above.rank} ${above.name}`) : best('You lead');
+  }
+
+  /** Re-resolve the chase target (the board, your best or a ghost changed): key, label, the tag ring. */
+  private updateChase() {
+    const t = this.chaseTarget();
+    const changed = t.key !== this.chaseKey || t.label !== this.chaseLabel;
+    this.chaseKey = t.key;
+    this.chaseLabel = t.label;
+    for (const g of this.ghosts) g.tag?.classList.toggle('chase', !this.opts.mode && g.key !== 'pb' && g.key === t.key);
+    if (changed) {
+      this.hud.deltaFor(t.key === 'pb' ? 'your best lap' : t.label);
+      this.syncToggles();
+    }
+    return t;
+  }
+
+  /** The pause menu's Chase: Your best, Next medal, the place above you, and a challenge's rival. */
+  private cycleChase() {
+    if (this.opts.mode) return;
+    const all: Chase[] = this.rival ? ['pb', 'medal', 'above', 'rival'] : ['pb', 'medal', 'above'];
+    this.chase = all[(Math.max(0, all.indexOf(this.chase)) + 1) % all.length]; // a rival that never came reads as Your best
+    if (this.chase !== 'rival') {
+      try {
+        localStorage.setItem(CHASE_KEY, this.chase);
+      } catch {
+        /* this race only */
+      }
+    }
+    this.syncBoardGhosts(); // fetches its ghost if it isn't here yet (the row shows the new target)
+  }
+
+  /** The lap being chased, once its ghost is here. Your best without its ghost (the board offline, a
+   *  multiplayer race) uses the 10 m splits saved with it. */
+  private chaseRef(): ChaseRef | null {
+    for (const g of this.ghosts) if (g.key === this.chaseKey && g.splits) return g;
+    if (this.chaseKey !== 'pb' || !this.pb) return null;
+    if (this.pbRef.pb !== this.pb) this.pbRef = { pb: this.pb, ref: { splits: this.pb.splits, step: SPLIT, ms: this.pb.ms } };
+    return this.pbRef.ref;
+  }
+  private pbRef: { pb: LocalPB | null; ref: ChaseRef | null } = { pb: null, ref: null };
+
+  /**
+   * The live gap to the chased lap: now against its time at this exact point, interpolated between
+   * its splits. (Until v0.25 it compared against your best's split at the start of the current
+   * 10 m, which read up to ~0.8 s slow and snapped back every 10 m.) Physics time and position, so
+   * the two match. Nothing for the first 20 m.
+   */
+  private chaseDelta(): number | null {
+    const ref = this.chaseRef();
+    if (!ref || this.lapStart === null) return null;
+    const s = this.phys.s;
+    const st = ref.step;
+    const si = Math.floor(s / st);
+    const a = ref.splits[si];
+    if (s < 20 || a === undefined) return null;
+    const next = ref.splits[si + 1];
+    const b = next ?? ref.ms; // the last few metres run to the line
+    const sb = next !== undefined ? (si + 1) * st : this.track.length;
+    const at = a + ((b - a) * (s - si * st)) / Math.max(1e-6, sb - si * st);
+    return ((this.simT - this.lapStart) * 1000 - at) / 1000;
   }
 
   // ------------------------------------------------------------------ render
@@ -1271,11 +1502,55 @@ export class Race {
     this.snapPrev();
     this.camPos.set(this.phys.x - Math.sin(this.phys.heading) * 6, 2.6, this.phys.z - Math.cos(this.phys.heading) * 6);
     this.camLook.set(this.phys.x, 0.6, this.phys.z);
+    Object.assign(this.cam, { ox: 0, oy: 0, oz: 0, vx: 0, vy: 0, vz: 0, fov: 0, fovV: 0, shake: 0, side: 0 });
+  }
+
+  /** A wall hit kicks the camera away from the wall, punches the FOV and starts a short shake. */
+  private kickCamera(speed: number, nx: number, nz: number) {
+    const k = Math.min(1, speed / 8);
+    const c = this.cam;
+    c.vx -= nx * 3 * k;
+    c.vz -= nz * 3 * k;
+    c.vy += 1.3 * k;
+    c.fovV += 55 * k;
+    c.shake = Math.min(1, c.shake + 0.8 * k);
+  }
+
+  /** Advance the camera springs; returns the shake offset to add this frame (deterministic in simT). */
+  private springCamera(dt: number, fb: FxFrame, out: THREE.Vector3) {
+    const c = this.cam;
+    // Damped springs: the kick at ω 18 rad/s, ζ 0.5; the FOV punch softer at ω 12, ζ 0.6.
+    for (let left = dt; left > 1e-6; ) {
+      const h = Math.min(left, 1 / 120);
+      left -= h;
+      c.vx += (-324 * c.ox - 18 * c.vx) * h;
+      c.vy += (-324 * c.oy - 18 * c.vy) * h;
+      c.vz += (-324 * c.oz - 18 * c.vz) * h;
+      c.ox += c.vx * h;
+      c.oy += c.vy * h;
+      c.oz += c.vz * h;
+      c.fovV += (-144 * c.fov - 14.4 * c.fovV) * h;
+      c.fov += c.fovV * h;
+    }
+    c.shake *= Math.exp(-dt / 0.22);
+    const t = this.simT;
+    const sh = c.shake;
+    // Two smooth octaves instead of per-frame white noise; then a few millimetres of kerb buzz at the
+    // stripe rate and a grass rumble.
+    const kerb = fb.kerb * 0.004 * (Math.sin((Math.PI * this.phys.s) / 0.8) > 0 ? 1 : -1);
+    const grass = fb.grass * 0.005 * (Math.sin(53 * t) + Math.sin(71 * t + 1));
+    out.set(
+      c.ox + sh * (0.1 * Math.sin(41 * t) + 0.04 * Math.sin(97 * t + 1.3)),
+      c.oy + sh * (0.08 * Math.sin(37 * t + 0.7) + 0.03 * Math.sin(89 * t + 2.1)) + kerb + grass,
+      c.oz,
+    );
+    return out;
   }
 
   // Scratch objects reused every frame (no per-frame allocations, so no GC hitches).
   private readonly v = { fwd: new THREE.Vector3(), pos: new THREE.Vector3(), look: new THREE.Vector3(), tmp: new THREE.Vector3(), up: new THREE.Vector3(0, 1, 0) };
   private prev = { x: 0, z: 0, h: 0 };
+  private body = { vf: 0, acc: 0 }; // low-passed longitudinal acceleration for the body pitch
   private alpha = 1; // how far between the last two physics steps this frame sits
   private viewW = 1;
   private viewH = 1;
@@ -1293,15 +1568,49 @@ export class Race {
     const heading = this.prev.h + dh * a;
     k.root.position.set(x, 0, z);
     k.root.rotation.y = heading;
-    k.body.rotation.z += (THREE.MathUtils.clamp(p.yawRate * p.forwardSpeed * 0.004, -0.07, 0.07) - k.body.rotation.z) * Math.min(1, dt * 8);
-    k.body.rotation.x += ((this.throttle ? -0.012 : 0.01) - k.body.rotation.x) * Math.min(1, dt * 5);
-    k.body.position.y = p.surface === 'grass' ? Math.sin(this.simT * 40) * 0.012 : p.surface === 'kerb' ? Math.sin(this.simT * 70) * 0.02 : 0;
+    // Body motion from the real accelerations (render only): dive under braking, squat on the power,
+    // roll that only saturates near 3 g, and on the kerb a bob at the stripe rate that follows speed.
+    const vf = p.forwardSpeed;
+    if (dt > 0) this.body.acc += (THREE.MathUtils.clamp((vf - this.body.vf) / dt, -40, 40) - this.body.acc) * (1 - Math.exp(-dt * 50));
+    this.body.vf = vf;
+    k.body.rotation.z += (THREE.MathUtils.clamp(p.yawRate * vf * 0.0028, -0.08, 0.08) - k.body.rotation.z) * Math.min(1, dt * 8);
+    k.body.rotation.x += (THREE.MathUtils.clamp(-0.0035 * this.body.acc, -0.025, 0.04) - k.body.rotation.x) * Math.min(1, dt * 8);
+    const stripe = Math.sin((Math.PI * p.s) / 0.8) > 0 ? 1 : -1;
+    k.body.position.y = p.surface === 'grass' ? Math.sin(this.simT * 40) * 0.012 : p.onKerb ? stripe * 0.014 * Math.min(1, p.speed / 10) : 0;
     for (const f of k.frontPivots) f.rotation.y = -p.steerAngle * 1.2;
     for (const w of k.wheels) w.rotation.x = p.wheelSpin;
+    const live = this.state === 'grid' || this.state === 'racing';
+    const fb = this.fx.frame(live ? dt : 0, this.camera, this.pipeline.renderer, this.pipeline.quality, this.atmos.time === 'night');
+    if (live) {
+      if (fb.impact) {
+        this.audio.impact(fb.impact);
+        this.haptics.impact(fb.impact);
+        this.kickCamera(fb.impact, fb.nx, fb.nz);
+      }
+      if (this.bumpHit) {
+        // Another kart: a softer thump and kick than a tyre wall, away from the kart that hit you.
+        const h = this.bumpHit;
+        this.audio.impact(h.closing * 0.8);
+        this.haptics.impact(h.closing);
+        this.kickCamera(h.closing * 0.6, -h.nx, -h.nz);
+      }
+      this.haptics.kerb(fb.kerb, p.speed);
+      const pb = this.pb?.ms ?? null;
+      if (pb !== this.pbSeen && this.pbSeen !== undefined && pb !== null) this.haptics.personalBest();
+      this.pbSeen = pb;
+      const cockpit = CAMS[this.camMode].id === 'hood';
+      this.audio.update({ speed: p.speed, vmax: p.vmax, throttle: this.throttle, squeal: fb.squeal, kerb: fb.kerb, grass: fb.grass, scrape: fb.scrape, cockpit });
+    }
+    this.bumpHit = null;
 
     const { fwd, pos, look, tmp, up } = this.v;
     fwd.set(Math.sin(heading), 0, Math.cos(heading));
     const mode = CAMS[this.camMode].id;
+    const cam = this.cam;
+    // Portrait phones (0 at aspect 0.8 or wider, 1 at 0.48 and taller): with the wider view below, the
+    // chase camera sits higher and looks down a little more, so the road ahead fills the screen between
+    // the timing panels and the speedometer instead of sky.
+    const tall = THREE.MathUtils.clamp((0.8 - this.camera.aspect) / 0.32, 0, 1);
     let lerp = 1 - Math.exp(-dt * 7);
     if (this.state === 'intro') {
       // Slow cinematic orbit; tight so the camera stays on the circuit (real pit buildings often sit beside the grid).
@@ -1324,20 +1633,28 @@ export class Race {
       lerp = 1 - Math.exp(-dt * 3);
     } else {
       const far = mode === 'far';
-      pos.set(x, far ? 4.2 : 2.3, z).addScaledVector(fwd, far ? -9.5 : -5.2);
-      look.set(x, 0.7, z).addScaledVector(fwd, 3.5);
+      // Look a little into the corner, toward the apex (yawRate > 0 turns left).
+      const side = THREE.MathUtils.clamp(-p.yawRate * p.forwardSpeed * 0.04, -1, 1);
+      cam.side += (side - cam.side) * (1 - Math.exp(-dt * 3));
+      tmp.set(-fwd.z, 0, fwd.x); // right of travel
+      pos.set(x, far ? 4.2 + 0.8 * tall : 2.3 + 1.5 * tall, z).addScaledVector(fwd, far ? -9.5 : -5.2 - 0.4 * tall);
+      look.set(x, 0.7 - 0.3 * tall, z).addScaledVector(fwd, 3.5 + 0.5 * tall).addScaledVector(tmp, cam.side);
     }
     this.camPos.lerp(pos, lerp);
     this.camLook.lerp(look, Math.min(1, lerp * 1.6));
-    this.camera.position.copy(this.camPos);
-    if (p.bump > 0.02) {
-      this.camera.position.x += (Math.random() - 0.5) * p.bump * 0.4;
-      this.camera.position.y += (Math.random() - 0.5) * p.bump * 0.3;
-    }
+    const shake = this.springCamera(live ? dt : 0, fb, tmp);
+    const amount = this.state === 'intro' || mode === 'tv' ? 0 : mode === 'hood' ? 0.5 : 1;
+    this.camera.position.copy(this.camPos).addScaledVector(shake, amount);
     this.camera.lookAt(this.camLook);
-    const fov = this.state === 'intro' ? 42 : (mode === 'hood' ? 70 : 60) + p.speed * 0.38;
-    if (Math.abs(this.camera.fov - fov) > 0.05) {
-      this.camera.fov += (fov - this.camera.fov) * Math.min(1, dt * 4);
+    // FOV: wider with speed; never narrower than 44-50° across (portrait phones), at most 100° tall;
+    // plus the impact punch.
+    const base = this.state === 'intro' ? 42 : (mode === 'hood' ? 70 : 60) + p.speed * 0.38;
+    const across = this.state === 'intro' ? 0 : 44 + 6 * Math.min(1, p.speed / p.vmax);
+    const floor = THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(across / 2)) / this.camera.aspect));
+    cam.fovBase += (Math.min(100, Math.max(base, floor)) - cam.fovBase) * Math.min(1, dt * 4);
+    const fov = cam.fovBase + cam.fov * amount;
+    if (Math.abs(this.camera.fov - fov) > 0.01) {
+      this.camera.fov = fov;
       this.camera.updateProjectionMatrix();
     }
     k.root.visible = mode !== 'hood' || this.state === 'intro';
@@ -1375,9 +1692,7 @@ export class Race {
     const L = this.track.length;
     if (lapT >= 0) {
       this.hud.lapTime(lapT * 1000, this.invalid);
-      const si = Math.floor(p.s / SPLIT);
-      if (this.pb?.splits[si] !== undefined && si < this.splits.length && si > 1) this.hud.delta((lapT * 1000 - this.pb.splits[si]) / 1000);
-      else this.hud.delta(null);
+      this.hud.delta(this.chaseDelta());
       const cur = this.sectorTimes.length;
       const prog = THREE.MathUtils.clamp((p.s - (cur * L) / 3) / (L / 3), 0, 1);
       this.hud.sectors(this.sectorTimes, this.sectorColors, cur, prog);
@@ -1415,40 +1730,6 @@ export class Race {
     g.lineWidth = 3.5;
     g.strokeStyle = '#f2f3f5';
     g.stroke();
-  }
-
-  private updateSkids(drift: boolean) {
-    const p = this.phys;
-    const skidding = p.surface !== 'grass' && p.speed > 4 && (p.slip > 2.6 || (drift && Math.abs(p.yawRate) > 0.6));
-    const fx = Math.sin(p.heading);
-    const fz = Math.cos(p.heading);
-    const sk = this.skid;
-    [-0.6, 0.6].forEach((side, w) => {
-      const cx = p.x + fz * side - fx * 0.62;
-      const cz = p.z - fx * side - fz * 0.62;
-      const prev = sk.prev[w];
-      const cur = this.v.tmp.set(cx, 0.05, cz);
-      if (skidding && prev && prev.distanceToSquared(cur) > 0.04) {
-        const dx = cur.x - prev.x;
-        const dz = cur.z - prev.z;
-        const len = Math.hypot(dx, dz) || 1;
-        const nx = (-dz / len) * 0.1;
-        const nz = (dx / len) * 0.1;
-        const quad = [prev.x - nx, prev.z - nz, prev.x + nx, prev.z + nz, cur.x - nx, cur.z - nz, cur.x + nx, cur.z + nz];
-        const tri = [0, 1, 2, 1, 3, 2];
-        const base = (sk.i % 3000) * 18;
-        tri.forEach((v, n) => {
-          sk.pos[base + n * 3] = quad[v * 2];
-          sk.pos[base + n * 3 + 1] = 0.05;
-          sk.pos[base + n * 3 + 2] = quad[v * 2 + 1];
-        });
-        sk.i++;
-        sk.geo.setDrawRange(0, Math.min(sk.i, 3000) * 6);
-        (sk.geo.attributes.position as THREE.BufferAttribute).needsUpdate = true;
-        prev.set(cx, 0.05, cz);
-      } else if (!skidding) sk.prev[w] = null;
-      else if (!prev) sk.prev[w] = new THREE.Vector3(cx, 0.05, cz); // once per skid, not per tick
-    });
   }
 
   private onResize = () => {

@@ -99,12 +99,30 @@ Lifecycle and rules (housekeeping runs lazily inside any request that loads the 
   moves with the kart's velocity and is pulled towards that target (no steady-state lag, smooth corrections, snap
   beyond 8 m). Measured on localhost: median 4 cm / p90 17 cm off at racing speed (direct link),
   ≈1 m through the relay.
-- **Contact**: each client resolves its own kart against the karts it sees (ellipse footprints, push
-  out and remove closing speed). This is symmetric enough without a server.
+- **Contact** (`RemoteKarts.collide`, after every physics step): each client resolves its own kart
+  against the others, dead-reckoned to the exact time of that physics state (ellipse footprints).
+  Each side moves out half the overlap and takes 0.6 of the closing speed once per contact, so the
+  pair separates at 0.2 of the approach speed: a 5 m/s rear-end costs the hitter 3 m/s and gives
+  the leader 3 m/s. Sliding contact rubs a little speed off; a hit off the kart's axis gives a small
+  yaw kick. `KartPhysics.kartHit` is set for one step per contact (for sound, haptics, the camera).
+  - A kart is a **ghost** (no contact, drawn at 45% opacity) when its pose is over 250 ms old or
+    relayed, it finished (or you did), it jumped more than 3 m in the last 2 s (a reset; yours
+    too), or it has been under 3 m/s for 2 s (stuck karts aren't walls). Karts that overlap when a
+    ghost rule ends stay ghosts until they're apart. All of these are local facts, so the pose
+    format didn't change.
+  - Safety net: a contact still closing after two impulses means the other side isn't resolving
+    it (you're a ghost to them), so the karts pass through rather than one shoving the other.
+- **Slipstream** (`RemoteKarts.tow`): within 14 m behind another kart and 1.4 m of its line, both
+  over 14 m/s, your air drag falls by up to 35% (`KartPhysics.dragScale`, exactly 1 outside
+  multiplayer), worth +2–4 km/h on a straight. Only from karts you could hit (never a ghost,
+  never a pose over 250 ms old), and never from time-trial ghosts. A small **Tow** chip beside the
+  speed shows it (`hud.ts` `TowIndicator`).
 - **Progress / laps**: `MultiplayerRace` integrates distance along the centreline. It wraps at the
   line and ignores jumps no kart could make in one step, so going back and forth over the line or
   cutting across the infield earns nothing. The flag is at `laps × length`, and the crossing
-  is interpolated within the physics step. After the flag the kart drives a cool-down lap on autopilot.
+  is interpolated within the physics step. After the flag the kart drives a cool-down lap on autopilot
+  (`src/game/autopilot.ts`: pure pursuit at a speed planned from the real road ahead; it stays within
+  ~2 m of the centreline on every circuit, and no "Lap invalid" banner shows while it drives).
 - **Standings**: finished players by time, then by progress, then DNF / left. Every client computes
   the same order. Position badges also appear on name tags and the minimap.
 - **Trust**: like the leaderboard, the client is trusted. The server only rejects implausible
@@ -141,8 +159,11 @@ Everything else lives in its own modules.
      relabels the exit button (`exitLabel`). With `startAt` it skips the briefing (`intro.dispose()`
      then `begin()`), because a synchronised start can't wait for "press any key". Then it calls
      `addon.attach(context())`.
-   - `resetToGrid()`: `gridPose(track, gridSlot)` (in `raceMode.ts`) sets the staggered grid
-     position. Without a slot it is the old centreline spot. `startAt` fixes `goAt` to
+   - `resetToGrid()`: `gridPose(track, gridSlot)` (in `raceMode.ts`) sets the grid position: rows
+     of two side by side, the front row 14 m behind the line and 6 m between rows, measured in real
+     metres and squeezed on a short straight (rows 4 m apart, the front row nearer the line) so
+     all 8 slots sit on the straight. The line never moves. Without a slot it is the old
+     centreline spot (time trial). `startAt` fixes `goAt` to
      `SYNC_GO` (4.4 s; the lights come on at 0.9 + 0.7·k).
    - `tick()`: grid timer from `startAt`; `addon.tick(dt)` after physics.
    - `render()`: `addon.frame(dt)` just before `pipeline.render()`.
@@ -165,6 +186,9 @@ Everything else lives in its own modules.
      multiplayer. At ≤640 px the HUD's tools and attribution move to the top right, so the
      standings drop to 96 px from the top.
    - Name tags have their own `.mp-tags` layer.
+   - On the grid, Classic-controls players see "Hold Gas: you launch at lights out" in the controls
+     reminder above the speed (`hud.ts` `LaunchHint`); the usual reminder is back at lights out.
+   - In a slipstream, a small Tow chip sits beside the speed (`hud.ts` `TowIndicator`).
    - The results card is centred. The time-trial lap card still appears on the right.
 4. **Styles**: `src/ui/multiplayer.css` uses the Paddock Paper tokens and the `.btn`, `.label`, `.display`,
    `.mono` and `.graph-paper` primitives. The lobby is paper; the race overlay is night.
