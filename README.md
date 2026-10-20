@@ -40,7 +40,7 @@ spec is [docs/pit-wall.md](docs/pit-wall.md); tokens and shared components live 
 - **Both directions**: every track can be raced in reverse (KF1 really is a dual-direction
   circuit), with separate leaderboards.
 - **Timing like TV**: flying laps, three sectors with purple/green/yellow colours, a live delta
-  to your PB, track limits and wrong-way detection, and five red lights before the start.
+  to your PB, track limits (four wheels off), cut detection that follows the road you're on, and wrong-way detection, and five red lights before the start.
 - **Ghosts**: race against your own PB and the top three drivers on the leaderboard, with
   name tags.
 - **Multiplayer**: create a room, share the link or code, and race friends live (up to 8, N laps,
@@ -89,7 +89,7 @@ In every scheme:
 
 | Action | Keys |
 | --- | --- |
-| Reset onto track | `R` (invalidates the lap), gamepad Y |
+| Reset onto track | `R` or the Reset button that appears when you're stuck (invalidates the lap), gamepad Y |
 | Camera | `C` |
 | Ghosts on/off | `G` |
 | Mute | `M` |
