@@ -254,41 +254,30 @@ export class TrackModel {
     return this.minLap;
   }
 
-  /** Nearest centreline point; uses `hint` (last index) to stay on the right section at crossovers. */
+  /**
+   * Nearest centreline point. With `hint` (the last index) it looks within 40 samples of it, to
+   * stay on the same part of the lap at crossovers, and re-acquires from the whole lap when the
+   * point is past that part's limits and on another part's road, or nowhere near it. Karts use
+   * follow() instead (continuous progress with flagged rejoins).
+   */
   nearest(x: number, z: number, hint = -1): Nearest {
-    let best = -1;
-    let bestD = Infinity;
-    const test = (i: number) => {
-      const dx = x - this.px[i];
-      const dz = z - this.pz[i];
-      const d = dx * dx + dz * dz;
-      if (d < bestD) {
-        bestD = d;
-        best = i;
-      }
-    };
     if (hint >= 0) {
-      for (let k = -40; k <= 40; k++) test((hint + k + this.n) % this.n);
-    }
-    if (best < 0 || bestD > (this.halfWidth + this.runoff + 4) ** 2) {
-      bestD = Infinity;
-      const cx = Math.floor(x / 12);
-      const cz = Math.floor(z / 12);
-      for (let r = 1; r < 40 && best < 0; r += 3) {
-        for (let gx = cx - r; gx <= cx + r; gx++)
-          for (let gz = cz - r; gz <= cz + r; gz++) this.grid.get(`${gx},${gz}`)?.forEach(test);
+      let best = hint;
+      let bestD = Infinity;
+      for (let k = -40; k <= 40; k++) {
+        const i = (hint + k + this.n) % this.n;
+        const d = this.d2(i, x, z);
+        if (d < bestD) {
+          bestD = d;
+          best = i;
+        }
       }
-      if (best < 0) for (let i = 0; i < this.n; i++) test(i);
+      if (bestD <= this.limit ** 2) return this.project(best, x, z);
+      const other = this.closest(x, z);
+      if (other.dist > this.halfWidth + KERB && bestD <= (this.halfWidth + this.runoff + 4) ** 2) return this.project(best, x, z);
+      return other;
     }
-    const i = best;
-    const dx = x - this.px[i];
-    const dz = z - this.pz[i];
-    const along = dx * this.tx[i] + dz * this.tz[i];
-    const [nx, nz] = this.normal(i);
-    const offset = dx * nx + dz * nz;
-    let s = i * (this.length / this.n) + along;
-    s = ((s % this.length) + this.length) % this.length;
-    return { i, s, offset, dist: Math.abs(offset) };
+    return this.closest(x, z);
   }
 
   /** Position + heading at distance s along the lap. */
