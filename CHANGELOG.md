@@ -6,6 +6,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-20
+
 ### Changed
 - **Every race starts at Live**, the real time of day at the circuit. Pick Day or Night on the grid,
   or in the pause menu, for that race only; the next race starts at Live again.
@@ -346,7 +348,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 ### Fixed
 - Leaderboard and lap submission on the live site.
 
-[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.16.0...v0.17.0
