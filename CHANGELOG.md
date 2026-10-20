@@ -6,6 +6,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-10-21
+
 ### Fixed
 - **Cutting across a hairpin no longer counts.** Lap progress now follows the road you're actually
   on, so driving across an infield (KF1's hairpin, for one) voids the lap with "Cut the track", and
@@ -386,7 +388,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 ### Fixed
 - Leaderboard and lap submission on the live site.
 
-[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.22.0...HEAD
+[0.22.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.18.0...v0.19.0
