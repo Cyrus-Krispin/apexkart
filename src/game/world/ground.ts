@@ -475,7 +475,7 @@ function grassTexture(aniso: number): THREE.Texture {
   }
   grassTex = new THREE.CanvasTexture(c);
   grassTex.wrapS = grassTex.wrapT = THREE.RepeatWrapping;
-  grassTex.anisotropy = aniso;
+  grassTex.anisotropy = Math.min(4, aniso); // close up only: 4 taps are plenty
   return grassTex;
 }
 
@@ -503,8 +503,7 @@ export function addDetail(
       extra = /* glsl */ `
         // Close-up grass: tufts and blades a few centimetres across, gone by ~40 m.
         float akNear = 1.0 - smoothstep(7.0, 40.0, distance(vAkWorld, cameraPosition));
-        float akG = texture2D(akGrass, vAkWorld.xz * 0.9).r;
-        diffuseColor.rgb *= 1.0 + (akG - 0.5) * 0.42 * akNear;
+        if (akNear > 0.0) diffuseColor.rgb *= 1.0 + (texture2D(akGrass, vAkWorld.xz * 0.9).r - 0.5) * 0.42 * akNear;
         // Metres beyond the apron (or kerb) edge, from the nearest part of the circuit.
         float akE = texture2D(akField, vMapUv).r * ${(FIELD_MAX - FIELD_MIN).toFixed(1)} + ${FIELD_MIN.toFixed(1)};
         float akW = max(fwidth(akE), 1e-3);

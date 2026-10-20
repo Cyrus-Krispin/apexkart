@@ -60,6 +60,23 @@ export async function fetchLiveEnv(data: TrackData): Promise<boolean> {
   }
 }
 
+/**
+ * Every shadow caster draws with three's one shared depth material, which copies the caster's map
+ * but only picks a new shader when instancing changes between two draws, so which shader variant
+ * gets built depends on draw order: a new pairing mid-race (an instanced tree, then a plain wall)
+ * built a shader after START. Nothing here is alpha-tested, so the shadow pass doesn't need the maps:
+ * dropping them leaves variants that differ only by instancing, and the warm-up's overview frame,
+ * which draws every caster, builds all of them.
+ */
+function plainShadows(root: THREE.Object3D) {
+  root.traverse((o) => {
+    if ((o as THREE.Mesh).isMesh && o.castShadow)
+      o.onBeforeShadow = (_r, _s, _c, _sc, _g, depth) => {
+        (depth as THREE.MeshDepthMaterial).map = null;
+      };
+  });
+}
+
 // Yield between heavy steps so the intro stays responsive (rAF would stall in background tabs).
 const frame = () => new Promise((r) => setTimeout(r, 16));
 
@@ -110,6 +127,7 @@ export async function buildWorld(o: {
   await frame();
   group.add(painter.toMesh(o.aniso));
   group.add(buildHorizon(track, data.id));
+  plainShadows(group);
   const groundColor = new THREE.Color(GROUND.grass);
   // Not "Ready" yet: the race warms its shaders, textures and lights up before START unlocks.
   return { group, groundColor, emissive: side.emissive, lamps: side.lamps, stats: { buildings: b.footprints.length, trees: trees.count, env: !!env } };
