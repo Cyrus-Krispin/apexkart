@@ -8,8 +8,11 @@ const CELL = 12; // spatial grid cell, metres
 
 /** The kerb band beyond the asphalt edge, metres. */
 export const KERB = 1.1;
-/** How far past the asphalt edge the kart's centre may go before the lap is invalid. */
-export const LIMIT_GRACE = 2.4;
+/**
+ * How far past the asphalt edge the kart's centre may go before the lap is invalid: the kerb
+ * (1.15 m) plus half a kart (0.7 m), i.e. all four wheels off.
+ */
+export const LIMIT_GRACE = 1.85;
 
 export interface Projection {
   lat0: number;

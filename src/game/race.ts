@@ -637,7 +637,7 @@ export class Race {
         this.sectorColors.push(this.sectorColor(k, t));
       }
     }
-    if (!this.invalid && Math.abs(this.phys.offset) > this.track.halfWidth + 2.4) this.invalidate('Track limits');
+    if (!this.invalid && Math.abs(this.phys.offset) > this.track.limit) this.invalidate('Track limits'); // four wheels off
 
     const t = this.track;
     const i = this.phys.hint;
