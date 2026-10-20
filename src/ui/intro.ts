@@ -1,10 +1,9 @@
-import { escapeHtml, formatMs, saveDriver, type BoardResponse, type Dir, type Driver } from '../net/api';
+import { escapeHtml, formatMs, type BoardResponse, type Dir, type Driver } from '../net/api';
 import type { TrackData } from '../track/osm';
 import type { TimeOfDay, TimePref } from '../game/atmosphere';
 import { SCHEME_LABEL, touchDevice, type ControlScheme } from '../game/input';
 import { earnedMedal, MEDAL_NAME, MEDALS, targets } from '../game/medals';
 import type { TrackShape } from '../track/shape';
-import { cleanDriverName } from './profile';
 import { circuitCode, stripeStyle } from './pitwall';
 import { rotationLabel, trackArt } from './trackArt';
 
@@ -55,10 +54,10 @@ interface Lap {
 }
 
 /**
- * The grid: the pre-race briefing. The circuit drawn large on the timing screen, and the world
- * loading as a lap of it: a dot leaves the line, each sector lights up as it passes, and the
- * chequered line flashes when it gets back. The times to beat, controls and time of day around
- * it, and one green START, by tap or any key.
+ * The grid: the moment before the race. The circuit drawn large, and the world loading as a lap of
+ * it: a dot leaves the line, each sector lights up as it passes, and the chequered line flashes
+ * when it gets back. Around it, read-only: the times to beat, the medal you're chasing and your
+ * setup (chosen on the circuit page). One green START, by tap or any key, once it's ready.
  */
 export class RaceIntro {
   readonly el: HTMLDivElement;
@@ -66,12 +65,12 @@ export class RaceIntro {
   private started = false;
   private count: HTMLElement;
   private pct: HTMLElement;
-  private go: HTMLElement; // status line: the race starts on its own once the world is ready
+  private go: HTMLButtonElement;
   private help: HTMLElement;
   private medals: HTMLElement;
   private record: HTMLElement;
   private art: HTMLElement;
-  private markControls: (s: ControlScheme) => void;
+  private setup: HTMLElement;
   // Progress: what's loaded, where the lap is heading (loaded, or the line once START is live),
   // and where the dot is.
   private loaded = 0;
@@ -99,15 +98,12 @@ export class RaceIntro {
     const rot = rotationLabel(o.shape, o.dir === 'rev');
     const code = circuitCode(t.name);
     const where = t.location || 'OpenStreetMap circuit';
-    const tabs = (attr: string, items: [string, string, string?][]) =>
-      items.map(([v, label, small]) => `<button type="button" role="radio" ${attr}="${v}">${label}${small ? `<small>${small}</small>` : ''}</button>`).join('');
     this.el = document.createElement('div');
     this.el.className = 'intro-ov';
     this.el.innerHTML = `
       <header class="io-top">
         <button class="io-back" data-act="back"><span aria-hidden="true">‹</span> Circuits</button>
         <span class="io-sess"><i class="live-dot"></i>On the grid</span>
-        <label class="io-driver"><span class="pw-k">Racing as</span><input maxlength="16" value="${escapeHtml(o.driver.name)}" spellcheck="false" autocomplete="off" aria-label="Driver name" /></label>
       </header>
 
       <section class="io-map">
@@ -131,38 +127,26 @@ export class RaceIntro {
           <div><span class="pw-k">Your best</span><b class="pw-t ${o.pb ? 'io-pb' : 'none'}">${o.pb ? formatMs(o.pb) : 'No time'}</b></div>
           <div><span class="pw-k">Track record</span><b class="pw-t io-rec" data-el="rec">–:––.–––</b></div>
         </div>
-        <div class="io-block io-medals">
-          <span class="pw-k">Medal targets</span>
-          <div class="io-med" data-el="medals">${MEDALS.map((m) => `<div><i class="medal ${m}"></i><span>${MEDAL_NAME[m]}</span><b class="mono">–:––.–––</b></div>`).join('')}</div>
+        <div class="io-block">
+          <span class="pw-k">Chasing</span>
+          <p class="io-tgt" data-el="medals">–</p>
         </div>
-        <div class="io-block io-ctl">
-          <span class="pw-k">Controls</span>
-          <div class="pw-tabs" role="radiogroup" aria-label="Controls">${tabs('data-controls', o.schemes.map((s) => [s, SCHEME_LABEL[s]]))}</div>
+        <div class="io-block">
+          <span class="pw-k">Setup</span>
+          <p class="io-setup" data-el="setup"></p>
           <p class="io-help" data-el="help"></p>
         </div>
-        <div class="io-block io-tod">
-          <span class="pw-k">Time of day</span>
-          <div class="pw-tabs soft" role="radiogroup" aria-label="Time of day">${tabs('data-time', [
-            ['live', 'Live', o.liveNow === 'night' ? 'Night now' : 'Day now'],
-            ['day', 'Day'],
-            ['night', 'Night', 'Floodlit'],
-          ])}</div>
-        </div>
-        <ol class="io-rules">
-          <li><b>Flying lap</b>The clock starts when you cross the line.</li>
-          <li><b>Track limits</b>Four wheels off the track and the lap won't count.</li>
-          <li><b>Live board</b>Your best lap goes on the board, and its ghost races everyone.</li>
-        </ol>
       </section>
 
       <footer class="io-foot">
-        <p class="io-go" data-el="go" role="status" aria-live="polite"><i class="live-dot"></i><span>On the grid at ${escapeHtml(code)} as soon as the world is ready</span></p>
+        <button class="btn go lg block io-go" data-el="go" disabled>Start ${escapeHtml(code)}<span class="io-go-sub">${touchDevice() ? '' : 'or press any key'}</span></button>
       </footer>`;
     o.container.appendChild(this.el);
     const $ = (k: string) => this.el.querySelector<HTMLElement>(`[data-el=${k}]`)!;
     this.count = $('count');
     this.pct = $('pct');
-    this.go = $('go');
+    this.go = $('go') as HTMLButtonElement;
+    this.setup = $('setup');
     this.help = $('help');
     this.medals = $('medals');
     this.record = $('rec');
@@ -176,57 +160,20 @@ export class RaceIntro {
     this.lap = this.setupLap();
     this.raf = requestAnimationFrame(this.tick);
 
-    const input = this.el.querySelector('input')!;
-    input.addEventListener('input', () => {
-      const v = cleanDriverName(input.value);
-      if (v !== input.value) input.value = v;
-      o.driver.name = v.trim() || 'Driver';
-      saveDriver(o.driver);
-    });
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') input.blur();
-      e.stopPropagation();
-    });
-    const seg = [...this.el.querySelectorAll<HTMLButtonElement>('[data-time]')];
-    const mark = (t: TimePref) =>
-      seg.forEach((b) => {
-        const on = b.dataset.time === t;
-        b.classList.toggle('on', on);
-        b.setAttribute('aria-checked', String(on));
-      });
-    mark(o.time);
-    seg.forEach((b) =>
-      b.addEventListener('click', (e) => {
-        if (e.detail > 0) b.blur(); // after a pointer click, the next key press starts the race again
-        const t = b.dataset.time as TimePref;
-        if (b.classList.contains('on')) return;
-        mark(t);
-        o.onTime(t);
-      }),
-    );
-    const ctl = [...this.el.querySelectorAll<HTMLButtonElement>('[data-controls]')];
-    this.markControls = (s) =>
-      ctl.forEach((b) => {
-        const on = b.dataset.controls === s;
-        b.classList.toggle('on', on);
-        b.setAttribute('aria-checked', String(on));
-      });
     this.setControls(o.controls);
-    ctl.forEach((b) =>
-      b.addEventListener('click', (e) => {
-        if (e.detail > 0) b.blur();
-        if (!b.classList.contains('on')) o.onControls(b.dataset.controls as ControlScheme); // the race calls setControls back
-      }),
-    );
     this.el.querySelector('[data-act=back]')!.addEventListener('click', () => o.onBack());
+    this.go.addEventListener('click', () => this.start());
     addEventListener('keydown', this.onKey);
-    // Don't hold people hostage to slow tiles: go after a few seconds regardless.
+    // Don't hold people hostage to slow tiles: allow starting after a few seconds regardless.
     setTimeout(() => this.ready(), 5000);
   }
 
-  /** Show a scheme as picked, with its controls. */
+  /** The setup line (direction, time of day, controls) and the keys for the scheme. */
   setControls(s: ControlScheme) {
-    this.markControls(s);
+    const o = this.o;
+    const rot = rotationLabel(o.shape, o.dir === 'rev');
+    const time = o.time === 'live' ? `Live (${o.liveNow})` : o.time === 'day' ? 'Day' : 'Night';
+    this.setup.innerHTML = `<span>${rot.icon} ${rot.label}</span><span>${time}</span><span>${SCHEME_LABEL[s]} controls</span>`;
     this.help.innerHTML = controlsHelp(s);
   }
 
@@ -240,17 +187,16 @@ export class RaceIntro {
     this.paintMedals(rec?.ms ?? 0);
   }
 
-  /** Medal cells: won ones ticked, the next one ringed. null = the record isn't known yet. */
+  /** The medal you're chasing and its time (null = the record, and so the targets, aren't known yet). */
   private paintMedals(record: number | null) {
     const have = earnedMedal(this.o.track.id, this.o.dir);
     const next = MEDALS[(have ? MEDALS.indexOf(have) : -1) + 1];
+    if (!next) {
+      this.medals.innerHTML = '<i class="medal platinum"></i> All medals won. Platinum is record pace.';
+      return;
+    }
     const tg = record === null ? null : targets(record, this.o.track.lengthM);
-    MEDALS.forEach((m, k) => {
-      const cell = this.medals.children[k] as HTMLElement;
-      const won = have !== null && k <= MEDALS.indexOf(have);
-      cell.className = won ? 'won' : m === next ? 'next' : '';
-      cell.querySelector('b')!.textContent = tg ? formatMs(tg[m]) : '–:––.–––';
-    });
+    this.medals.innerHTML = `<i class="medal ${next}"></i> <b>${MEDAL_NAME[next]}</b> <span class="mono">${tg ? formatMs(tg[next]) : '–:––.–––'}</span>`;
   }
 
   // ---------- the loading lap
@@ -338,12 +284,10 @@ export class RaceIntro {
       this.paintLap(lap, this.shown);
     }
     if (this.shown >= 1) {
-      // Back at the line: it flashes, the lap is done, and the lights come on. You already pressed
-      // Start on the circuit, so there's nothing to press here.
+      // Back at the line: it flashes, and the lap is done.
       this.flagged = true;
       this.art.classList.add('flag');
       this.paintText();
-      setTimeout(() => this.start(), this.still ? 0 : 320);
       return;
     }
     this.raf = requestAnimationFrame(this.tick);
@@ -365,13 +309,10 @@ export class RaceIntro {
   ready() {
     if (this.canStart) return;
     this.canStart = true;
-    this.goal = 1; // the dot sprints for the line, and the race starts when it gets there
-    this.go.querySelector('span')!.textContent = 'Lights';
+    this.goal = 1; // the dot sprints for the line; START doesn't wait for it
+    this.go.disabled = false;
     this.el.classList.add('ready');
-    if (!this.lap) {
-      this.paintText();
-      setTimeout(() => this.start(), 300);
-    }
+    if (!this.lap) this.paintText();
   }
 
   private start() {
