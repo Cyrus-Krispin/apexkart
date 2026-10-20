@@ -6,6 +6,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-20
+
 ### Added
 - **Choose how you drive**, in the pre-race briefing or the pause menu:
   - **Simple**: the kart accelerates by itself, so you only brake and steer. No drifting. Hold
@@ -255,7 +257,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 ### Fixed
 - Leaderboard and lap submission on the live site.
 
-[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.13.1...HEAD
+[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.11.0...v0.12.0
