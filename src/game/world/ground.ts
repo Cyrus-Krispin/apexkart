@@ -4,12 +4,14 @@ import * as THREE from 'three';
 import type { EnvData, AreaKind, LineKind } from '../../track/env';
 import type { TrackModel } from '../track';
 import { footprintTouchesTrack, Land, projectRing, rng, type Extent, type LandClass, type Pt } from './common';
+import { kerbWidthAt } from '../kerbs';
 
 export const GROUND = {
   grass: '#7da457',
   grassDark: '#739b4f',
   mowA: '#86ae5e',
   mowB: '#78a052',
+  mowMid: '#7fa758',
   apron: '#c8c1b1',
 };
 
@@ -46,11 +48,16 @@ export class GroundPainter {
   private clsW: number;
   private clsH: number;
 
+  /**
+   * `fine` (Medium and High, decided once at world build): the run-off's mowing stripes and the seam
+   * at the apron are drawn crisp in the ground shader instead of painted, plus a close-up grass octave.
+   */
   constructor(
     private track: TrackModel,
     private env: EnvData | null,
     extent: Extent,
     maxTex: number,
+    private fine = false,
   ) {
     // Never paint more than ~2.4 km across.
     const cx = (extent.x0 + extent.x1) / 2;
@@ -206,7 +213,10 @@ export class GroundPainter {
     sg.fillRect(sw, 0, sw, 4);
     const pattern = g.createPattern(stripe, 'repeat')!;
     pattern.setTransform(new DOMMatrix().rotate((Math.atan2(t.tz[0], t.tx[0]) * 180) / Math.PI + 90));
-    stroke(loop, 2 * (t.halfWidth + t.runoff), pattern, Land.Track, true);
+    // Fine grounds get their stripes from the shader (crisp, following the track); paint them plain.
+    stroke(loop, 2 * (t.halfWidth + t.runoff), this.fine ? GROUND.mowMid : pattern, Land.Track, true);
+    // A soft darker seam just outside the apron, so the concrete sits in the grass (every tier).
+    stroke(loop, 2 * (t.halfWidth + 1.45), 'rgba(38,58,22,0.28)', null, true);
     // The concrete apron itself is a mesh with crisp edges (trackside.ts, to hw + 1.1 m); paint it
     // only well inside that, so the ground texture's blur never shows past its edge as a smear.
     stroke(loop, 2 * (t.halfWidth + 0.7), GROUND.apron, Land.Track, true);
@@ -251,6 +261,64 @@ export class GroundPainter {
     }
   }
 
+  /**
+   * Distance from the circuit for the ground shader, over the same extent as the ground texture:
+   * metres beyond the apron or kerb's outer edge (FIELD_MIN..FIELD_MAX), from the nearest section
+   * of the lap. Distance is linear in position, so even a texel per metre or two gives crisp bands.
+   */
+  private trackField(): THREE.DataTexture {
+    const t = this.track;
+    const e = this.extent;
+    const w = e.x1 - e.x0;
+    const h = e.z1 - e.z0;
+    const per = Math.min(1, 1024 / Math.max(w, h)); // texels per metre
+    const W = Math.max(2, Math.ceil(w * per));
+    const H = Math.max(2, Math.ceil(h * per));
+    const cw = w / W;
+    const ch = h / H;
+    const best = new Float32Array(W * H).fill(FIELD_MAX);
+    const reach = t.halfWidth + 1.2 + FIELD_MAX + 1;
+    for (let i = 0; i < t.n; i++) {
+      const j = (i + 1) % t.n;
+      const ax = t.px[i];
+      const az = t.pz[i];
+      const dx = t.px[j] - ax;
+      const dz = t.pz[j] - az;
+      const L2 = dx * dx + dz * dz || 1;
+      const edgeR = t.halfWidth + kerbWidthAt(t, i, 1);
+      const edgeL = t.halfWidth + kerbWidthAt(t, i, -1);
+      const i0 = Math.max(0, Math.floor((Math.min(ax, ax + dx) - reach - e.x0) / cw));
+      const i1 = Math.min(W - 1, Math.ceil((Math.max(ax, ax + dx) + reach - e.x0) / cw));
+      // Rows run south to north (row 0 at z1), matching the ground plane's v.
+      const j0 = Math.max(0, Math.floor((e.z1 - Math.max(az, az + dz) - reach) / ch));
+      const j1 = Math.min(H - 1, Math.ceil((e.z1 - Math.min(az, az + dz) + reach) / ch));
+      for (let r = j0; r <= j1; r++) {
+        const z = e.z1 - (r + 0.5) * ch;
+        for (let c = i0; c <= i1; c++) {
+          const x = e.x0 + (c + 0.5) * cw;
+          const f = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / L2));
+          const qx = x - ax - dx * f;
+          const qz = z - az - dz * f;
+          const d = Math.sqrt(qx * qx + qz * qz);
+          // Right of travel when (q × tangent) points up: TrackModel.normal is (-tz, tx).
+          const right = qx * -dz + qz * dx >= 0;
+          const v = d - (right ? edgeR : edgeL);
+          const k = r * W + c;
+          if (v < best[k]) best[k] = v;
+        }
+      }
+    }
+    const data = new Uint8Array(W * H);
+    for (let k = 0; k < data.length; k++) data[k] = Math.round(((Math.min(FIELD_MAX, Math.max(FIELD_MIN, best[k])) - FIELD_MIN) / (FIELD_MAX - FIELD_MIN)) * 255);
+    const tex = new THREE.DataTexture(data, W, H, THREE.RedFormat, THREE.UnsignedByteType);
+    tex.magFilter = THREE.LinearFilter;
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
+    tex.generateMipmaps = true;
+    tex.unpackAlignment = 1;
+    tex.needsUpdate = true;
+    return tex;
+  }
+
   /** Bake into a ground mesh. Edges fade into the base grass colour of the endless plane. */
   toMesh(maxAniso: number): THREE.Mesh {
     const g = this.ctx;
@@ -278,7 +346,7 @@ export class GroundPainter {
     const geo = new THREE.PlaneGeometry(e.x1 - e.x0, e.z1 - e.z0);
     geo.rotateX(-Math.PI / 2);
     const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.96, metalness: 0 });
-    addDetail(mat, 2.2, 0.26);
+    addDetail(mat, 2.2, 0.26, this.fine ? { field: this.trackField(), grass: grassTexture(maxAniso) } : undefined);
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set((e.x0 + e.x1) / 2, -0.02, (e.z0 + e.z1) / 2);
     mesh.receiveShadow = true;
@@ -316,24 +384,113 @@ function detailTexture(): THREE.Texture {
   return detailTex;
 }
 
-/** Multiply a tiling world-space detail texture into a material's colour (crisp close up). */
-export function addDetail(mat: THREE.MeshStandardMaterial | THREE.MeshLambertMaterial, metres: number, strength: number) {
+const FIELD_MIN = -1; // metres beyond the apron edge stored in the ground's track field
+const FIELD_MAX = 9;
+
+let grassTex: THREE.Texture | null = null;
+/** Close-up grass for Medium and High: small tufts and blade strokes, tiling, anisotropic. */
+function grassTexture(aniso: number): THREE.Texture {
+  if (grassTex) return grassTex;
+  const N = 256;
+  const c = document.createElement('canvas');
+  c.width = c.height = N;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#808080';
+  g.fillRect(0, 0, N, N);
+  const rand = rng(97531);
+  // Draw a shape at (x, y) and at its wrapped copies, so the texture tiles seamlessly.
+  const wrapped = (x: number, y: number, r: number, draw: (x: number, y: number) => void) => {
+    for (const ox of [0, -N, N]) for (const oy of [0, -N, N]) if (x + ox > -r && x + ox < N + r && y + oy > -r && y + oy < N + r) draw(x + ox, y + oy);
+  };
+  for (let i = 0; i < 260; i++) {
+    const x = rand() * N;
+    const y = rand() * N;
+    const r = 4 + rand() * 9;
+    const v = rand() > 0.55 ? 255 : 0;
+    wrapped(x, y, r, (px, py) => {
+      const grd = g.createRadialGradient(px, py, 0, px, py, r);
+      grd.addColorStop(0, `rgba(${v},${v},${v},0.16)`);
+      grd.addColorStop(1, `rgba(${v},${v},${v},0)`);
+      g.fillStyle = grd;
+      g.fillRect(px - r, py - r, r * 2, r * 2);
+    });
+  }
+  g.lineCap = 'round';
+  for (let i = 0; i < 3200; i++) {
+    const x = rand() * N;
+    const y = rand() * N;
+    const a = rand() * Math.PI * 2;
+    const len = 2 + rand() * 4.5;
+    const v = rand() > 0.5 ? 200 + rand() * 55 : rand() * 70;
+    g.strokeStyle = `rgba(${v | 0},${v | 0},${v | 0},${0.35 + rand() * 0.3})`;
+    g.lineWidth = 0.8 + rand() * 0.7;
+    wrapped(x, y, len, (px, py) => {
+      g.beginPath();
+      g.moveTo(px, py);
+      g.lineTo(px + Math.cos(a) * len, py + Math.sin(a) * len);
+      g.stroke();
+    });
+  }
+  grassTex = new THREE.CanvasTexture(c);
+  grassTex.wrapS = grassTex.wrapT = THREE.RepeatWrapping;
+  grassTex.anisotropy = aniso;
+  return grassTex;
+}
+
+/**
+ * Multiply a tiling world-space detail texture into a material's colour (crisp close up).
+ * The ground on Medium and High also passes `field` (distance from the circuit, sampled with the
+ * material's map uv) for mowing stripes that follow the track and a crisp seam at the apron, and
+ * `grass`, a finer octave that fades out with distance so the far field stays calm.
+ */
+export function addDetail(
+  mat: THREE.MeshStandardMaterial | THREE.MeshLambertMaterial,
+  metres: number,
+  strength: number,
+  ground?: { field: THREE.Texture; grass: THREE.Texture },
+) {
   const tex = detailTexture();
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.detailMap = { value: tex };
     shader.uniforms.detailScale = { value: 1 / metres };
     shader.uniforms.detailStrength = { value: strength };
+    let extra = '';
+    if (ground) {
+      shader.uniforms.akField = { value: ground.field };
+      shader.uniforms.akGrass = { value: ground.grass };
+      extra = /* glsl */ `
+        // Close-up grass: tufts and blades a few centimetres across, gone by ~40 m.
+        float akNear = 1.0 - smoothstep(7.0, 40.0, distance(vAkWorld, cameraPosition));
+        float akG = texture2D(akGrass, vAkWorld.xz * 0.9).r;
+        diffuseColor.rgb *= 1.0 + (akG - 0.5) * 0.42 * akNear;
+        // Metres beyond the apron (or kerb) edge, from the nearest part of the circuit.
+        float akE = texture2D(akField, vMapUv).r * ${(FIELD_MAX - FIELD_MIN).toFixed(1)} + ${FIELD_MIN.toFixed(1)};
+        float akW = max(fwidth(akE), 1e-3);
+        // Mowing stripes 1.5 m wide, running along the track across the run-off; they fade out
+        // where a stripe gets thinner than a few pixels rather than shimmer.
+        float akS = akE / 1.5;
+        float akStripe = clamp(sin(3.14159 * akS) / (3.14159 * akW / 1.5), -1.0, 1.0) * (1.0 - smoothstep(0.25, 0.6, akW / 1.5));
+        float akBand = smoothstep(0.3, 0.8, akE) * (1.0 - smoothstep(5.4, 6.0, akE));
+        diffuseColor.rgb *= 1.0 + 0.06 * akStripe * akBand;
+        // A thin dark seam where the concrete meets the grass.
+        float akSeam = (1.0 - smoothstep(0.0, max(0.28, akW), akE)) * step(-0.3, akE);
+        diffuseColor.rgb *= 1.0 - 0.3 * akSeam;`;
+    }
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vAkWorld;')
       .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvAkWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vAkWorld;\nuniform sampler2D detailMap;\nuniform float detailScale;\nuniform float detailStrength;')
+      .replace(
+        '#include <common>',
+        `#include <common>\nvarying vec3 vAkWorld;\nuniform sampler2D detailMap;\nuniform float detailScale;\nuniform float detailStrength;${ground ? '\nuniform sampler2D akField;\nuniform sampler2D akGrass;' : ''}`,
+      )
       .replace(
         '#include <map_fragment>',
         `#include <map_fragment>
         float akD = texture2D(detailMap, vAkWorld.xz * detailScale).r * 0.6 + texture2D(detailMap, vAkWorld.xz * detailScale * 0.23).r * 0.4;
-        diffuseColor.rgb *= 1.0 + (akD - 0.5) * detailStrength * 2.0;`,
+        diffuseColor.rgb *= 1.0 + (akD - 0.5) * detailStrength * 2.0;${extra}`,
       );
   };
-  mat.customProgramCacheKey = () => `ak-detail-${metres}-${strength}`;
+  mat.customProgramCacheKey = () => `ak-detail-${metres}-${strength}${ground ? '-ground' : ''}`;
+  if (ground) mat.userData.akTextures = [ground.field, ground.grass, tex];
 }

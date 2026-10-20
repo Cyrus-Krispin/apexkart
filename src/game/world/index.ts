@@ -87,7 +87,7 @@ export async function buildWorld(o: {
 
   o.onStage('Painting the ground', 0.25);
   await frame();
-  const painter = new GroundPainter(track, env, extent, o.quality === 'low' ? 2048 : 4096);
+  const painter = new GroundPainter(track, env, extent, o.quality === 'low' ? 2048 : 4096, o.quality !== 'low');
   painter.paint();
   if (o.isDisposed()) return null;
 

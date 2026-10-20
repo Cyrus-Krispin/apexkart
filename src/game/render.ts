@@ -92,6 +92,8 @@ export function texturesUnder(root: THREE.Object3D): THREE.Texture[] {
     if (!m) return;
     for (const mat of Array.isArray(m) ? m : [m]) {
       for (const v of Object.values(mat)) if ((v as THREE.Texture | null)?.isTexture) out.add(v as THREE.Texture);
+      // Textures a material's onBeforeCompile patch samples (the ground's detail, grass and track field).
+      for (const t of (mat.userData?.akTextures as THREE.Texture[] | undefined) ?? []) out.add(t);
       const u = (mat as THREE.ShaderMaterial).uniforms;
       if (u) for (const x of Object.values(u)) if ((x?.value as THREE.Texture | null)?.isTexture) out.add(x.value as THREE.Texture);
     }
