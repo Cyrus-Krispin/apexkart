@@ -22,7 +22,8 @@ spec is [docs/pit-wall.md](docs/pit-wall.md); tokens and shared components live 
   metre (`src/game/track.ts`). The start/finish line is auto-placed on the longest straight.
 - **The real place in 3D** (`src/game/world/`): OpenStreetMap buildings are extruded to their
   real height, land use is painted into a crisp stylised ground, and trees fill the mapped woods
-  and parks. The circuit gets raised kerbs, a branded tyre wall on the physics barrier,
+  and parks. The circuit gets raised kerbs where a real track has them (corner apexes and
+  exits), a concrete apron, grid boxes, braking marks and boards, a branded tyre wall on the physics barrier,
   floodlights, hoardings, a grandstand, a pit building and marshal posts. Featured circuits ship
   with baked surroundings in `public/tracks/env/`.
 - **Renderer** (`src/game/render.ts`): golden-hour light, GTAO ambient occlusion, bloom, sky
