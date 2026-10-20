@@ -1,15 +1,19 @@
-// HTML for the atlas: the dock's Race now tile and rail cards, the track sheet, search results,
-// the country list and the live panel. Pure functions of their inputs; atlas.ts wires them up.
-import type { LatLon, TrackData } from '../track/osm';
+// HTML for the home screen in the Pit Wall design (docs/pit-wall.md): the timing tower, the daily
+// and Box box bars, the pit board for a circuit, search results and the live sheet. Pure functions
+// of their inputs; atlas.ts wires them up.
+import type { TrackData } from '../track/osm';
 import type { TrackShape } from '../track/shape';
+import { cornersInRaceOrder } from '../track/shape';
 import { trackArt, rotationLabel, type ArtOptions } from './trackArt';
 import { escapeHtml as esc, formatMs, timeAgo, type BoardResponse, type DailyResponse, type Dir, type FeedItem } from '../net/api';
-import type { Venue } from './world';
 import { MEDALS, MEDAL_NAME, type Medal, type Targets } from '../game/medals';
+import type { ControlScheme } from '../game/input';
+import type { TimePref } from '../game/prefs';
+import { stripeStyle } from './pitwall';
 
 export { esc, formatMs };
 
-/** Track drawings are pure functions of the shape and options, and the rail redraws often: cache them. */
+/** Track drawings are pure functions of the shape and options, and screens redraw often: cache them. */
 const artCache = new WeakMap<TrackShape, Map<string, string>>();
 function art(shape: TrackShape, o: ArtOptions): string {
   let byOpts = artCache.get(shape);
@@ -20,229 +24,148 @@ function art(shape: TrackShape, o: ArtOptions): string {
   return svg;
 }
 
-export const SEARCH_ICON = `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.5 15.5L21 21" stroke="currentColor" stroke-width="2" stroke-linecap="square"/></svg>`;
-const PLAY = `<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 2.5v11L13.5 8z" fill="currentColor"/></svg>`;
-const LOOP = `<svg viewBox="0 0 120 56" width="120" height="56" aria-hidden="true"><path d="M18 40c-8-4-9-18 2-22 9-3 18 6 30 4s16-14 30-12 24 12 20 24-18 12-30 8-26 6-36 4-10-3-16-6z" fill="none" stroke="currentColor" stroke-width="2.5" stroke-dasharray="5 5" stroke-linejoin="round"/><circle cx="18" cy="40" r="4" fill="currentColor"/></svg>`;
-const SUN = `<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><circle cx="8" cy="8" r="3.2" fill="currentColor"/><path d="M8 1v2.2M8 12.8V15M1 8h2.2M12.8 8H15M3 3l1.6 1.6M11.4 11.4L13 13M13 3l-1.6 1.6M4.6 11.4L3 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
-const MOON = `<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M10.8 1.6A6.6 6.6 0 1 0 14.4 11 5.4 5.4 0 0 1 10.8 1.6z" fill="currentColor"/></svg>`;
-const GHOST_ICON = `<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 1.5c-3 0-5 2.2-5 5.2v7.3l1.7-1.3 1.6 1.3L8 12.7l1.7 1.3 1.6-1.3 1.7 1.3V6.7c0-3-2-5.2-5-5.2z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><circle cx="6.2" cy="6.6" r="1" fill="currentColor"/><circle cx="9.8" cy="6.6" r="1" fill="currentColor"/></svg>`;
-const NEAR_ICON = `<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="8" cy="8" r="2" fill="currentColor"/></svg>`;
+export const ICON = {
+  search: `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M15.5 15.5L21 21" stroke="currentColor" stroke-width="2.2" stroke-linecap="square"/></svg>`,
+  close: `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="square"/></svg>`,
+  ghost: `<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 1.5c-3 0-5 2.2-5 5.2v7.3l1.7-1.3 1.6 1.3L8 12.7l1.7 1.3 1.6-1.3 1.7 1.3V6.7c0-3-2-5.2-5-5.2z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><circle cx="6.2" cy="6.6" r="1" fill="currentColor"/><circle cx="9.8" cy="6.6" r="1" fill="currentColor"/></svg>`,
+  pin: `<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="8" cy="8" r="2" fill="currentColor"/></svg>`,
+};
 
-export function coords(c: LatLon) {
-  const la = `${Math.abs(c[0]).toFixed(3)}°${c[0] >= 0 ? 'N' : 'S'}`;
-  const lo = `${Math.abs(c[1]).toFixed(3)}°${c[1] >= 0 ? 'E' : 'W'}`;
-  return `${la} ${lo}`;
+const MEDAL_SHORT: Record<Medal, string> = { bronze: 'BRNZ', silver: 'SILV', gold: 'GOLD', platinum: 'PLAT' };
+const km = (m: number) => (m / 1000).toFixed(2);
+const gap = (ms: number) => `${ms < 0 ? '−' : '+'}${(Math.abs(ms) / 1000).toFixed(3)}`;
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+/** "12:04:51" until the daily circuit resets. */
+export function clock(msLeft: number): string {
+  const s = Math.max(0, Math.floor(msLeft / 1000));
+  return `${pad2(Math.floor(s / 3600))}:${pad2(Math.floor(s / 60) % 60)}:${pad2(s % 60)}`;
 }
 
-const km = (m: number) => (m / 1000).toFixed(2);
-const place = (t: TrackData) => (t.location ? t.location.split(',')[0] : coords(t.center));
+// ------------------------------------------------------------------ tower
 
-// ------------------------------------------------------------------ dock
+export type Tab = 'live' | 'near' | 'world';
 
-export function nowTile(p: { t: TrackData; shape: TrackShape; dir: Dir; why: string; pb: number | null } | null): string {
-  if (!p) return `<button class="now" data-now disabled><span class="now-top"><span class="label">Race now</span></span><span class="now-name display">Loading…</span></button>`;
-  const rot = rotationLabel(p.shape, p.dir === 'rev');
-  return `<button class="now" data-now title="Race ${esc(p.t.name)} (Enter)">
-    <span class="now-art" aria-hidden="true">${art(p.shape, { w: 220, h: 150, pad: 12, reverse: p.dir === 'rev', arrows: false })}</span>
-    <span class="now-top"><span class="label">Race now</span><kbd>↵</kbd></span>
-    <span class="now-name display">${esc(p.t.name)}</span>
-    <span class="now-why">${esc(p.why)}<span class="now-rot"> · ${rot.icon} ${rot.label.toLowerCase()}</span>${p.pb ? ` · PB <b class="mono">${formatMs(p.pb)}</b>` : ''}</span>
-    <span class="now-go display">Go <span class="arrow">→</span></span>
+export interface TowerRow {
+  key: string; // t:ID (a raceable layout) or v:i (a venue whose layouts load on tap)
+  code: string;
+  name: string;
+  sub: string; // city · country, or why it's here
+  cc?: string;
+  best?: number | null; // track record, ms
+  flash?: '' | 'p' | 'g';
+  live: number;
+  distKm?: number; // near me
+  medal?: Medal | null;
+  daily?: boolean;
+}
+
+export function towerHead(tab: Tab): string {
+  return `<span>POS</span><span>CIRCUIT</span><span>RECORD</span><span>${tab === 'near' ? 'KM' : 'LIVE'}</span>`;
+}
+
+export function towerRow(r: TowerRow, pos: number, sel: boolean, tab: Tab): string {
+  const right =
+    tab === 'near' && r.distKm !== undefined
+      ? `<span class="tw-km mono${r.live ? ' on' : ''}">${r.distKm < 10 ? r.distKm.toFixed(1) : Math.round(r.distKm)}</span>`
+      : `<span class="pw-lv${r.live ? '' : ' z'}">${r.live}</span>`;
+  return `<button class="pw-row tw-row${sel ? ' sel' : ''}${r.daily ? ' daily' : ''}" data-key="${esc(r.key)}" aria-label="${esc(r.name)}${r.live ? `, ${r.live} on track` : ''}">
+    <span class="pw-pos">${pos}</span>
+    <span class="pw-stripe" style="${stripeStyle(r.cc)}"></span>
+    <span class="tw-id"><b class="pw-code">${esc(r.code)}</b><span class="tw-nm">${esc(r.name)}<small>${esc(r.sub)}</small></span></span>
+    <span class="tw-best">${r.medal ? `<i class="medal ${r.medal}" title="${MEDAL_NAME[r.medal]} medal"></i>` : ''}<span class="pw-t${r.best ? '' : ' none'}${r.flash ? ' ' + r.flash : ''}">${r.best ? formatMs(r.best) : '—'}</span></span>
+    ${right}
   </button>`;
 }
 
-export interface FilterChip {
-  key: string; // featured | near | view | cc:XXX
-  label: string;
-  n?: number;
-  on: boolean;
-  cc?: string;
+export function towerEmpty(msg: string, action?: { act: string; label: string }): string {
+  return `<div class="tw-empty"><p>${esc(msg)}</p>${action ? `<button class="btn" data-act="${action.act}">${esc(action.label)}</button>` : ''}</div>`;
 }
 
-export function chips(list: FilterChip[]): string {
-  return list
-    .map(
-      (c) => `<button class="fchip${c.on ? ' on' : ''}" data-filter="${esc(c.key)}" aria-pressed="${c.on}">
-        ${c.key === 'near' ? NEAR_ICON : c.cc ? `<span class="cc mono">${esc(c.cc)}</span>` : c.key === 'featured' ? '<span class="star">★</span>' : ''}
-        <span class="fl">${esc(c.label)}</span>${c.n != null ? `<span class="n mono">${c.n.toLocaleString('en')}</span>` : ''}
-      </button>`,
-    )
-    .join('');
+export function dailyBar(d: { t: TrackData; msLeft: number; streak: number; board: DailyResponse | null; me: string } | null): string {
+  if (!d) return '';
+  const mine = d.board?.entries.find((e) => e.pid === d.me);
+  const tag = mine ? `P${mine.rank}` : d.streak ? `STREAK ${d.streak}` : 'NEW';
+  return `<button class="pw-daily" data-act="daily" aria-label="Today's daily circuit: ${esc(d.t.name)}">
+    <span class="chq"></span><span class="dl-k">DAILY</span><b class="dl-nm">${esc(d.t.name)}</b>
+    <span class="dl-clk mono" data-el="dailyClock">${clock(d.msLeft)}</span><span class="dl-tag">${tag}</span>
+  </button>`;
 }
 
-export interface TrackCard {
+export function boxBar(p: { code: string; name: string; why: string } | null): string {
+  if (!p) return `<button class="pw-box" disabled><span class="bx-k">BOX BOX</span><span class="bx-main"><b>LOADING…</b></span></button>`;
+  return `<button class="pw-box" data-act="box" aria-label="Race ${esc(p.name)} (Enter)">
+    <span class="bx-k">BOX BOX</span><span class="bx-main"><b>RACE ${esc(p.code)}</b><small>${esc(p.why)}</small></span><kbd>↵</kbd>
+  </button>`;
+}
+
+// ------------------------------------------------------------------ pit board (one circuit)
+
+export interface PitData {
   t: TrackData;
   shape: TrackShape;
-  num?: number; // position among the featured circuits
-  record?: number;
-  live: number;
-  pb: number | null;
-  medal?: Medal | null; // best medal you've won here
-}
-
-const medalDot = (m: Medal) => `<i class="medal m-${m}" title="${MEDAL_NAME[m]} medal" aria-label="${MEDAL_NAME[m]} medal"></i>`;
-
-export function trackCard(d: TrackCard): string {
-  const { t, shape } = d;
-  const tag = d.num ? String(d.num).padStart(2, '0') : t.corrected ? 'Fixed' : 'OSM';
-  const badge = d.live
-    ? `<span class="card-live"><i class="live-dot"></i>${d.live} live</span>`
-    : t.needsFix && !t.corrected
-      ? '<span class="card-warn">Trace off</span>'
-      : '';
-  return `<article class="card" data-card="t:${esc(t.id)}">
-    <button class="card-hit" data-track="${esc(t.id)}" aria-label="${esc(t.name)}, ${km(t.lengthM)} km"></button>
-    <div class="card-art graph-paper">${art(shape, { w: 228, h: 64, pad: 8, arrows: false })}</div>
-    <div class="card-body">
-      <div class="card-top">${t.country ? `<span class="cc mono">${esc(t.country)}</span>` : ''}<span class="label">${tag}</span>${d.medal ? medalDot(d.medal) : ''}${badge}</div>
-      <h3 class="display">${esc(t.name)}</h3>
-      <p class="card-sub">${esc(place(t))} · ${km(t.lengthM)} km · ${shape.corners.length} turns</p>
-      <div class="card-foot">
-        <span class="label">Rec</span><span class="card-rec">${recordHtml(d.record)}</span>
-        ${d.pb ? `<span class="card-pb mono" title="Your best">You ${formatMs(d.pb)}</span>` : ''}
-        <button class="card-go" data-go="${esc(t.id)}" title="Race now" aria-label="Race ${esc(t.name)} now">${PLAY}</button>
-      </div>
-    </div>
-  </article>`;
-}
-
-/** The record slot on a track card (refreshed in place when the live feed updates). */
-export function recordHtml(ms: number | undefined): string {
-  return ms ? `<b class="mono">${formatMs(ms)}</b>` : '<span class="muted">Open</span>';
-}
-
-const left = (ms: number) => {
-  const h = Math.floor(ms / 3_600_000);
-  const m = Math.floor((ms % 3_600_000) / 60_000);
-  return h ? `${h}h ${String(m).padStart(2, '0')}m left` : `${m}m left`;
-};
-
-export interface DailyCard {
-  t: TrackData;
-  shape: TrackShape;
-  board: DailyResponse | null;
-  me: string; // your pid
-  streak: number; // consecutive days you've set a daily lap, including today
-  msLeft: number;
-}
-
-/** Today's circuit, first on the rail: the day's leader, your place and your streak. */
-export function dailyCard(d: DailyCard): string {
-  const { t, board } = d;
-  const lead = board?.entries[0];
-  const mine = board?.entries.find((e) => e.pid === d.me);
-  const status = lead
-    ? `${board!.total} driver${board!.total > 1 ? 's' : ''} today · ${esc(lead.name)} <b class="mono">${formatMs(lead.ms)}</b>`
-    : 'Nobody yet. Set today’s time.';
-  const you = mine ? `You P${mine.rank}` : 'No lap yet';
-  return `<article class="card daily" data-card="t:${esc(t.id)}">
-    <button class="card-hit" data-track="${esc(t.id)}" aria-label="Daily circuit: ${esc(t.name)}"></button>
-    <div class="card-art daily-art">${art(d.shape, { w: 248, h: 64, pad: 9, arrows: false })}
-      <span class="daily-tag label">Daily circuit</span><span class="daily-left mono">${left(d.msLeft)}</span></div>
-    <div class="card-body">
-      <h3 class="display">${esc(t.name)}</h3>
-      <p class="card-sub daily-status">${status}</p>
-      <div class="card-foot"><span class="daily-you">${you}${d.streak > 1 ? ` · <b>${d.streak}-day streak</b>` : ''}</span>
-        <button class="card-go" data-go="${esc(t.id)}" title="Race today’s circuit" aria-label="Race today’s circuit, ${esc(t.name)}">${PLAY}</button></div>
-    </div>
-  </article>`;
-}
-
-/** On the daily circuit's sheet: the day's top five. */
-export function dailyBoard(board: DailyResponse | null, me: string, msLeft: number): string {
-  const rows = board?.entries.slice(0, 5) ?? [];
-  return `<div class="d-daily">
-    <div class="d-daily-head"><span class="label">Today’s daily circuit</span><span class="label">${left(msLeft)}</span></div>
-    ${
-      rows.length
-        ? `<ol class="board">${rows
-            .map(
-              (e) => `<li class="${e.pid === me ? 'me' : ''}"><span class="pos mono">${String(e.rank).padStart(2, '0')}</span><span class="bar" style="background:${esc(e.color)}"></span><span class="nm">${esc(e.name)}${e.pid === me ? ' <em>you</em>' : ''}</span><span class="tm mono">${formatMs(e.ms)}</span></li>`,
-            )
-            .join('')}</ol>`
-        : '<p class="empty">Nobody has set a time today. Your first clean lap leads.</p>'
-    }
-  </div>`;
-}
-
-export function venueCard(v: Venue, empty: boolean): string {
-  const name = v.name || 'Unnamed kart track';
-  return `<article class="card venue${empty ? ' empty' : ''}" data-card="v:${v.i}">
-    <button class="card-hit" data-venue="${v.i}" aria-label="${esc(name)}: load the layout"></button>
-    <div class="card-art venue-art">${LOOP}</div>
-    <div class="card-body">
-      <div class="card-top">${v.cc ? `<span class="cc mono">${esc(v.cc)}</span>` : ''}<span class="label">Venue</span></div>
-      <h3 class="display${v.name ? '' : ' unnamed'}">${esc(name)}</h3>
-      <p class="card-sub">${coords(v.at)}</p>
-      <div class="card-foot"><span class="muted">${empty ? 'No racing line mapped yet' : 'Open to load the layout'}</span><span class="card-arrow mono" aria-hidden="true">→</span></div>
-    </div>
-  </article>`;
-}
-
-export function moreTile(n: number): string {
-  return `<div class="card more"><p class="display">+${n.toLocaleString('en')}</p><p class="label">more on the map</p><p class="more-tip">Zoom in and press <b>List tracks here</b></p></div>`;
-}
-
-export function emptyRail(msg: string): string {
-  return `<div class="rail-empty"><p>${msg}</p></div>`;
-}
-
-// ------------------------------------------------------------------ sheet
-
-export interface SheetData {
-  t: TrackData;
-  shape: TrackShape;
+  code: string;
   dir: Dir;
-  num?: number;
-  total: number;
   pb: number | null;
-  siblings: TrackData[]; // other layouts at the same venue
+  rank: number | null; // your place on the board
+  live: number;
+  siblings: TrackData[]; // other layouts at the venue
   shapeOf: (t: TrackData) => TrackShape;
   countryName?: string;
-  nightNow: boolean; // the sun is down at the circuit right now
+  nightNow: boolean; // at the circuit, right now
   medals: { targets: Targets; earned: Medal | null };
-  daily?: string; // the day's board, when this is today's daily circuit
-  challenge?: { name?: string; ms?: number }; // opened from someone's challenge link
+  daily?: string; // the daily board html when this is today's circuit
+  challenge?: { name?: string; ms?: number };
+  time: TimePref;
+  controls: ControlScheme;
+  lapS: number; // seconds per lap for the live dots
 }
 
-/** The four targets, what you've won, and how far your best is from the next one. */
-function medalLadder(m: SheetData['medals'], pb: number | null): string {
-  const got = m.earned ? MEDALS.indexOf(m.earned) : -1;
-  const next = MEDALS[got + 1];
-  const note = !next
-    ? 'Platinum: you’re on record pace here.'
-    : pb
-      ? `${MEDAL_NAME[next]} is <b class="mono">${((pb - m.targets[next]) / 1000).toFixed(3)} s</b> away.`
-      : `Beat <b class="mono">${formatMs(m.targets.bronze)}</b> for bronze.`;
-  return `<div class="d-medals" role="list" aria-label="Medal targets">${MEDALS.map(
-    (k, i) =>
-      `<div class="dm${i <= got ? ' got' : ''}${k === next ? ' next' : ''}" role="listitem">${medalDot(k)}<span class="label">${MEDAL_NAME[k]}</span><b class="mono">${formatMs(m.targets[k])}</b></div>`,
-  ).join('')}</div><p class="d-medal-note">${note}</p>`;
+/** The next medal to chase and how far off it you are. */
+export function nextMedal(pb: number | null, t: Targets): { m: Medal; gap: number | null } | null {
+  for (const m of MEDALS) if (!pb || pb > t[m]) return { m, gap: pb ? pb - t[m] : null };
+  return null; // platinum done
 }
 
-export function sheet(d: SheetData): string {
-  const { t, shape, dir } = d;
-  const rev = dir === 'rev';
-  const rot = rotationLabel(shape, rev);
-  const other = rotationLabel(shape, !rev);
-  const off = t.needsFix && !t.corrected;
-  const canFix = !t.preset; // featured circuits are curated (the server refuses edits to them)
+export function pit(d: PitData): string {
+  const { t, shape } = d;
+  const rot = rotationLabel(shape, d.dir === 'rev');
+  const turns = cornersInRaceOrder(shape, d.dir === 'rev').length;
+  const nx = nextMedal(d.pb, d.medals.targets);
+  const where = [d.countryName, t.location?.split(',')[0]].filter(Boolean).join(' · ') || 'OpenStreetMap';
+  const fixable = !t.preset || !!t.corrected;
+  const fwd = rotationLabel(shape, false);
+  const rev = rotationLabel(shape, true);
   return `
-    <div class="d-top">
-      <button class="back" data-act="back" aria-label="Close"><span class="mono">←</span> Back</button>
-      <span class="label">${d.num ? `${String(d.num).padStart(2, '0')} / ${String(d.total).padStart(2, '0')} featured` : t.corrected ? 'Community layout' : 'From OpenStreetMap'}</span>
+  <div class="pit-main">
+    <header class="pit-hd">
+      <button class="pit-back" data-act="back" aria-label="Back to the tower"><span class="mono">‹</span> TOWER</button>
+      <span class="pw-lv${d.live ? '' : ' z'}" data-el="pitLive">${d.live} ON TRACK</span>
+    </header>
+    <div class="pit-name">
+      <span class="pw-stripe big" style="${stripeStyle(t.country)}"></span>
+      <div class="pit-name-t">
+        <p class="label">${esc(where)}</p>
+        <h1 class="display">${esc(t.name)}</h1>
+        <p class="pit-meta mono">${km(t.lengthM)} KM · ${turns} TURNS · ${rot.icon} ${rot.label.toUpperCase()} · ${d.nightNow ? 'NIGHT' : 'DAY'} THERE NOW</p>
+      </div>
     </div>
-    <h1 class="display d-name">${esc(t.name)}</h1>
-    <p class="d-loc">${t.country ? `<span class="cc mono">${esc(t.country)}</span>` : ''}<span>${esc(t.location || d.countryName || coords(t.center))}</span><span class="d-now${d.nightNow ? ' night' : ''}" title="Race on Live time of day to match it">${d.nightNow ? MOON : SUN}${d.nightNow ? 'Night' : 'Day'} there now</span></p>
-    <div class="d-art graph-paper">${art(shape, { w: 400, h: 200, pad: 24, reverse: rev, turns: true, arrows: true, road: true })}</div>
-    <dl class="d-stats">
-      <div><dt class="label">Length</dt><dd class="mono">${km(t.lengthM)}<small>km</small></dd></div>
-      <div><dt class="label">Turns</dt><dd class="mono">${shape.corners.length}</dd></div>
-      <div><dt class="label">Width</dt><dd class="mono">${Math.max(t.width, 8.5).toFixed(1)}<small>m</small></dd></div>
-    </dl>
+    ${
+      d.challenge
+        ? `<div class="pit-chal"><span class="chq"></span><div><b>CHALLENGE${d.challenge.name ? ` FROM ${esc(d.challenge.name.toUpperCase())}` : ''}</b><span>${d.challenge.ms ? `Beat ${formatMs(d.challenge.ms)}. Their lap races with you as a ghost.` : 'Their lap races with you as a ghost.'}</span></div></div>`
+        : ''
+    }
+    <div class="pit-track graph-paper">
+      ${art(shape, { w: 560, h: 380, pad: 34, reverse: d.dir === 'rev', turns: true, arrows: true, road: true, sectors: true, live: d.live, lapS: d.lapS })}
+      <div class="pit-dir pw-tabs" role="group" aria-label="Direction">
+        <button data-dir="fwd" aria-pressed="${d.dir === 'fwd'}">${fwd.icon} ${fwd.label}</button>
+        <button data-dir="rev" aria-pressed="${d.dir === 'rev'}">${rev.icon} ${rev.label}</button>
+      </div>
+      <div class="pit-legend"><span><i class="p"></i>S1</span><span><i class="g"></i>S2</span><span><i class="y"></i>S3</span>${d.live ? `<span><i class="w"></i>${d.live} ON TRACK</span>` : ''}</div>
+    </div>
     ${
       d.siblings.length
-        ? `<div class="d-sibs"><p class="label">${d.siblings.length + 1} layouts here</p><div class="sib-row">${[t, ...d.siblings]
+        ? `<div class="pit-sibs" role="group" aria-label="Layouts at this venue"><p class="label">${d.siblings.length + 1} LAYOUTS HERE</p><div class="pit-sib-row">${[t, ...d.siblings]
             .sort((a, b) => b.lengthM - a.lengthM)
             .map(
               (s) =>
@@ -251,55 +174,96 @@ export function sheet(d: SheetData): string {
             .join('')}</div></div>`
         : ''
     }
-    <div class="seg" role="radiogroup" aria-label="Direction">
-      <button data-dir="${dir}" class="on" role="radio" aria-checked="true"><span>${rot.icon}</span>${rot.label}</button>
-      <button data-dir="${rev ? 'fwd' : 'rev'}" role="radio" aria-checked="false"><span>${other.icon}</span>${other.label}</button>
+  </div>
+  <div class="pit-side">
+    <div class="pw-board" aria-label="Your pit board">
+      <div class="pw-board-in">
+        <div class="pw-board-row"><span>${esc(d.code)}</span><span class="y">${Math.round(t.lengthM)}M</span></div>
+        <div class="pw-board-row"><span data-el="pitRank">P${d.rank ?? '–'}</span><span class="sm">${d.pb ? formatMs(d.pb) : 'NO TIME'}</span></div>
+        <div class="pw-board-row">${
+          nx
+            ? `<span class="y">${MEDAL_SHORT[nx.m]}</span><span class="sm">${nx.gap !== null ? gap(nx.gap) : formatMs(d.medals.targets[nx.m])}</span>`
+            : `<span class="y">PLAT ✓</span><span class="sm">${d.pb ? formatMs(d.pb) : ''}</span>`
+        }</div>
+      </div>
     </div>
-    ${off && canFix ? '<button class="d-warn-top" data-act="edit-start"><b>This trace is off the asphalt.</b> Fix the layout →</button>' : ''}
-    ${
-      d.challenge
-        ? `<div class="d-challenge">${GHOST_ICON}<p><span class="label">Challenge</span><b>${d.challenge.name ? esc(d.challenge.name) : 'A driver'}</b> dares you to beat <b class="mono">${d.challenge.ms ? formatMs(d.challenge.ms) : '…'}</b>. Their lap races with you as a ghost.</p></div>`
-        : ''
-    }
-    <button class="btn primary lg block" data-act="race">${d.challenge?.name ? `Race ${esc(d.challenge.name)}’s ghost` : 'Race'} <span class="arrow">→</span></button>
-    <p class="d-pb">${d.pb ? `Your best <b class="mono">${formatMs(d.pb)}</b>` : 'Your first clean lap goes straight onto the board.'}</p>
-    ${medalLadder(d.medals, d.pb)}
+    <p class="label">MEDAL TARGETS</p>
+    ${medalGrid(d.medals.targets, d.pb)}
     ${d.daily ?? ''}
-    <div class="sec-head"><h2 class="label">Leaderboard · ${rot.label.toLowerCase()}</h2><span class="label" data-el="dCount"></span></div>
-    <div class="d-live" data-el="dLive"></div>
-    <div data-el="dBoard"><p class="empty">Loading…</p></div>
-    <div class="d-layout">
-      <p>${
-        t.corrected
-          ? `<span class="cc mono fixed">Fixed</span> Layout corrected by <b>${esc(t.corrected.by)}</b> ${timeAgo(t.corrected.at)}. Times on the old trace are on a separate board.`
-          : `Traced from OpenStreetMap${t.osmWays.length ? ` (<a target="_blank" rel="noopener" href="https://www.openstreetmap.org/way/${t.osmWays[0]}">way ${t.osmWays[0]}${t.osmWays.length > 1 ? ` +${t.osmWays.length - 1}` : ''}</a>)` : ''}.`
-      }</p>
-      ${canFix ? `<button class="link" data-act="edit-start">${off ? 'Fix the layout' : 'Line off the asphalt? Fix it'} →</button>` : ''}
-    </div>`;
+    <p class="label pit-cls-h">CLASSIFICATION <span class="mono" data-el="dCount"></span></p>
+    <div class="pit-cls" data-el="dBoard"><p class="pit-empty">Loading times…</p></div>
+    <p class="pit-on" data-el="dLive"></p>
+    <p class="label">SESSION</p>
+    <div class="pw-tabs pit-sess" role="group" aria-label="Session">
+      <button class="on" aria-pressed="true">TIME TRIAL</button>
+      <button data-act="friends">RACE FRIENDS</button>
+      <button data-act="challenge">CHALLENGE</button>
+    </div>
+    <div class="pit-set">
+      <span class="label">TIME OF DAY</span>
+      <div class="pw-tabs soft" role="group" aria-label="Time of day">${(['live', 'day', 'night'] as const)
+        .map((k) => `<button data-time="${k}" aria-pressed="${d.time === k}">${k === 'live' ? `LIVE · ${d.nightNow ? 'NIGHT' : 'DAY'}` : k.toUpperCase()}</button>`)
+        .join('')}</div>
+      <span class="label">CONTROLS</span>
+      <div class="pw-tabs soft" role="group" aria-label="Controls">${(['simple', 'classic'] as const)
+        .map((k) => `<button data-controls="${k}" aria-pressed="${d.controls === k}">${k.toUpperCase()}</button>`)
+        .join('')}</div>
+    </div>
+    ${fixable ? `<button class="pit-fix" data-act="edit">Layout looks wrong? <b>Fix it</b></button>` : ''}
+    <div class="pit-go">
+      <div class="pit-lights" aria-hidden="true">${'<i><b></b><b></b></i>'.repeat(5)}</div>
+      <button class="btn go lg block" data-act="race">START ${esc(d.code)} <kbd>↵</kbd></button>
+    </div>
+  </div>`;
 }
 
-export function board(b: BoardResponse, me: string): { count: string; live: string; list: string } {
+export function medalGrid(t: Targets, pb: number | null): string {
+  const nx = nextMedal(pb, t);
+  return `<div class="pit-med">${MEDALS.map((m) => {
+    const won = !!pb && pb <= t[m];
+    return `<div class="${won ? 'won' : ''}${nx?.m === m ? ' nx' : ''}"><i class="medal ${m}"></i><span>${MEDAL_SHORT[m]}</span><b class="mono">${formatMs(t[m])}</b><em class="mono">${won ? '✓' : pb ? gap(pb - t[m]) : ''}</em></div>`;
+  }).join('')}</div>`;
+}
+
+/** The classification: top ten, gaps to the leader, a ghost button on every lap but yours. */
+export function classification(b: BoardResponse, me: string): { count: string; live: string; list: string } {
   const lead = b.entries[0]?.ms;
   const mine = b.entries.find((e) => e.pid === me);
   return {
-    count: b.total ? `${b.total} driver${b.total > 1 ? 's' : ''}` : '',
-    live: b.onTrack.length
-      ? `<i class="live-dot"></i>On track: ${b.onTrack.map((o) => `<span class="chip"><i style="background:${esc(o.color)}"></i>${esc(o.name)}</span>`).join('')}`
-      : '',
+    count: b.total ? `· ${b.total} DRIVER${b.total > 1 ? 'S' : ''}` : '',
+    live: b.onTrack.length ? `<i class="live-dot"></i>ON TRACK: ${b.onTrack.map((o) => `<span><i style="background:${esc(o.color)}"></i>${esc(o.name)}</span>`).join('')}` : '',
     list: b.entries.length
-      ? `<ol class="board">${b.entries
+      ? `${b.entries
           .map(
-            (e) => `<li class="${e.pid === me ? 'me' : ''}">
-              <span class="pos mono">${String(e.rank).padStart(2, '0')}</span>
-              <span class="bar" style="background:${esc(e.color)}"></span>
-              <span class="nm">${esc(e.name)}${e.pid === me ? ' <em>you</em>' : ''}</span>
-              <span class="tm mono">${e.rank === 1 ? formatMs(e.ms) : `+${((e.ms - lead) / 1000).toFixed(3)}`}</span>
-              ${e.pid === me ? '<span></span>' : `<button class="bd-ghost" data-rival="${esc(e.pid)}" title="Race ${esc(e.name)}’s ghost" aria-label="Race ${esc(e.name)}’s ghost">${GHOST_ICON}</button>`}
-            </li>`,
+            (e, k) => `<div class="cls-row${e.pid === me ? ' you' : ''}">
+              <span class="cls-p">${e.rank}</span>
+              <span class="cls-bar" style="background:${esc(e.color)}"></span>
+              <span class="cls-n">${esc(e.name)}${e.pid === me ? ' <em>YOU</em>' : ''}</span>
+              <b class="mono${k === 0 ? ' p' : ''}">${formatMs(e.ms)}</b>
+              <span class="cls-gap mono">${k ? gap(e.ms - lead) : 'REC'}</span>
+              ${e.pid === me ? '<span></span>' : `<button class="cls-ghost" data-rival="${esc(e.pid)}" aria-label="Race ${esc(e.name)}'s ghost">GHOST</button>`}
+            </div>`,
           )
-          .join('')}</ol>${mine ? `<button class="link bd-share" data-act="challenge">Challenge a friend to beat your ${formatMs(mine.ms)} →</button>` : ''}`
-      : '<p class="empty">No times yet. Set the benchmark.</p>',
+          .join('')}${mine ? `<button class="pit-share" data-act="challenge">Challenge a friend to beat your ${formatMs(mine.ms)} →</button>` : ''}`
+      : '<p class="pit-empty">No times yet. Set the benchmark.</p>',
   };
+}
+
+export function dailyBoard(board: DailyResponse | null, me: string, msLeft: number): string {
+  const rows = board?.entries.slice(0, 5) ?? [];
+  return `<div class="pit-daily">
+    <div class="pit-daily-h"><span class="chq"></span><b>DAILY CIRCUIT</b><span class="mono">ENDS ${clock(msLeft)}</span></div>
+    ${
+      rows.length
+        ? rows
+            .map(
+              (e) =>
+                `<div class="cls-row${e.pid === me ? ' you' : ''}"><span class="cls-p">${e.rank}</span><span class="cls-bar" style="background:${esc(e.color)}"></span><span class="cls-n">${esc(e.name)}${e.pid === me ? ' <em>YOU</em>' : ''}</span><b class="mono">${formatMs(e.ms)}</b><span></span><span></span></div>`,
+            )
+            .join('')
+        : '<p class="pit-empty">Nobody has set a time today. Your first clean lap leads.</p>'
+    }
+  </div>`;
 }
 
 // ------------------------------------------------------------------ search
@@ -308,7 +272,8 @@ export interface SearchHit {
   key: string; // t:ID | c:CCC | v:i | place
   title: string;
   sub: string;
-  tag: string; // cc or kind
+  tag: string;
+  cc?: string;
 }
 
 export function searchResults(groups: { label: string; hits: SearchHit[] }[], sel: number): string {
@@ -316,28 +281,27 @@ export function searchResults(groups: { label: string; hits: SearchHit[] }[], se
   const html = groups
     .filter((g) => g.hits.length)
     .map(
-      (g) => `<div class="sr-group"><p class="label">${esc(g.label)}</p>${g.hits
-        .map((h) => {
-          const n = i++;
-          return `<button class="sr${n === sel ? ' on' : ''}" data-hit="${esc(h.key)}" data-i="${n}"><span class="sr-tag mono">${esc(h.tag)}</span><span class="sr-main"><b>${esc(h.title)}</b><small>${esc(h.sub)}</small></span></button>`;
-        })
-        .join('')}</div>`,
+      (g) =>
+        `<p class="label sr-h">${esc(g.label)}</p>${g.hits
+          .map((h) => {
+            const n = i++;
+            return `<button class="pw-row sr${n === sel ? ' sel' : ''}" data-hit="${esc(h.key)}"><span class="pw-stripe" style="${stripeStyle(h.cc)}"></span><span class="tw-nm">${esc(h.title)}<small>${esc(h.sub)}</small></span><span class="sr-tag mono">${esc(h.tag)}</span></button>`;
+          })
+          .join('')}`,
     )
     .join('');
-  return html || '<p class="sr-none">Nothing matches. Try a city name.</p>';
+  return html || towerEmpty('Nothing matches. Try a city name.');
 }
 
 // ------------------------------------------------------------------ countries
 
-export function countryList(list: { cc: string; name: string; n: number }[], active: string | null): string {
-  return list.length
-    ? list
-        .map(
-          (c) =>
-            `<button class="cp-row${c.cc === active ? ' on' : ''}" data-filter="cc:${esc(c.cc)}"><span class="cc mono">${esc(c.cc)}</span><span class="cp-name">${esc(c.name)}</span><span class="n mono">${c.n}</span></button>`,
-        )
-        .join('')
-    : '<p class="sr-none">No country by that name.</p>';
+export function countryList(list: { cc: string; name: string; n: number }[], active: string | null, total: number): string {
+  return `<button class="cc-row${active === null ? ' on' : ''}" data-cc="ALL"><span class="pw-stripe"></span><span>All countries</span><span class="mono">${total.toLocaleString('en')}</span></button>${list
+    .map(
+      (c) =>
+        `<button class="cc-row${c.cc === active ? ' on' : ''}" data-cc="${esc(c.cc)}"><span class="pw-stripe" style="${stripeStyle(c.cc)}"></span><span>${esc(c.name)}</span><span class="mono">${c.n}</span></button>`,
+    )
+    .join('')}`;
 }
 
 // ------------------------------------------------------------------ live
@@ -350,28 +314,22 @@ export interface LiveRow {
   where: string;
 }
 
-export function liveBody(rows: LiveRow[], laps: FeedItem[]): string {
-  const drivers = rows.length
+/** The live sheet: who's on track now, then race control (the latest laps). */
+export function liveSheet(rows: LiveRow[], laps: FeedItem[]): string {
+  const on = rows.length
     ? rows
-        .slice(0, 6)
         .map(
-          (r) => `<button class="lv-row" data-feed="${esc(r.track)}" data-dir="${r.dir}">
-            <span class="bar" style="background:${esc(r.color)}"></span>
-            <span class="lv-main"><b>${esc(r.name)}</b><small>${esc(r.where)}${r.dir === 'rev' ? ' · reverse' : ''}</small></span>
-            <span class="lv-tag mono"><i class="live-dot"></i>Live</span>
-          </button>`,
+          (r) =>
+            `<button class="pw-row lv-row" data-feed="${esc(r.track)}" data-dir="${r.dir}"><span class="cls-bar" style="background:${esc(r.color)}"></span><span class="tw-nm">${esc(r.name)}<small>${esc(r.where)}</small></span><span class="pw-lv">1</span></button>`,
         )
-        .join('') + (rows.length > 6 ? `<p class="lv-more">+${rows.length - 6} more driving now</p>` : '')
-    : '<p class="lv-empty">Nobody on track right now. Set the pace.</p>';
-  const recent = laps
-    .slice(0, 3)
-    .map(
-      (l) => `<button class="lv-row" data-feed="${esc(l.track)}" data-dir="${l.dir}">
-        <span class="bar" style="background:${esc(l.color)}"></span>
-        <span class="lv-main"><b>${esc(l.name)}</b><small>${esc(l.trackName)}${l.dir === 'rev' ? ' · rev' : ''}</small></span>
-        <span class="lv-time"><span class="mono">${formatMs(l.ms)}</span><small class="${l.rank === 1 ? 'p1' : ''}">P${l.rank} · ${timeAgo(l.at)}</small></span>
-      </button>`,
-    )
-    .join('');
-  return `<div class="lv-sec">${drivers}</div>${recent ? `<p class="lv-head label">Latest laps</p><div class="lv-sec">${recent}</div>` : ''}`;
+        .join('')
+    : '<p class="pit-empty">Nobody is on track right now. Be the first.</p>';
+  return `<p class="label">ON TRACK NOW</p>${on}<p class="label">RACE CONTROL</p>${laps.length ? laps.slice(0, 12).map((l) => rcLine(l, true)).join('') : '<p class="pit-empty">No laps yet today.</p>'}`;
+}
+
+/** One race-control line: "19:02 NINA 0:47.612 AT KF1 KARTING CIRCUIT · P3". */
+export function rcLine(l: FeedItem, button = false): string {
+  const t = new Date(l.at);
+  const body = `<span class="mono">${pad2(t.getHours())}:${pad2(t.getMinutes())}</span> <b>${esc(l.name.toUpperCase())}</b> <span class="mono${l.rank === 1 ? ' p' : ''}">${formatMs(l.ms)}</span> AT ${esc(l.trackName.toUpperCase())}${l.rank === 1 ? ' · <em>RECORD</em>' : ` · P${l.rank}`}`;
+  return button ? `<button class="rc-line" data-feed="${esc(l.track)}" data-dir="${l.dir}" title="${esc(timeAgo(l.at))}">${body}</button>` : `<span class="rc-item">${body}</span>`;
 }

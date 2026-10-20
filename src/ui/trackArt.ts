@@ -1,5 +1,6 @@
-// SVG circuit drawings in the "race programme" style: ink line on graph paper,
-// chequered start/finish, direction chevrons and optional turn numbers.
+// SVG circuit drawings in the Pit Wall style: a light line (or road) on carbon, chequered
+// start/finish, direction chevrons, and optionally turn numbers, timing-coloured sectors and
+// dots lapping for the drivers on track.
 import { cornersInRaceOrder, type TrackShape } from '../track/shape';
 
 export interface ArtOptions {
@@ -11,8 +12,13 @@ export interface ArtOptions {
   arrows?: boolean;
   road?: boolean; // thick road with casing instead of a single line
   draw?: boolean; // animate the line drawing itself
+  sectors?: boolean; // colour S1 / S2 / S3 (purple, green, yellow) from the line in race direction
+  live?: number; // dots lapping the circuit, one per driver on track
+  lapS?: number; // seconds per lap for those dots
   className?: string;
 }
+
+let artSeq = 0;
 
 export function trackArt(shape: TrackShape, o: ArtOptions): string {
   const pad = o.pad ?? 16;
@@ -60,6 +66,36 @@ export function trackArt(shape: TrackShape, o: ArtOptions): string {
   }
 
   const dir = o.reverse ? -1 : 1;
+  const start = Math.round(shape.startFrac * n);
+  if (o.sectors) {
+    // Thirds of the lap from the start line, in the direction of travel.
+    const third = Math.ceil(n / 3);
+    for (let k = 0; k < 3; k++) {
+      let sd = '';
+      const from = k * third;
+      const to = Math.min(n, (k + 1) * third);
+      for (let j = from; j <= to; j += Math.min(stride, Math.max(1, to - j)) || 1) {
+        const [px, py] = P(start + dir * j);
+        sd += `${j === from ? 'M' : 'L'}${px.toFixed(1)} ${py.toFixed(1)}`;
+        if (j === to) break;
+      }
+      parts.push(`<path class="ta-sector ta-s${k + 1}" d="${sd}" stroke-width="${Math.max(2, lw * (o.road ? 0.42 : 1)).toFixed(1)}"/>`);
+    }
+  }
+  if (o.live && o.live > 0) {
+    // Drivers on track: dots running the lap, spread around it.
+    const id = `ta-p${++artSeq}`;
+    parts.push(`<path id="${id}" d="${d}" fill="none" stroke="none"/>`);
+    const lap = Math.max(20, o.lapS ?? 50);
+    const startAt = shape.startFrac; // the path begins at index 0; offset so dots leave from the line
+    for (let k = 0; k < Math.min(o.live, 12); k++) {
+      const phase = (startAt + k / Math.min(o.live, 12)) % 1;
+      const keys = o.reverse ? `keyPoints="1;0" keyTimes="0;1" calcMode="linear"` : '';
+      parts.push(
+        `<circle class="ta-live ta-live-${k % 6}" r="${Math.max(2.4, lw * 0.6).toFixed(1)}"><animateMotion dur="${lap.toFixed(1)}s" begin="-${(phase * lap).toFixed(2)}s" repeatCount="indefinite" ${keys}><mpath href="#${id}"/></animateMotion></circle>`,
+      );
+    }
+  }
   if (o.arrows) {
     for (const f of [0.12, 0.45, 0.78]) {
       const i = Math.round((shape.startFrac + dir * f) * n);

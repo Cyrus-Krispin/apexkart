@@ -1,29 +1,28 @@
-// The home screen: a dark world map with every kart venue on OpenStreetMap, a dock with
-// "Race now", country filters and a rail of circuits, and a sheet for the selected track.
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
+// The home screen in the Pit Wall design (docs/pit-wall.md). Every circuit is a live session, so
+// home is a timing tower: circuits ranked by who's on track (LIVE), by distance (NEAR ME) or by
+// country (WORLD, all 4,900 venues). Pick one and its pit board shows the track, your medal
+// targets, the classification and a green Start. On desktop the tower and the pit board sit side
+// by side as a broadcast wall, with race control running along the bottom.
 import { centroid, trackFromId, waysFromId, type LatLon, type TrackData } from '../track/osm';
 import { cellOf, unpackPoints, venueKey, type VenueCell } from '../shared/venues';
 import { dailyStreak, dailyTrack, dayOf, msLeftToday } from '../shared/daily';
 import { analyzeShape, type TrackShape } from '../track/shape';
 import { ProfileMenu } from './profile';
-import { LayoutEditor } from './layoutEditor';
+import { openLayoutEditor } from './editorScreen';
 import { api, type BoardResponse, type CommunityLayout, type DailyResponse, type Dir, type Driver, type FeedResponse } from '../net/api';
-import { localPB, timePref } from '../game/prefs';
+import { localPB, saveTimePref, timePref, type TimePref } from '../game/prefs';
+import { controlsPref, saveControlsPref, type ControlScheme } from '../game/input';
 import { earnedMedal, targets } from '../game/medals';
 import { isNightAt } from '../game/sun';
-import { coreBounds, distM, loadWorld, localeCountry, type Venue, type WorldIndex } from './world';
+import { distM, loadWorld, localeCountry, type Venue, type WorldIndex } from './world';
+import { circuitCode, stripeStyle } from './pitwall';
 import * as V from './atlasViews';
 
-const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services';
-const DARK = `${ESRI}/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}`;
-const DARK_LABELS = `${ESRI}/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}`;
-const SAT = `${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`;
-const LAST_KEY = 'ak:last'; // {id, dir} of the last circuit raced: what "Race now" offers
-const SAME_VENUE_M = 700; // a venue dot this close to a known track is that track
-const RAIL_BATCH = 36;
-const TOP_COUNTRIES = 14;
-const SAT_ZOOM = 14;
+const LAST_KEY = 'ak:last'; // {id, dir} of the last circuit raced: what Box box offers
+const SAME_VENUE_M = 700; // a venue this close to a known track is that track
+const NEAR_KM = 400;
+const BATCH = 80; // tower rows rendered at a time in the long lists
+const FLASH_MS = 2200;
 
 export interface AtlasOptions {
   root: HTMLElement;
@@ -32,9 +31,6 @@ export interface AtlasOptions {
    *  public id whose lap races along as a ghost (a challenge). */
   onRace: (track: TrackData, dir: Dir, daily: boolean, rival?: string) => void;
 }
-
-type Filter = { kind: 'featured' } | { kind: 'country'; cc: string } | { kind: 'near'; at: LatLon } | { kind: 'view'; bounds: L.LatLngBounds };
-type RailItem = { kind: 'track'; t: TrackData } | { kind: 'venue'; v: Venue };
 
 const shapes = new Map<string, TrackShape>();
 export function shapeOf(t: TrackData): TrackShape {
@@ -46,258 +42,213 @@ export function shapeOf(t: TrackData): TrackShape {
   return s;
 }
 
-/** Point at a fraction of the raw polyline's arc length (same parametrisation as the shape). */
-function pointAtFrac(pts: LatLon[], frac: number): LatLon {
-  const k = Math.cos((pts[0][0] * Math.PI) / 180);
-  const seg: number[] = [];
-  let total = 0;
-  for (let i = 0; i < pts.length; i++) {
-    const a = pts[i];
-    const b = pts[(i + 1) % pts.length];
-    const d = Math.hypot((b[1] - a[1]) * k, b[0] - a[0]);
-    seg.push(d);
-    total += d;
-  }
-  let want = frac * total;
-  for (let i = 0; i < pts.length; i++) {
-    if (want <= seg[i]) {
-      const a = pts[i];
-      const b = pts[(i + 1) % pts.length];
-      const t = seg[i] ? want / seg[i] : 0;
-      return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
-    }
-    want -= seg[i];
-  }
-  return pts[0];
-}
-
-function loopLengthKm(pts: LatLon[]) {
-  let L = 0;
-  for (let i = 0; i < pts.length; i++) {
-    const a = pts[i];
-    const b = pts[(i + 1) % pts.length];
-    L += Math.hypot((b[0] - a[0]) * 110540, (b[1] - a[1]) * 111320 * Math.cos((a[0] * Math.PI) / 180));
-  }
-  return L / 1000;
-}
-
 const isTyping = (e: Event) => /^(INPUT|TEXTAREA|SELECT)$/.test((e.target as HTMLElement)?.tagName ?? '');
+/** Phones: the pit board is a page of its own over the tower. */
 const small = () => innerWidth <= 760;
+const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+type Remote = { id: string; name: string; center?: LatLon };
 
 export class Atlas {
-  private map!: L.Map;
-  private base!: L.Layer;
-  private sat!: L.TileLayer;
   private tracks = new Map<string, TrackData>();
-  private pins = new Map<string, L.Marker>();
-  private outlines = L.layerGroup();
-  private sfMarker: L.Marker | null = null;
+  private remote = new Map<string, Remote>(); // circuits others are racing that this browser hasn't loaded
   private selected: TrackData | null = null;
   private dir: Dir = 'fwd';
+  private routed = false; // the pit board is open because the address says so (not the desktop default)
   private feed: FeedResponse | null = null;
   private board: BoardResponse | null = null;
+  private daily: DailyResponse | null = null;
+  private rival: { pid: string; name?: string; ms?: number } | null = null; // from a challenge link
   private el: Record<string, HTMLElement> = {};
   private profile: ProfileMenu;
   private toastTimer = 0;
   private aliases = new Map<string, string>(); // OSM id -> community layout id
   private pendingLayouts = new Map<string, CommunityLayout>();
-  private editor: LayoutEditor | null = null;
+  private closeEditor: (() => void) | null = null;
 
   private world: WorldIndex | null = null;
-  private dots: L.CircleMarker[] = [];
-  private dotRenderer = L.canvas({ padding: 0.4 });
-  private venueTip = L.tooltip({ direction: 'top', offset: [0, -6], className: 'venue-tip', opacity: 1 });
-  private focusRing: L.CircleMarker | null = null;
-  private hiddenVenues = new Set<number>(); // a known track already covers them
-  private emptyVenues = new Set<number>(); // loaded, but OSM has no racing line there
-  private loadingVenue: number | null = null;
-  private dotBucket = -1;
   private localCC: string | null = null;
-  private filter: Filter = { kind: 'featured' };
-  private rail: RailItem[] = [];
-  private railShown = 0;
-  private railTotal = 0;
+  private covered = new Set<number>(); // venues a known track already stands for
+  private coveredSig = '';
+  private emptyVenues = new Set<number>(); // loaded, but no racing line there
+  private cells = new Map<string, Promise<VenueCell | null>>(); // pre-stitched layouts per 5° cell
+  private loadingVenue: number | null = null;
+
+  private tab: V.Tab = 'live';
+  private worldCC: string | null = null; // WORLD: one country, or null for all
+  private near: { at: LatLon; label: string } | null = null;
+  private rows: V.TowerRow[] = [];
+  private shown = 0;
+  private cursor: string | null = null; // keyboard position in the tower
   private hits: V.SearchHit[] = [];
   private hitSel = 0;
-  private cells = new Map<string, Promise<VenueCell | null>>(); // pre-stitched layouts per 5° cell
-  private hiddenSig = ''; // the known tracks hiddenVenues was worked out for
-  private dotStyle: ('on' | 'dim' | 'off')[] = []; // what each venue dot currently shows
-  private sheetRecord: number | undefined; // the record the open sheet's medal targets use
-  private daily: DailyResponse | null = null;
+  private prevRecords = new Map<string, number>();
+  private flashes = new Map<string, { kind: 'p' | 'g'; until: number }>();
+  private pbSeen = new Map<string, number>();
   private feedFails = 0;
-  private rival: { pid: string; name?: string; ms?: number } | null = null; // from a challenge link
+  private starting = false;
 
   constructor(private o: AtlasOptions) {
     o.root.innerHTML = ATLAS_HTML;
     o.root.querySelectorAll<HTMLElement>('[data-el]').forEach((e) => (this.el[e.dataset.el!] = e));
     this.profile = new ProfileMenu(this.el.profileBtn, o.driver, () => {
-      this.renderRail(true);
       if (this.board) this.renderBoard();
     });
-    this.initMap();
     this.bind();
-    this.fitPlaceholder();
-    this.renderNow();
+    this.renderTabs();
+    this.renderTower();
+    this.renderBox();
     this.load();
-    if (import.meta.env.DEV) Object.assign(window as any, { __atlas: this, __L: L });
+    window.setInterval(() => this.tickClock(), 1000);
+    if (import.meta.env.DEV) Object.assign(window as any, { __atlas: this });
   }
 
-  // ------------------------------------------------------------------ map
+  // ------------------------------------------------------------------ data
 
-  private initMap() {
-    this.map = L.map(this.el.map, { zoomControl: false, worldCopyJump: true, attributionControl: false, maxZoom: 19, minZoom: 2, zoomSnap: 0.25 }).setView(
-      [30, 12],
-      small() ? 1.5 : 2.5,
-    );
-    L.control.zoom({ position: 'bottomright' }).addTo(this.map);
-    L.control.attribution({ position: 'bottomleft', prefix: false }).addTo(this.map);
-    this.base = L.layerGroup([
-      L.tileLayer(DARK, { attribution: 'Esri · OpenStreetMap contributors', maxZoom: 16, className: 'tiles-dark' }),
-      L.tileLayer(DARK_LABELS, { maxZoom: 16, className: 'tiles-dark' }),
-    ]).addTo(this.map);
-    this.sat = L.tileLayer(SAT, { attribution: 'Imagery © Esri, Maxar, Earthstar Geographics', maxZoom: 19, maxNativeZoom: 19 });
-    this.outlines.addTo(this.map);
-    this.map.on('zoomend moveend', () => this.onView());
-    this.map.on('zoomend', () => this.sizeDots());
-  }
-
-  private onView() {
-    const z = this.map.getZoom();
-    const sat = z >= SAT_ZOOM;
-    if (sat && !this.map.hasLayer(this.sat)) {
-      this.map.addLayer(this.sat);
-      this.map.removeLayer(this.base);
-    } else if (!sat && this.map.hasLayer(this.sat)) {
-      this.map.addLayer(this.base);
-      this.map.removeLayer(this.sat);
+  private async load() {
+    const [presets, world] = await Promise.allSettled([fetch('/tracks/presets.json').then((r) => r.json() as Promise<TrackData[]>), loadWorld()]);
+    if (presets.status === 'fulfilled') presets.value.forEach((t) => this.addTrack({ ...t, preset: true }));
+    try {
+      const saved: TrackData[] = JSON.parse(localStorage.getItem('ak:tracks') || '[]');
+      saved.forEach((t) => this.tracks.has(t.id) || this.addTrack(t));
+    } catch {
+      /* ignore */
     }
-    const c = this.map.getContainer();
-    c.classList.toggle('z-far', z < 4);
-    c.classList.toggle('z-mid', z >= 4.5);
-    c.classList.toggle('z-near', z >= 9);
-    c.classList.toggle('z-sat', sat);
-    this.updateHere();
-    this.drawOutlines();
-  }
-
-  /** "List tracks here" once you've zoomed into a region that has some. */
-  private updateHere() {
-    const z = this.map.getZoom();
-    const btn = this.el.here;
-    if (z < 6 || this.selected || this.editor || this.loadingVenue !== null) return btn.classList.remove('show');
-    const b = this.map.getBounds();
-    const n = this.inBounds(b).length;
-    const viewing = this.filter.kind === 'view' && this.filter.bounds.pad(0.05).contains(b);
-    btn.querySelector('span')!.textContent = `List ${n} track${n > 1 ? 's' : ''} here`;
-    btn.classList.toggle('show', n > 0 && !viewing);
-  }
-
-  private drawOutlines() {
-    this.outlines.clearLayers();
-    if (this.map.getZoom() < 12 || this.editor) return;
-    const view = this.map.getBounds().pad(0.4);
-    for (const t of this.tracks.values()) {
-      if (!view.contains(t.center)) continue;
-      const sel = this.selected?.id === t.id;
-      const ll = t.points.map((p) => L.latLng(p[0], p[1]));
-      ll.push(ll[0]);
-      L.polyline(ll, { color: '#141414', weight: sel ? 10 : 7, opacity: 0.75, interactive: false }).addTo(this.outlines);
-      L.polyline(ll, { color: sel ? '#ff4d00' : '#f2eee5', weight: sel ? 5 : 3.5, opacity: 1 })
-        .on('click', () => this.open(t.id))
-        .addTo(this.outlines);
+    try {
+      this.applyLayouts(await api.layouts());
+    } catch {
+      /* layouts are optional */
     }
-  }
-
-  private addPin(t: TrackData) {
-    if (this.pins.has(t.id)) return;
-    const icon = L.divIcon({
-      className: 'pin-wrap',
-      html: `<div class="pin${t.preset ? ' feat' : ''}"><i></i><span>${V.esc(t.name)}</span><b class="pin-live mono"></b></div>`,
-      iconSize: [0, 0],
-    });
-    const m = L.marker(t.center, { icon, riseOnHover: true, keyboard: false, zIndexOffset: t.preset ? 500 : 100 }).on('click', () => this.open(t.id));
-    m.addTo(this.map);
-    this.pins.set(t.id, m);
-    this.markLive(t.id);
-  }
-
-  private markLive(id: string) {
-    const el = this.pins.get(id)?.getElement()?.querySelector<HTMLElement>('.pin');
-    if (!el) return;
-    const n = (this.feed?.live[`${id}|fwd`] ?? 0) + (this.feed?.live[`${id}|rev`] ?? 0);
-    el.classList.toggle('is-live', n > 0);
-    el.querySelector('.pin-live')!.textContent = n ? String(n) : '';
-  }
-
-  private hotPin(id: string | null) {
-    for (const [pid, m] of this.pins) m.getElement()?.classList.toggle('hot', pid === id);
-  }
-
-  private markSelectedPin() {
-    for (const [pid, m] of this.pins) m.getElement()?.classList.toggle('sel', pid === this.selected?.id);
-  }
-
-  // ------------------------------------------------------------------ world venues
-
-  private drawDots() {
-    const w = this.world!;
-    this.dotStyle = [];
-    this.hiddenSig = '';
-    this.dots = w.venues.map((v) => {
-      const m = L.circleMarker(v.at, { renderer: this.dotRenderer, radius: 3, stroke: true, weight: 1, color: '#0b0b0a', fillColor: '#ff4d00', fillOpacity: 0.9, bubblingMouseEvents: false });
-      m.on('click', () => this.openVenue(v));
-      m.on('mouseover', () => {
-        this.venueCell(v); // likely next: start fetching its layouts now
-        this.venueTip.setLatLng(v.at).setContent(`<b>${V.esc(v.name || 'Unnamed kart track')}</b>${v.cc ? `<span>${V.esc(w.countries.get(v.cc)?.name ?? v.cc)}</span>` : ''}`);
-        this.venueTip.addTo(this.map);
-      });
-      m.on('mouseout', () => this.venueTip.remove());
-      return m;
-    });
-    this.refreshVenues();
-    this.sizeDots();
-  }
-
-  /** Hide dots that a known track already covers; dim the ones outside the country filter. */
-  private refreshVenues() {
-    if (!this.world) return;
-    const known = [...this.tracks.values()];
-    // Which dots a known track covers only changes when tracks do (phones feel this loop).
-    const sig = known.map((t) => t.id).join();
-    if (sig !== this.hiddenSig) {
-      this.hiddenSig = sig;
-      this.hiddenVenues.clear();
-      for (const v of this.world.venues) if (known.some((t) => Math.abs(t.center[0] - v.at[0]) < 0.02 && distM(t.center, v.at) < SAME_VENUE_M)) this.hiddenVenues.add(v.i);
+    if (world.status === 'fulfilled') {
+      this.world = world.value;
+      this.localCC = localeCountry(this.world);
+      for (const t of this.tracks.values()) if (!t.country) t.country = this.nearestVenue(t.center, 3000)?.cc || undefined;
+      this.el.worldN.textContent = this.worldTotal().toLocaleString('en');
     }
-    const cc = this.filter.kind === 'country' ? this.filter.cc : null;
-    for (const v of this.world.venues) {
-      const m = this.dots[v.i];
-      if (this.hiddenVenues.has(v.i) || this.emptyVenues.has(v.i)) {
-        if (this.dotStyle[v.i] !== 'off') m.remove();
-        this.dotStyle[v.i] = 'off';
+    this.nameTracks([...this.tracks.values()].filter((t) => !t.preset && !t.location));
+    this.route();
+    this.renderTower();
+    this.renderBox();
+    this.renderDaily();
+    this.pollFeed();
+    this.pollDaily();
+    window.setInterval(() => !this.o.root.hidden && this.pollFeed(), 6000);
+    window.setInterval(() => !this.o.root.hidden && this.pollDaily(), 60000);
+    window.setInterval(() => this.selected && !this.o.root.hidden && this.pollBoard(), 5000);
+  }
+
+  private addTrack(t: TrackData) {
+    const lay = this.pendingLayouts.get(t.id);
+    if (lay) {
+      this.pendingLayouts.delete(t.id);
+      t = this.withLayout(t, lay);
+    }
+    if (!t.country && this.world) t.country = this.nearestVenue(t.center, 3000)?.cc || undefined;
+    this.tracks.set(t.id, t);
+    this.remote.delete(t.id);
+  }
+
+  /** Swap a track's OSM trace for a community-corrected layout (new id, new leaderboard). */
+  private withLayout(t: TrackData, lay: CommunityLayout): TrackData {
+    const baseId = t.corrected?.baseId ?? t.id;
+    const osmPoints = t.corrected?.osmPoints ?? t.points;
+    this.aliases.set(baseId, lay.id);
+    return { ...t, id: lay.id, points: lay.points, lengthM: lay.lengthM, corrected: { by: lay.by, at: lay.at, baseId, osmPoints } };
+  }
+
+  private applyLayouts(all: Record<string, CommunityLayout>) {
+    for (const [base, lay] of Object.entries(all)) {
+      const current = this.tracks.get(base) ?? [...this.tracks.values()].find((x) => x.corrected?.baseId === base);
+      if (!current) {
+        this.pendingLayouts.set(base, lay);
         continue;
       }
-      // Restyle only the dots whose look changes (a country filter dims the rest).
-      const dim = cc !== null && v.cc !== cc;
-      const style = dim ? 'dim' : 'on';
-      const was = this.dotStyle[v.i];
-      if (was === style) continue;
-      if (was !== 'on' && was !== 'dim') m.addTo(this.map);
-      m.setStyle(dim ? { fillOpacity: 0.16, opacity: 0.2 } : { fillOpacity: 0.9, opacity: 1 });
-      this.dotStyle[v.i] = style;
+      if (current.id === lay.id) continue;
+      const fixed = this.withLayout(current, lay);
+      this.tracks.delete(current.id);
+      this.tracks.set(fixed.id, fixed);
+      if (this.selected?.id === current.id) this.selected = fixed;
     }
-    // Known tracks pick up their country from the venue they replaced.
-    for (const t of known) if (!t.country) t.country = this.nearestVenue(t.center, 3000)?.cc || undefined;
   }
 
-  private sizeDots() {
-    const z = this.map.getZoom();
-    const bucket = z < 3.5 ? 0 : z < 5.5 ? 1 : z < 8 ? 2 : 3;
-    if (bucket === this.dotBucket) return;
-    this.dotBucket = bucket;
-    const r = [2.4, 3.2, 4.5, 6.5][bucket];
-    for (const m of this.dots) m.setRadius(r);
+  private persist() {
+    const list = [...this.tracks.values()].filter((t) => !t.preset).slice(-60);
+    try {
+      localStorage.setItem('ak:tracks', JSON.stringify(list));
+    } catch {
+      /* ignore */
+    }
   }
+
+  private async pollFeed() {
+    try {
+      const f = await api.feed();
+      this.feedFails = 0;
+      this.noteRecords(f);
+      this.feed = f;
+      this.renderFeed();
+    } catch {
+      // One dropped request isn't an outage: keep the last timing until a few fail in a row.
+      if (++this.feedFails >= 3 || !this.feed) this.el.liveBody.innerHTML = '<p class="pit-empty">Live timing is offline.</p>';
+    }
+  }
+
+  /** New track records flash purple on the tower. */
+  private noteRecords(f: FeedResponse) {
+    const now = Date.now();
+    for (const [k, r] of Object.entries(f.records)) {
+      const prev = this.prevRecords.get(k);
+      if (prev !== undefined && r.ms < prev) this.flashes.set(k.split('|')[0], { kind: 'p', until: now + FLASH_MS });
+      this.prevRecords.set(k, r.ms);
+    }
+  }
+
+  private async pollBoard() {
+    const t = this.selected;
+    if (!t) return;
+    try {
+      const b = await api.board(t.id, this.dir);
+      if (this.selected !== t) return;
+      this.board = b;
+      this.renderBoard();
+    } catch {
+      if (this.el.dBoard?.isConnected) this.el.dBoard.innerHTML = '<p class="pit-empty">Leaderboard is offline. You can still race; laps are saved on this device.</p>';
+    }
+  }
+
+  private async pollDaily() {
+    try {
+      this.daily = await api.daily();
+      this.renderDaily();
+    } catch {
+      /* the bar still shows today's circuit */
+    }
+  }
+
+  /** Give discovered tracks a place name ("Jurong West kart track") via reverse geocoding. */
+  private async nameTracks(list: TrackData[]) {
+    for (const t of list.slice(0, 6)) {
+      if (t.location) continue;
+      try {
+        const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&zoom=14&lat=${t.center[0]}&lon=${t.center[1]}`);
+        const a = (await r.json()).address ?? {};
+        const place = a.suburb || a.neighbourhood || a.town || a.city_district || a.village || a.city || a.county;
+        const region = a.city || a.state || a.country;
+        if (place) {
+          t.location = [place, region !== place ? region : '', a.country].filter(Boolean).join(', ');
+          if (/^Unnamed/i.test(t.name)) t.name = `${place} kart track`;
+          this.persist();
+          this.renderTower(true);
+          if (this.selected?.id === t.id) this.renderPit();
+        }
+      } catch {
+        /* keep what we have */
+      }
+      await new Promise((res) => setTimeout(res, 1100)); // Nominatim allows ~1 request/second
+    }
+  }
+
+  // ------------------------------------------------------------------ venues
 
   private nearestVenue(at: LatLon, maxM: number): Venue | null {
     let best: Venue | null = null;
@@ -326,13 +277,25 @@ export class Atlas {
     return best;
   }
 
-  private focusVenue(v: Venue | null) {
-    if (!v) {
-      this.focusRing?.remove();
-      return;
+  /** Venues a known track already stands for (worked out again only when the tracks change). */
+  private coveredVenues(): Set<number> {
+    const known = [...this.tracks.values()];
+    const sig = known.map((t) => t.id).join();
+    if (sig !== this.coveredSig && this.world) {
+      this.coveredSig = sig;
+      this.covered.clear();
+      for (const v of this.world.venues) if (known.some((t) => Math.abs(t.center[0] - v.at[0]) < 0.02 && distM(t.center, v.at) < SAME_VENUE_M)) this.covered.add(v.i);
     }
-    this.focusRing ??= L.circleMarker(v.at, { radius: 11, color: '#f2eee5', weight: 2, fill: false, interactive: false, className: 'focus-ring' });
-    this.focusRing.setLatLng(v.at).addTo(this.map);
+    return this.covered;
+  }
+
+  private venues(): Venue[] {
+    const cov = this.coveredVenues();
+    return (this.world?.venues ?? []).filter((v) => !cov.has(v.i) && !this.emptyVenues.has(v.i));
+  }
+
+  private worldTotal() {
+    return this.venues().length + this.tracks.size;
   }
 
   /** The pre-stitched layouts file for a venue's cell (fetched once, then cached). */
@@ -349,14 +312,13 @@ export class Atlas {
     return p;
   }
 
-  /** A venue's layouts, pre-stitched and served from the CDN. Only baked venues are on the map. */
+  /** A venue's layouts, pre-stitched and served from the CDN. */
   private async venueLayouts(v: Venue): Promise<TrackData[]> {
     const cell = await this.venueCell(v);
     if (!cell) throw new Error('offline');
-    // The baker keys each venue by its dot; fall back to the nearest baked venue in the cell, so a
-    // map index from an older bake still finds its layouts.
-    let packed = cell?.[venueKey(v.at[0], v.at[1])];
-    if (!packed && cell) {
+    // The baker keys each venue by its position; fall back to the nearest baked venue in the cell.
+    let packed = cell[venueKey(v.at[0], v.at[1])];
+    if (!packed) {
       let best = 600;
       for (const [k, layouts] of Object.entries(cell)) {
         const [la, lo] = k.split(',').map(Number);
@@ -367,457 +329,303 @@ export class Atlas {
         }
       }
     }
-    if (packed?.length) {
-      return packed.map(([id, name, width, lengthM, pts]) => {
-        const points = unpackPoints(pts);
-        return { id, name, location: '', center: centroid(points), points, width, lengthM, osmWays: waysFromId(id) ?? [], source: 'OpenStreetMap', country: v.cc || undefined };
-      });
-    }
-    return [];
+    return (packed ?? []).map(([id, name, width, lengthM, pts]) => {
+      const points = unpackPoints(pts);
+      return { id, name, location: '', center: centroid(points), points, width, lengthM, osmWays: waysFromId(id) ?? [], source: 'OpenStreetMap', country: v.cc || undefined };
+    });
   }
 
-  /** A venue dot becomes a track: get its layouts and open the longest. */
+  /** A venue row becomes a track: get its layouts and open the longest. */
   private async openVenue(v: Venue) {
     const known = this.trackNear(v.at, SAME_VENUE_M);
     if (known) return this.open(known.id);
     if (this.loadingVenue === v.i) return;
     this.loadingVenue = v.i;
-    this.focusVenue(v);
-    this.map.flyTo(v.at, 16, { duration: 1.1 });
+    this.toast(`Loading ${v.name || 'the track'}…`, 'busy');
     try {
       const found = await this.venueLayouts(v);
       if (this.loadingVenue !== v.i) return;
       if (!found.length) {
         this.emptyVenues.add(v.i);
-        this.refreshVenues();
-        this.renderRail(true);
-        this.toast('This track isn’t ready yet, so it’s off the map for now.', 'warn');
+        this.renderTower(true);
+        this.toast('This track isn’t ready yet, so it’s off the list for now.', 'warn');
         return;
       }
-      const fresh = found.filter((t) => !this.tracks.has(t.id));
-      fresh.forEach((t) => this.addTrack(t));
+      found.filter((t) => !this.tracks.has(t.id)).forEach((t) => this.addTrack(t));
       this.persist();
-      this.refreshVenues();
-      this.nameTracks(fresh);
+      this.nameTracks(found);
       this.toast(found.length > 1 ? `${found.length} layouts at this venue` : '');
       this.open(found.sort((a, b) => b.lengthM - a.lengthM)[0].id);
     } catch {
       this.toast('Couldn’t load this track. Check your connection and try again.', 'warn');
     } finally {
       if (this.loadingVenue === v.i) this.loadingVenue = null;
-      this.focusVenue(null);
     }
   }
 
-  // ------------------------------------------------------------------ filters and the rail
-
-  private countryCounts(): Map<string, number> {
-    const n = new Map<string, number>();
-    for (const v of this.world?.venues ?? []) if (v.cc && !this.hiddenVenues.has(v.i) && !this.emptyVenues.has(v.i)) n.set(v.cc, (n.get(v.cc) ?? 0) + 1);
-    for (const t of this.tracks.values()) if (t.country) n.set(t.country, (n.get(t.country) ?? 0) + 1);
-    return n;
+  private countryName(cc: string | undefined) {
+    return (cc && this.world?.countries.get(cc)?.name) || cc || '';
   }
 
-  private renderChips() {
-    const counts = this.countryCounts();
-    const f = this.filter;
-    const activeCC = f.kind === 'country' ? f.cc : null;
-    const top = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([cc]) => cc);
-    const order = [...new Set([this.localCC, activeCC, ...top.slice(0, TOP_COUNTRIES)].filter((c): c is string => !!c && counts.has(c)))];
-    const featured = [...this.tracks.values()].filter((t) => t.preset).length;
-    const list: V.FilterChip[] = [
-      { key: 'featured', label: 'Featured', n: featured, on: f.kind === 'featured' },
-      { key: 'near', label: 'Near me', on: f.kind === 'near' },
-      ...(f.kind === 'view' ? [{ key: 'view', label: 'This area', n: this.railTotal, on: true }] : []),
-      ...order.map((cc) => ({ key: `cc:${cc}`, label: this.countryName(cc), cc, n: counts.get(cc), on: cc === activeCC })),
-    ];
-    this.el.chips.innerHTML = V.chips(list);
-    this.el.allBtn.querySelector('b')!.textContent = String(counts.size);
-    this.el.chips.querySelector('.on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  // ------------------------------------------------------------------ the tower
+
+  /** One row per venue: a venue's other layouts are on its pit board. The busiest (then featured,
+   *  then longest) layout stands for the venue. */
+  private venueTracks(list: TrackData[]): TrackData[] {
+    const kept: TrackData[] = [];
+    const rank = (t: TrackData) => this.liveOf(t.id) * 1e6 + (t.id === this.selected?.id ? 1e5 : 0) + (t.preset ? 1e4 : 0) + t.lengthM;
+    for (const t of list.slice().sort((a, b) => rank(b) - rank(a)))
+      if (!kept.some((k) => Math.abs(k.center[0] - t.center[0]) < 0.01 && distM(k.center, t.center) < 800)) kept.push(t);
+    return kept;
   }
 
-  private countryName(cc: string) {
-    return this.world?.countries.get(cc)?.name ?? cc;
+  private liveOf(id: string) {
+    return (this.feed?.live[`${id}|fwd`] ?? 0) + (this.feed?.live[`${id}|rev`] ?? 0);
   }
 
-  /** What the rail lists for a filter. */
-  private railFor(f: Filter): RailItem[] {
-    const tracks = [...this.tracks.values()];
-    const venues = (this.world?.venues ?? []).filter((v) => !this.hiddenVenues.has(v.i) && !this.emptyVenues.has(v.i));
-    const byName = (a: Venue, b: Venue) => (a.name ? 0 : 1) - (b.name ? 0 : 1) || a.name.localeCompare(b.name);
-    const T = (t: TrackData): RailItem => ({ kind: 'track', t });
-    const Vn = (v: Venue): RailItem => ({ kind: 'venue', v });
-    if (f.kind === 'featured') {
-      const found = tracks.filter((t) => !t.preset).reverse();
-      return [...tracks.filter((t) => t.preset), ...found].map(T);
+  private recordOf(id: string) {
+    const a = this.feed?.records[`${id}|fwd`]?.ms;
+    const b = this.feed?.records[`${id}|rev`]?.ms;
+    return a && b ? Math.min(a, b) : (a ?? b ?? null);
+  }
+
+  private flashOf(id: string): '' | 'p' | 'g' {
+    const f = this.flashes.get(id);
+    return f && f.until > Date.now() ? f.kind : '';
+  }
+
+  private trackRow(t: TrackData, extra: Partial<V.TowerRow> = {}): V.TowerRow {
+    const city = t.location?.split(',')[0];
+    return {
+      key: `t:${t.id}`,
+      code: circuitCode(t.name),
+      name: t.name,
+      sub: [city, this.countryName(t.country)].filter(Boolean).join(' · ') || 'OpenStreetMap',
+      cc: t.country,
+      best: this.recordOf(t.id),
+      flash: this.flashOf(t.id),
+      live: this.liveOf(t.id),
+      medal: earnedMedal(t.id, 'fwd') ?? earnedMedal(t.id, 'rev'),
+      daily: t.id === this.dailyId(),
+      ...extra,
+    };
+  }
+
+  private venueRow(v: Venue, extra: Partial<V.TowerRow> = {}): V.TowerRow {
+    return { key: `v:${v.i}`, code: circuitCode(v.name || 'Kart track'), name: v.name || 'Unnamed kart track', sub: this.countryName(v.cc) || 'Kart track', cc: v.cc, best: null, live: 0, ...extra };
+  }
+
+  /** LIVE: every circuit with a session, ranked by drivers on track, then today's laps, then records. */
+  private liveRows(): V.TowerRow[] {
+    const lastLap = new Map<string, number>();
+    for (const l of this.feed?.laps ?? []) lastLap.set(l.track, Math.max(lastLap.get(l.track) ?? 0, l.at));
+    const dayAgo = Date.now() - 86_400_000;
+    const score = (r: V.TowerRow, id: string) => r.live * 1e9 + ((lastLap.get(id) ?? 0) > dayAgo ? 1e6 + (lastLap.get(id)! - dayAgo) / 1e3 : 0) + (r.best ? 1e3 : 0) + (r.daily ? 500 : 0);
+    const list: { r: V.TowerRow; s: number }[] = [];
+    for (const t of this.venueTracks([...this.tracks.values()])) {
+      const r = this.trackRow(t);
+      list.push({ r, s: score(r, t.id) });
     }
-    if (f.kind === 'country') {
-      const ts = tracks.filter((t) => t.country === f.cc).sort((a, b) => Number(!!b.preset) - Number(!!a.preset));
-      return [...ts.map(T), ...venues.filter((v) => v.cc === f.cc).sort(byName).map(Vn)];
+    for (const x of this.remote.values()) {
+      const r: V.TowerRow = { key: `t:${x.id}`, code: circuitCode(x.name), name: x.name, sub: 'Raced by others', best: this.recordOf(x.id), flash: this.flashOf(x.id), live: this.liveOf(x.id) };
+      list.push({ r, s: score(r, x.id) });
     }
-    const at: LatLon = f.kind === 'near' ? f.at : [f.bounds.getCenter().lat, f.bounds.getCenter().lng];
-    const inside = (p: LatLon) => (f.kind === 'near' ? distM(at, p) < 400_000 : f.bounds.contains(p));
-    const items: [number, RailItem][] = [
-      ...tracks.filter((t) => inside(t.center)).map((t) => [distM(at, t.center), T(t)] as [number, RailItem]),
-      ...venues.filter((v) => inside(v.at)).map((v) => [distM(at, v.at), Vn(v)] as [number, RailItem]),
-    ];
-    return items.sort((a, b) => a[0] - b[0]).map(([, it]) => it);
+    return list.sort((a, b) => b.s - a.s || a.r.name.localeCompare(b.r.name)).map((x) => x.r);
   }
 
-  private inBounds(b: L.LatLngBounds) {
-    return this.railFor({ kind: 'view', bounds: b });
+  private nearRows(at: LatLon): V.TowerRow[] {
+    const items: [number, V.TowerRow][] = [];
+    for (const t of this.venueTracks([...this.tracks.values()])) {
+      const d = distM(at, t.center) / 1000;
+      if (d < NEAR_KM) items.push([d, this.trackRow(t, { distKm: d })]);
+    }
+    for (const v of this.venues()) {
+      if (Math.abs(v.at[0] - at[0]) > 4) continue;
+      const d = distM(at, v.at) / 1000;
+      if (d < NEAR_KM) items.push([d, this.venueRow(v, { distKm: d })]);
+    }
+    return items.sort((a, b) => a[0] - b[0]).map(([, r]) => r);
   }
 
-  private applyFilter(f: Filter, fly = true) {
-    this.filter = f;
-    this.refreshVenues();
-    this.renderRail();
-    this.renderChips();
-    this.updateHere();
-    if (!fly) return;
-    const pad = this.mapPadding();
-    if (f.kind === 'featured') this.map.flyTo([30, 12], small() ? 1.5 : 2.5, { duration: 1.2 });
-    else if (f.kind === 'near') this.map.flyTo(f.at, 8, { duration: 1.4 });
-    else if (f.kind === 'country') {
-      const pts = [...(this.world?.venues ?? []).filter((v) => v.cc === f.cc).map((v) => v.at), ...[...this.tracks.values()].filter((t) => t.country === f.cc).map((t) => t.center)];
-      const b = coreBounds(pts);
-      if (b) this.map.flyToBounds(L.latLngBounds(b).pad(0.1), { maxZoom: 9, duration: 1.4, ...pad });
+  private worldRows(cc: string | null): V.TowerRow[] {
+    const ts = this.venueTracks([...this.tracks.values()].filter((t) => !cc || t.country === cc)).map((t) => this.trackRow(t));
+    ts.sort((a, b) => b.live - a.live || Number(!!b.best) - Number(!!a.best) || a.name.localeCompare(b.name));
+    const named = (a: Venue, b: Venue) => (a.name ? 0 : 1) - (b.name ? 0 : 1) || a.name.localeCompare(b.name);
+    const vs = this.venues().filter((v) => !cc || v.cc === cc);
+    vs.sort(cc ? named : (a, b) => this.countryName(a.cc).localeCompare(this.countryName(b.cc)) || named(a, b));
+    return [...ts, ...vs.map((v) => this.venueRow(v))];
+  }
+
+  private computeRows(): V.TowerRow[] {
+    if (this.tab === 'near') return this.near ? this.nearRows(this.near.at) : [];
+    if (this.tab === 'world') return this.worldRows(this.worldCC);
+    return this.liveRows();
+  }
+
+  /** Rebuild the tower. `keep` holds your scroll place (background refreshes); LIVE rows glide to their new places. */
+  private renderTower(keep = false): void {
+    if (this.searching()) return this.renderSearch();
+    const list = this.el.tower;
+    const before = new Map<string, number>();
+    if (keep && this.tab === 'live' && !reduceMotion()) for (const r of list.querySelectorAll<HTMLElement>('[data-key]')) before.set(r.dataset.key!, r.getBoundingClientRect().top);
+    const scroll = list.scrollTop;
+    const shown = this.shown;
+    this.rows = this.computeRows();
+    this.el.head.innerHTML = V.towerHead(this.tab);
+    this.el.head.hidden = false;
+    this.renderSub();
+    if (!this.rows.length) {
+      this.shown = 0;
+      list.innerHTML =
+        this.tab === 'near'
+          ? this.near
+            ? V.towerEmpty(`No kart tracks within ${NEAR_KM} km of ${this.near.label}.`)
+            : V.towerEmpty('See the tracks closest to you.', { act: 'locate', label: 'Use my location' })
+          : V.towerEmpty(this.world || this.tracks.size ? 'No tracks here yet.' : 'Loading tracks…');
+      return;
+    }
+    this.shown = 0;
+    list.innerHTML = '';
+    this.more(keep ? Math.max(shown, BATCH) : BATCH);
+    if (keep) list.scrollTop = scroll;
+    else list.scrollTop = 0;
+    // FLIP: rows that moved slide from where they were.
+    if (before.size)
+      for (const r of list.querySelectorAll<HTMLElement>('[data-key]')) {
+        const was = before.get(r.dataset.key!);
+        if (was === undefined) continue;
+        const dy = was - r.getBoundingClientRect().top;
+        if (Math.abs(dy) > 1) r.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: 600, easing: 'cubic-bezier(.3,.9,.2,1)' });
+      }
+  }
+
+  /** Append the next rows of a long list. */
+  private more(n = BATCH) {
+    const from = this.shown;
+    const to = Math.min(this.rows.length, from + n);
+    if (to <= from) return;
+    const sel = this.selected ? `t:${this.selected.id}` : null;
+    let html = '';
+    for (let i = from; i < to; i++) {
+      const r = this.rows[i];
+      html += V.towerRow(r, i + 1, r.key === sel || r.key === this.cursor, this.tab);
+    }
+    this.el.tower.insertAdjacentHTML('beforeend', html);
+    this.shown = to;
+  }
+
+  private renderTabs() {
+    for (const b of this.el.tabs.querySelectorAll<HTMLElement>('[data-tab]')) {
+      const on = b.dataset.tab === this.tab && !this.searching();
+      b.setAttribute('aria-selected', String(on));
+      b.classList.toggle('on', on);
     }
   }
 
-  private filterHash() {
-    return this.filter.kind === 'country' ? `#/c/${this.filter.cc}` : '';
+  private renderSub() {
+    const s = this.el.sub;
+    if (this.tab === 'world') {
+      const name = this.worldCC ? this.countryName(this.worldCC) : 'All countries';
+      s.innerHTML = `<button class="tw-cc" data-act="countries" aria-haspopup="dialog"><span class="pw-stripe" style="${stripeStyle(this.worldCC)}"></span><b>${V.esc(name.toUpperCase())}</b><span class="mono">${this.rows.length.toLocaleString('en')}</span><span class="tw-caret">▾</span></button>`;
+      s.hidden = false;
+    } else if (this.tab === 'near' && this.near) {
+      s.innerHTML = `<p class="tw-near">${V.ICON.pin}<span>NEAR <b>${V.esc(this.near.label.toUpperCase())}</b></span><button class="tw-link" data-act="locate">Use my location</button></p>`;
+      s.hidden = false;
+    } else s.hidden = true;
   }
 
-  private pickFilter(key: string) {
-    this.closeCountries();
-    if (key === 'near') return this.nearMe();
-    if (key === 'view') return;
-    const hash = key.startsWith('cc:') ? `#/c/${key.slice(3)}` : '';
-    if (location.hash.replace(/^#$/, '') === hash) {
-      // Same route: re-apply (e.g. back to Featured from "Near me", which has no route).
-      this.applyFilter(key === 'featured' ? { kind: 'featured' } : { kind: 'country', cc: key.slice(3) });
-    } else location.hash = hash;
+  private setTab(tab: V.Tab) {
+    this.clearSearch();
+    if (tab === 'world' && this.worldCC === null && !this.tabTouched) this.worldCC = this.localCC;
+    this.tabTouched = true;
+    this.tab = tab;
+    this.cursor = null;
+    this.renderTabs();
+    if (tab === 'near' && !this.near) this.locate();
+    this.renderTower();
+    const hash = this.tabHash();
+    if (!this.routed && location.hash !== hash && (location.hash.startsWith('#/c/') || hash)) history.replaceState(null, '', hash || location.pathname + location.search);
+  }
+  private tabTouched = false;
+
+  private tabHash() {
+    return this.tab === 'world' && this.worldCC ? `#/c/${this.worldCC}` : '';
   }
 
-  private nearMe() {
-    if (!navigator.geolocation) return this.toast('Location isn’t available here. Pick a country instead.', 'warn');
+  private locate() {
+    if (!navigator.geolocation) return this.toast('Location isn’t available here. Search for a city instead.', 'warn');
     this.toast('Finding tracks near you…', 'busy');
     navigator.geolocation.getCurrentPosition(
       (p) => {
         this.toast('');
-        if (location.hash.startsWith('#/c/')) history.replaceState(null, '', location.pathname + location.search);
-        this.applyFilter({ kind: 'near', at: [p.coords.latitude, p.coords.longitude] });
+        this.near = { at: [p.coords.latitude, p.coords.longitude], label: 'you' };
+        this.tab = 'near';
+        this.renderTabs();
+        this.renderTower();
       },
-      () => this.toast('Location is off. Pick a country instead.', 'warn'),
+      () => this.toast('Location is off. Search for a city instead.', 'warn'),
       { timeout: 10000, maximumAge: 600000 },
     );
   }
 
-  /** Rebuild the rail for the current filter; `keep` holds your place (for background refreshes). */
-  private renderRail(keep = false) {
-    const items = this.railFor(this.filter);
-    const { scrollLeft } = this.el.rail;
-    const shown = this.railShown;
-    this.rail = items;
-    this.railTotal = items.length;
-    this.railShown = 0;
-    this.el.rail.scrollLeft = 0;
-    if (!items.length) {
-      const f = this.filter;
-      this.el.rail.innerHTML = V.emptyRail(
-        f.kind === 'near' ? 'No kart tracks mapped within 400 km of you yet.' : f.kind === 'view' ? 'No tracks in this area.' : 'Loading tracks…',
-      );
-      return;
-    }
-    this.el.rail.innerHTML = '';
-    this.moreRail();
-    if (this.filter.kind === 'featured') this.el.rail.insertAdjacentHTML('afterbegin', this.dailyCardHtml());
-    // The first venues on the rail are the likely next taps: fetch their layouts ahead.
-    for (const it of items.slice(0, 8)) if (it.kind === 'venue') this.venueCell(it.v);
-    if (keep) {
-      while (this.railShown < Math.min(shown, items.length)) this.moreRail();
-      this.el.rail.scrollLeft = scrollLeft;
-    }
-    this.renderNow();
+  // ------------------------------------------------------------------ countries
+
+  private openCountries() {
+    const pop = this.el.ccPop;
+    pop.hidden = false;
+    const input = pop.querySelector('input')!;
+    input.value = '';
+    this.renderCountries();
+    if (!small()) input.focus();
   }
 
-  /** Cards render in batches as you scroll along the rail. */
-  private moreRail() {
-    const next = this.rail.slice(this.railShown, this.railShown + RAIL_BATCH);
-    if (!next.length) return;
-    this.railShown += next.length;
-    const featured = [...this.tracks.values()].filter((t) => t.preset);
-    const html = next
-      .map((it) => {
-        if (it.kind === 'venue') return V.venueCard(it.v, this.emptyVenues.has(it.v.i));
-        const t = it.t;
-        const rec = this.feed?.records[`${t.id}|fwd`];
-        const idx = featured.indexOf(t);
-        return V.trackCard({
-          t,
-          shape: shapeOf(t),
-          num: idx >= 0 ? idx + 1 : undefined,
-          record: rec?.ms,
-          live: (this.feed?.live[`${t.id}|fwd`] ?? 0) + (this.feed?.live[`${t.id}|rev`] ?? 0),
-          pb: localPB(t.id, 'fwd'),
-          medal: earnedMedal(t.id, 'fwd'),
-        });
-      })
-      .join('');
-    this.el.rail.querySelector('.card.more')?.remove();
-    this.el.rail.insertAdjacentHTML('beforeend', html);
+  private closeCountries() {
+    this.el.ccPop.hidden = true;
   }
 
-  private onRailScroll() {
-    const r = this.el.rail;
-    if (r.scrollLeft + r.clientWidth > r.scrollWidth - 600) this.moreRail();
+  private renderCountries() {
+    const q = this.el.ccPop.querySelector('input')!.value.trim().toLowerCase();
+    const n = new Map<string, number>();
+    for (const v of this.venues()) if (v.cc) n.set(v.cc, (n.get(v.cc) ?? 0) + 1);
+    for (const t of this.tracks.values()) if (t.country) n.set(t.country, (n.get(t.country) ?? 0) + 1);
+    const list = [...n.entries()]
+      .map(([cc, k]) => ({ cc, n: k, name: this.countryName(cc) }))
+      .filter((c) => !q || c.name.toLowerCase().includes(q) || c.cc.toLowerCase().includes(q))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    this.el.ccList.innerHTML = V.countryList(list, this.worldCC, this.worldTotal());
   }
 
-  /** Light up a rail item on the map (pin for tracks, ring for venues). */
-  private hoverItem(key: string | null) {
-    if (!key) {
-      this.hotPin(null);
-      this.focusVenue(null);
-      return;
-    }
-    if (key.startsWith('t:')) this.hotPin(key.slice(2));
-    else {
-      const v = this.world?.venues[Number(key.slice(2))];
-      if (v) {
-        this.focusVenue(v);
-        this.venueCell(v);
-      }
-    }
-  }
-
-  // ------------------------------------------------------------------ race now
-
-  private nowPick(): { t: TrackData; dir: Dir; why: string } | null {
-    try {
-      const last = JSON.parse(localStorage.getItem(LAST_KEY) || 'null') as { id: string; dir: Dir } | null;
-      const t = last && this.tracks.get(this.aliases.get(last.id) ?? last.id);
-      if (t) return { t, dir: last!.dir === 'rev' ? 'rev' : 'fwd', why: 'Last raced' };
-    } catch {
-      /* fall through */
-    }
-    const featured = [...this.tracks.values()].filter((t) => t.preset);
-    const live = (t: TrackData) => (this.feed?.live[`${t.id}|fwd`] ?? 0) + (this.feed?.live[`${t.id}|rev`] ?? 0);
-    const busiest = featured.slice().sort((a, b) => live(b) - live(a))[0];
-    if (busiest && live(busiest)) return { t: busiest, dir: 'fwd', why: `${live(busiest)} on track` };
-    return featured[0] ? { t: featured[0], dir: 'fwd', why: 'Featured' } : null;
-  }
-
-  private renderNow() {
-    const p = this.nowPick();
-    // On Live time of day, say so when the race will be under the floodlights.
-    const why = p && timePref() === 'live' && isNightAt(p.t.center) ? `${p.why} · night race` : p?.why;
-    this.el.now.innerHTML = V.nowTile(p ? { ...p, why: why!, shape: shapeOf(p.t), pb: localPB(p.t.id, p.dir) } : null);
-  }
-
-  private raceNow() {
-    const p = this.nowPick();
-    if (p) this.race(p.t, p.dir);
-  }
-
-  private race(t: TrackData, dir: Dir, rival?: string) {
-    try {
-      localStorage.setItem(LAST_KEY, JSON.stringify({ id: t.id, dir }));
-    } catch {
-      /* private mode */
-    }
-    this.closeSearch();
-    this.o.onRace(t, dir, this.isDaily(t, dir), rival);
-  }
-
-  // ------------------------------------------------------------------ daily circuit
-
-  /** Today's circuit, worked out here (the same way the server does) so it shows even offline. */
-  private dailyId() {
-    return dailyTrack(dayOf(), [...this.tracks.values()].filter((t) => t.preset).map((t) => t.id));
-  }
-
-  private isDaily(t: TrackData, dir: Dir) {
-    return dir === 'fwd' && t.id === this.dailyId();
-  }
-
-  private dailyCardHtml() {
-    const t = this.tracks.get(this.dailyId() ?? '');
-    if (!t) return '';
-    const board = this.daily?.track === t.id ? this.daily : null;
-    return V.dailyCard({ t, shape: shapeOf(t), board, me: this.o.driver.pid, streak: dailyStreak(), msLeft: msLeftToday() });
-  }
-
-  /** Refresh the daily card in place (it leads the rail in the Featured view). */
-  private renderDaily() {
-    const card = this.el.rail.querySelector('.card.daily');
-    if (card) card.outerHTML = this.dailyCardHtml();
-    if (this.selected && this.isDaily(this.selected, this.dir) && !this.editor) this.renderDetail();
-  }
-
-  private async pollDaily() {
-    try {
-      this.daily = await api.daily();
-      this.renderDaily();
-    } catch {
-      /* the card still shows today's circuit */
-    }
-  }
-
-  // ------------------------------------------------------------------ events
-
-  private bind() {
-    const search = this.el.search as HTMLInputElement;
-    search.addEventListener('input', () => this.renderSearch());
-    search.addEventListener('focus', () => search.value && this.renderSearch());
-    search.addEventListener('keydown', (e) => {
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        e.preventDefault();
-        this.hitSel = (this.hitSel + (e.key === 'ArrowDown' ? 1 : -1) + this.hits.length) % Math.max(1, this.hits.length);
-        this.el.searchPop.querySelectorAll('.sr').forEach((b, i) => b.classList.toggle('on', i === this.hitSel));
-      } else if (e.key === 'Escape') {
-        this.closeSearch();
-        search.blur();
-      }
-    });
-    (this.el.searchForm as HTMLFormElement).addEventListener('submit', (e) => {
-      e.preventDefault();
-      const h = this.hits[this.hitSel];
-      if (h) this.pickHit(h.key);
-    });
-    this.el.searchPop.addEventListener('mousedown', (e) => e.preventDefault()); // keep focus in the input
-    this.el.searchPop.addEventListener('click', (e) => {
-      const b = (e.target as HTMLElement).closest<HTMLElement>('[data-hit]');
-      if (b) this.pickHit(b.dataset.hit!);
-    });
-    document.addEventListener('click', (e) => {
-      const t = e.target as Node;
-      if (!this.el.searchWrap.contains(t)) this.closeSearch();
-      if (!this.el.ccPop.contains(t) && !this.el.allBtn.contains(t)) this.closeCountries();
-    });
-
-    addEventListener('keydown', (e) => {
-      if (this.o.root.hidden || e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
-      if (document.querySelector('.cl-page, .mp-lobby:not([hidden]), .profile-pop:not([hidden])')) return;
-      const typing = isTyping(e);
-      if (e.key === '/' && !typing) {
-        e.preventDefault();
-        search.focus();
-        search.select();
-      } else if (e.key === 'Escape' && !typing) {
-        if (!this.el.ccPop.hidden) this.closeCountries();
-        else if (this.editor) this.stopEditing(true);
-        else if (this.selected) location.hash = this.filterHash();
-      } else if (e.key === 'Enter' && !typing && !(e.target as HTMLElement)?.closest?.('button, a')) {
-        e.preventDefault();
-        if (this.selected && !this.editor) this.race(this.selected, this.dir);
-        else if (!this.selected) this.raceNow();
-      } else if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && (e.target as HTMLElement)?.closest?.('.rail')) {
-        e.preventDefault();
-        const hits = [...this.el.rail.querySelectorAll<HTMLElement>('.card-hit')];
-        const i = hits.indexOf(document.activeElement as HTMLElement);
-        hits[Math.max(0, Math.min(hits.length - 1, i + (e.key === 'ArrowRight' ? 1 : -1)))]?.focus();
-      }
-    });
-
-    this.el.now.addEventListener('click', () => this.raceNow());
-
-    this.el.chips.addEventListener('click', (e) => {
-      const b = (e.target as HTMLElement).closest<HTMLElement>('[data-filter]');
-      if (b) this.pickFilter(b.dataset.filter!);
-    });
-    this.el.allBtn.addEventListener('click', () => (this.el.ccPop.hidden ? this.openCountries() : this.closeCountries()));
-    this.el.ccPop.addEventListener('input', () => this.renderCountries());
-    this.el.ccPop.addEventListener('click', (e) => {
-      const b = (e.target as HTMLElement).closest<HTMLElement>('[data-filter]');
-      if (b) this.pickFilter(b.dataset.filter!);
-    });
-
-    const rail = this.el.rail;
-    rail.addEventListener('scroll', () => this.onRailScroll(), { passive: true });
-    rail.addEventListener(
-      'wheel',
-      (e) => {
-        // A mouse wheel scrolls the rail sideways; trackpads already scroll in both axes.
-        if (Math.abs(e.deltaY) > Math.abs(e.deltaX) && rail.scrollWidth > rail.clientWidth) {
-          rail.scrollLeft += e.deltaY;
-          e.preventDefault();
-        }
-      },
-      { passive: false },
-    );
-    rail.addEventListener('click', (e) => {
-      const t = e.target as HTMLElement;
-      const go = t.closest<HTMLElement>('[data-go]');
-      if (go) {
-        const tr = this.tracks.get(go.dataset.go!);
-        if (tr) this.race(tr, 'fwd');
-        return;
-      }
-      const card = t.closest<HTMLElement>('[data-track]');
-      if (card) return this.open(card.dataset.track!);
-      const ven = t.closest<HTMLElement>('[data-venue]');
-      const v = ven && this.world?.venues[Number(ven.dataset.venue)];
-      if (v) this.openVenue(v);
-    });
-    rail.addEventListener('mouseover', (e) => this.hoverItem((e.target as HTMLElement).closest<HTMLElement>('[data-card]')?.dataset.card ?? null));
-    rail.addEventListener('mouseleave', () => this.hoverItem(null));
-    rail.addEventListener('focusin', (e) => {
-      const card = (e.target as HTMLElement).closest<HTMLElement>('[data-card]');
-      this.hoverItem(card?.dataset.card ?? null);
-      card?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
-    });
-
-    this.el.sheet.addEventListener('click', (e) => {
-      const t = e.target as HTMLElement;
-      if (t.closest('[data-act=back]')) location.hash = this.filterHash();
-      if (t.closest('[data-act=race]') && this.selected) this.race(this.selected, this.dir, this.rival?.pid);
-      const ghost = t.closest<HTMLElement>('[data-rival]');
-      if (ghost && this.selected) this.race(this.selected, this.dir, ghost.dataset.rival);
-      if (t.closest('[data-act=challenge]')) this.shareChallenge();
-      const sib = t.closest<HTMLElement>('.sib[data-track]');
-      if (sib && sib.dataset.track !== this.selected?.id) this.open(sib.dataset.track!);
-      const act = t.closest<HTMLElement>('[data-act^=edit]')?.dataset.act;
-      if (act) this.editAction(act);
-      const d = t.closest<HTMLElement>('[data-dir]')?.dataset.dir as Dir | undefined;
-      if (d && this.selected && d !== this.dir) location.hash = `#/t/${this.selected.id}/${d}`;
-    });
-
-    this.el.here.addEventListener('click', () => {
-      if (location.hash.startsWith('#/c/')) history.replaceState(null, '', location.pathname + location.search);
-      this.applyFilter({ kind: 'view', bounds: this.map.getBounds() }, false);
-    });
-
-    this.el.live.addEventListener('click', (e) => {
-      const t = e.target as HTMLElement;
-      if (t.closest('[data-act=live-toggle]')) return this.el.live.classList.toggle('collapsed');
-      const row = t.closest<HTMLElement>('[data-feed]');
-      if (row) {
-        this.el.live.classList.remove('open');
-        location.hash = `#/t/${row.dataset.feed}/${row.dataset.dir}`;
-      }
-    });
-    this.el.livePill.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (small()) this.el.live.classList.toggle('open');
-      else this.el.live.classList.remove('collapsed');
-    });
-    addEventListener('hashchange', () => this.route());
-    addEventListener('resize', () => {
-      this.map.invalidateSize();
-      this.fitPlaceholder();
-    });
-  }
-
-  private fitPlaceholder() {
-    (this.el.search as HTMLInputElement).placeholder = small() ? 'Search tracks & places' : 'Search circuits, countries or any city';
+  private pickCountry(cc: string | null) {
+    this.closeCountries();
+    this.tabTouched = true;
+    this.worldCC = cc;
+    this.tab = 'world';
+    this.renderTabs();
+    this.renderTower();
+    const hash = this.tabHash();
+    if (this.routed) location.hash = hash;
+    else history.replaceState(null, '', hash || location.pathname + location.search);
   }
 
   // ------------------------------------------------------------------ search
 
-  private renderSearch() {
+  private searching() {
+    return !!(this.el.search as HTMLInputElement).value.trim();
+  }
+
+  private clearSearch() {
+    const s = this.el.search as HTMLInputElement;
+    if (!s.value) return;
+    s.value = '';
+    this.o.root.classList.remove('searching');
+    this.renderTabs();
+  }
+
+  private renderSearch(): void {
     const q = (this.el.search as HTMLInputElement).value.trim();
-    if (!q) return this.closeSearch();
+    this.o.root.classList.toggle('searching', !!q);
+    this.renderTabs();
+    if (!q) return this.renderTower();
     const s = q.toLowerCase();
     const has = (x: string) => x.toLowerCase().includes(s);
     // Prefix matches first, then word starts ("ger" -> Germany before Rogers).
@@ -825,54 +633,56 @@ export class Atlas {
       const l = x.toLowerCase();
       return l.startsWith(s) ? 0 : new RegExp(`\\b${s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'u').test(l) ? 1 : 2;
     };
-    const counts = this.countryCounts();
     const trackHits = [...this.tracks.values()]
-      .filter((t) => has(`${t.name} ${t.location}`))
+      .filter((t) => has(`${t.name} ${t.location} ${circuitCode(t.name)}`))
       .sort((a, b) => rank(a.name) - rank(b.name))
-      .slice(0, 5)
-      .map((t) => ({ key: `t:${t.id}`, title: t.name, sub: `${t.location || V.coords(t.center)} · ${(t.lengthM / 1000).toFixed(2)} km`, tag: t.country ?? 'OSM' }));
+      .slice(0, 6)
+      .map((t) => ({ key: `t:${t.id}`, title: t.name, sub: `${t.location || this.countryName(t.country)} · ${(t.lengthM / 1000).toFixed(2)} km`, tag: circuitCode(t.name), cc: t.country }));
+    const counts = new Map<string, number>();
+    for (const v of this.venues()) if (v.cc) counts.set(v.cc, (counts.get(v.cc) ?? 0) + 1);
     const countryHits = [...(this.world?.countries.values() ?? [])]
       .filter((c) => counts.has(c.cc) && (has(c.name) || c.cc.toLowerCase() === s || c.cc2.toLowerCase() === s))
       .sort((a, b) => rank(a.name) - rank(b.name) || (counts.get(b.cc) ?? 0) - (counts.get(a.cc) ?? 0))
       .slice(0, 4)
-      .map((c) => ({ key: `c:${c.cc}`, title: c.name, sub: `${counts.get(c.cc)} kart tracks`, tag: c.cc }));
+      .map((c) => ({ key: `c:${c.cc}`, title: c.name, sub: `${counts.get(c.cc)} kart tracks`, tag: c.cc, cc: c.cc }));
     const venueHits =
       q.length < 2
         ? []
-        : (this.world?.venues ?? [])
-            .filter((v) => v.name && !this.hiddenVenues.has(v.i) && !this.emptyVenues.has(v.i) && has(v.name))
+        : this.venues()
+            .filter((v) => v.name && has(v.name))
             .sort((a, b) => rank(a.name) - rank(b.name))
-            .slice(0, 5)
-            .map((v) => ({ key: `v:${v.i}`, title: v.name, sub: `${this.countryName(v.cc)} · ${V.coords(v.at)}`, tag: v.cc || '—' }));
-    const place = [{ key: 'place', title: `Find “${q}” on the map`, sub: 'Any city or region', tag: '↵' }];
+            .slice(0, 6)
+            .map((v) => ({ key: `v:${v.i}`, title: v.name, sub: this.countryName(v.cc) || 'Kart track', tag: circuitCode(v.name), cc: v.cc }));
+    const place = [{ key: 'place', title: `Tracks near “${q}”`, sub: 'Any city or region', tag: '↵' }];
     this.hits = [...trackHits, ...countryHits, ...venueHits, ...place];
     this.hitSel = 0;
-    this.el.searchPop.innerHTML = V.searchResults(
+    this.el.head.hidden = true;
+    this.el.sub.innerHTML = `<p class="tw-near">${V.ICON.search}<span>RESULTS FOR <b>“${V.esc(q.toUpperCase())}”</b></span></p>`;
+    this.el.sub.hidden = false;
+    this.el.tower.innerHTML = V.searchResults(
       [
-        { label: 'Circuits', hits: trackHits },
-        { label: 'Countries', hits: countryHits },
-        { label: 'Venues', hits: venueHits },
-        { label: 'Places', hits: place },
+        { label: 'CIRCUITS', hits: trackHits },
+        { label: 'COUNTRIES', hits: countryHits },
+        { label: 'VENUES', hits: venueHits },
+        { label: 'PLACES', hits: place },
       ],
       this.hitSel,
     );
-    this.el.searchPop.hidden = false;
-  }
-
-  private closeSearch() {
-    this.el.searchPop.hidden = true;
+    this.el.tower.scrollTop = 0;
   }
 
   private pickHit(key: string) {
     const input = this.el.search as HTMLInputElement;
     const q = input.value.trim();
-    this.closeSearch();
     input.blur();
     if (key === 'place') return this.findPlace(q);
-    input.value = '';
-    if (key.startsWith('t:')) this.open(key.slice(2));
-    else if (key.startsWith('c:')) this.pickFilter(`cc:${key.slice(2)}`);
+    this.clearSearch();
+    if (key.startsWith('t:')) {
+      this.renderTower();
+      this.open(key.slice(2));
+    } else if (key.startsWith('c:')) this.pickCountry(key.slice(2));
     else if (key.startsWith('v:')) {
+      this.renderTower();
       const v = this.world?.venues[Number(key.slice(2))];
       if (v) this.openVenue(v);
     }
@@ -886,201 +696,314 @@ export class Atlas {
       const [hit] = await res.json();
       if (!hit) return this.toast(`Couldn't find “${q}”. Try a city name.`, 'warn');
       this.toast('');
-      if (this.selected) location.hash = this.filterHash();
-      const bb = hit.boundingbox.map(Number);
-      const bounds = L.latLngBounds([bb[0], bb[2]], [bb[1], bb[3]]);
-      this.map.flyToBounds(bounds, { maxZoom: 11, duration: 1.4, ...this.mapPadding() });
-      this.map.once('moveend', () => {
-        if (!this.inBounds(this.map.getBounds().pad(0.3)).length) return this.toast(`No kart tracks near ${hit.display_name.split(',')[0]} yet.`, 'warn');
-        if (location.hash.startsWith('#/c/')) history.replaceState(null, '', location.pathname + location.search);
-        this.applyFilter({ kind: 'view', bounds: this.map.getBounds().pad(0.3) }, false);
-      });
+      this.clearSearch();
+      this.near = { at: [Number(hit.lat), Number(hit.lon)], label: hit.display_name.split(',')[0] };
+      this.tab = 'near';
+      this.renderTabs();
+      this.renderTower();
+      if (this.routed) location.hash = '';
     } catch {
       this.toast('Search is unavailable right now', 'warn');
     }
   }
 
-  // ------------------------------------------------------------------ countries
+  // ------------------------------------------------------------------ Box box, the daily circuit
 
-  private openCountries() {
-    this.el.ccPop.hidden = false;
-    this.el.allBtn.classList.add('open');
-    const input = this.el.ccPop.querySelector('input')!;
-    input.value = '';
-    this.renderCountries();
-    if (!small()) input.focus();
-  }
-
-  private closeCountries() {
-    this.el.ccPop.hidden = true;
-    this.el.allBtn.classList.remove('open');
-  }
-
-  private renderCountries() {
-    const q = this.el.ccPop.querySelector('input')!.value.trim().toLowerCase();
-    const counts = this.countryCounts();
-    const list = [...counts.entries()]
-      .map(([cc, n]) => ({ cc, n, name: this.countryName(cc) }))
-      .filter((c) => !q || c.name.toLowerCase().includes(q) || c.cc.toLowerCase().includes(q))
-      .sort((a, b) => a.name.localeCompare(b.name));
-    this.el.ccList.innerHTML = V.countryList(list, this.filter.kind === 'country' ? this.filter.cc : null);
-  }
-
-  // ------------------------------------------------------------------ data
-
-  private async load() {
-    const [presets, world] = await Promise.allSettled([fetch('/tracks/presets.json').then((r) => r.json() as Promise<TrackData[]>), loadWorld()]);
-    if (presets.status === 'fulfilled') presets.value.forEach((t) => this.addTrack({ ...t, preset: true }));
+  private nowPick(): { t: TrackData; dir: Dir; why: string } | null {
     try {
-      const saved: TrackData[] = JSON.parse(localStorage.getItem('ak:tracks') || '[]');
-      saved.forEach((t) => this.tracks.has(t.id) || this.addTrack(t));
+      const last = JSON.parse(localStorage.getItem(LAST_KEY) || 'null') as { id: string; dir: Dir } | null;
+      const t = last && this.tracks.get(this.aliases.get(last.id) ?? last.id);
+      if (t) return { t, dir: last!.dir === 'rev' ? 'rev' : 'fwd', why: 'LAST RACED' };
     } catch {
-      /* ignore */
+      /* fall through */
     }
+    const busiest = [...this.tracks.values()].sort((a, b) => this.liveOf(b.id) - this.liveOf(a.id))[0];
+    if (busiest && this.liveOf(busiest.id)) return { t: busiest, dir: 'fwd', why: `${this.liveOf(busiest.id)} ON TRACK` };
+    const daily = this.tracks.get(this.dailyId() ?? '');
+    if (daily) return { t: daily, dir: 'fwd', why: 'DAILY CIRCUIT' };
+    const first = [...this.tracks.values()][0];
+    return first ? { t: first, dir: 'fwd', why: 'START HERE' } : null;
+  }
+
+  private renderBox() {
+    const p = this.nowPick();
+    const night = p && timePref() === 'live' && isNightAt(p.t.center);
+    this.el.box.innerHTML = V.boxBar(p ? { code: circuitCode(p.t.name), name: p.t.name, why: `${p.why}${night ? ' · NIGHT RACE' : ''}` } : null);
+  }
+
+  /** Today's circuit, worked out here (the same way the server does) so it shows even offline. */
+  private dailyId() {
+    return dailyTrack(dayOf(), [...this.tracks.values()].filter((t) => t.preset).map((t) => t.id));
+  }
+
+  private isDaily(t: TrackData, dir: Dir) {
+    return dir === 'fwd' && t.id === this.dailyId();
+  }
+
+  private renderDaily() {
+    const t = this.tracks.get(this.dailyId() ?? '');
+    this.el.daily.innerHTML = V.dailyBar(t ? { t, msLeft: msLeftToday(), streak: dailyStreak(), board: this.daily?.track === t.id ? this.daily : null, me: this.o.driver.pid } : null);
+    this.el.dailyClock = this.el.daily.querySelector('[data-el=dailyClock]') as HTMLElement;
+    if (this.selected && this.isDaily(this.selected, this.dir) && !this.closeEditor) this.renderPit();
+  }
+
+  private tickClock() {
+    if (this.o.root.hidden) return;
+    if (this.el.dailyClock?.isConnected) this.el.dailyClock.textContent = V.clock(msLeftToday());
+  }
+
+  // ------------------------------------------------------------------ racing
+
+  private race(t: TrackData, dir: Dir, rival?: string) {
     try {
-      this.applyLayouts(await api.layouts());
+      localStorage.setItem(LAST_KEY, JSON.stringify({ id: t.id, dir }));
     } catch {
-      /* layouts are optional */
+      /* private mode */
     }
-    if (world.status === 'fulfilled') {
-      this.world = world.value;
-      this.localCC = localeCountry(this.world);
-      this.drawDots();
-    }
-    this.nameTracks([...this.tracks.values()].filter((t) => !t.preset && !t.location));
-    // A country route fills the dock itself; otherwise (no route, or a circuit link) fill it here.
-    if (!this.route() || location.hash.startsWith('#/t/')) this.applyFilter(this.filter, false);
-    this.renderNow();
-    this.pollFeed();
-    this.pollDaily();
-    window.setInterval(() => !this.o.root.hidden && this.pollFeed(), 6000);
-    window.setInterval(() => !this.o.root.hidden && this.pollDaily(), 60000);
-    window.setInterval(() => this.selected && !this.o.root.hidden && this.pollBoard(), 5000);
+    this.o.onRace(t, dir, this.isDaily(t, dir), rival);
   }
 
-  private addTrack(t: TrackData) {
-    const lay = this.pendingLayouts.get(t.id);
-    if (lay) {
-      this.pendingLayouts.delete(t.id);
-      t = this.withLayout(t, lay);
-    }
-    this.tracks.set(t.id, t);
-    this.addPin(t);
-  }
-
-  /** Swap a track's OSM trace for a community-corrected layout (new id, new leaderboard). */
-  private withLayout(t: TrackData, lay: CommunityLayout): TrackData {
-    const baseId = t.corrected?.baseId ?? t.id;
-    const osmPoints = t.corrected?.osmPoints ?? t.points;
-    this.aliases.set(baseId, lay.id);
-    return { ...t, id: lay.id, points: lay.points, lengthM: lay.lengthM, corrected: { by: lay.by, at: lay.at, baseId, osmPoints } };
-  }
-
-  private applyLayouts(all: Record<string, CommunityLayout>) {
-    for (const [base, lay] of Object.entries(all)) {
-      const current = this.tracks.get(base) ?? [...this.tracks.values()].find((x) => x.corrected?.baseId === base);
-      if (!current) {
-        this.pendingLayouts.set(base, lay);
-        continue;
-      }
-      if (current.id === lay.id) continue;
-      const fixed = this.withLayout(current, lay);
-      this.tracks.delete(current.id);
-      this.pins.get(current.id)?.remove();
-      this.pins.delete(current.id);
-      this.tracks.set(fixed.id, fixed);
-      this.addPin(fixed);
-      if (this.selected?.id === current.id) this.selected = fixed;
-    }
-  }
-
-  private persist() {
-    const list = [...this.tracks.values()].filter((t) => !t.preset).slice(-60);
-    try {
-      localStorage.setItem('ak:tracks', JSON.stringify(list));
-    } catch {
-      /* ignore */
-    }
-  }
-
-  private async pollFeed() {
-    try {
-      this.feed = await api.feed();
-      this.feedFails = 0;
-      this.renderFeed();
-    } catch {
-      // One dropped request isn't an outage: keep showing the last timing until a few fail in a row.
-      if (++this.feedFails >= 3 || !this.feed) this.el.liveBody.innerHTML = '<p class="lv-empty">Live timing is offline.</p>';
-    }
-  }
-
-  private async pollBoard() {
+  /** START: the five red lights come on and go out, then you're on the grid. */
+  private start(rival?: string) {
     const t = this.selected;
-    if (!t) return;
-    try {
-      const b = await api.board(t.id, this.dir);
-      if (this.selected !== t) return;
-      this.board = b;
-      this.renderBoard();
-    } catch {
-      if (this.el.dBoard) this.el.dBoard.innerHTML = '<p class="empty">Leaderboard is offline. You can still race; laps are saved on this device.</p>';
-    }
+    if (!t || this.starting) return;
+    const lights = [...this.el.pit.querySelectorAll<HTMLElement>('.pit-lights i')];
+    if (!lights.length || reduceMotion()) return this.race(t, this.dir, rival);
+    this.starting = true;
+    this.el.pit.classList.add('lights');
+    lights.forEach((l, k) => setTimeout(() => l.classList.add('on'), k * 90));
+    setTimeout(() => {
+      lights.forEach((l) => l.classList.remove('on'));
+      this.el.pit.classList.remove('lights');
+      this.starting = false;
+      if (this.selected === t) this.race(t, this.dir, rival);
+    }, lights.length * 90 + 160);
   }
 
-  /** Give discovered tracks a place name ("Jurong West kart track") via reverse geocoding. */
-  private async nameTracks(list: TrackData[]) {
-    for (const t of list.slice(0, 6)) {
-      if (t.location) continue;
-      try {
-        const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&zoom=14&lat=${t.center[0]}&lon=${t.center[1]}`);
-        const a = (await r.json()).address ?? {};
-        const place = a.suburb || a.neighbourhood || a.town || a.city_district || a.village || a.city || a.county;
-        const region = a.city || a.state || a.country;
-        if (place) {
-          t.location = [place, region !== place ? region : '', a.country].filter(Boolean).join(', ');
-          if (/^Unnamed/i.test(t.name)) t.name = `${place} kart track`;
-          this.pins.get(t.id)?.remove();
-          this.pins.delete(t.id);
-          this.addPin(t);
-          this.persist();
-          this.renderRail(true);
-          if (this.selected?.id === t.id) this.renderDetail();
-        }
-      } catch {
-        /* keep the coordinates */
+  // ------------------------------------------------------------------ events
+
+  private bind() {
+    const root = this.o.root;
+    const search = this.el.search as HTMLInputElement;
+    search.addEventListener('input', () => this.renderSearch());
+    search.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        this.hitSel = (this.hitSel + (e.key === 'ArrowDown' ? 1 : -1) + this.hits.length) % Math.max(1, this.hits.length);
+        this.el.tower.querySelectorAll('.sr').forEach((b, i) => b.classList.toggle('sel', i === this.hitSel));
+      } else if (e.key === 'Escape') {
+        this.clearSearch();
+        this.renderTower();
+        search.blur();
+        root.classList.remove('search-open');
       }
-      await new Promise((res) => setTimeout(res, 1100)); // Nominatim allows ~1 request/second
+    });
+    (this.el.searchForm as HTMLFormElement).addEventListener('submit', (e) => {
+      e.preventDefault();
+      const h = this.hits[this.hitSel];
+      if (h) this.pickHit(h.key);
+    });
+
+    root.addEventListener('click', (e) => {
+      const t = e.target as HTMLElement;
+      const act = t.closest<HTMLElement>('[data-act]')?.dataset.act;
+      if (act === 'search-open') {
+        root.classList.add('search-open');
+        search.focus();
+        return;
+      }
+      if (act === 'search-clear') {
+        this.clearSearch();
+        this.renderTower();
+        root.classList.remove('search-open');
+        return;
+      }
+      if (act === 'box') return this.boxRace();
+      if (act === 'daily') {
+        const id = this.dailyId();
+        if (id) location.hash = `#/t/${id}/fwd`;
+        return;
+      }
+      if (act === 'locate') return this.locate();
+      if (act === 'countries') return this.el.ccPop.hidden ? this.openCountries() : this.closeCountries();
+      if (act === 'live-close') return this.toggleLive(false);
+      const tab = t.closest<HTMLElement>('[data-tab]')?.dataset.tab as V.Tab | undefined;
+      if (tab) return this.setTab(tab);
+      const cc = t.closest<HTMLElement>('[data-cc]')?.dataset.cc;
+      if (cc) return this.pickCountry(cc === 'ALL' ? null : cc);
+      const hit = t.closest<HTMLElement>('[data-hit]')?.dataset.hit;
+      if (hit) return this.pickHit(hit);
+      const row = t.closest<HTMLElement>('.tw-row[data-key]');
+      if (row) return this.openKey(row.dataset.key!);
+      const feed = t.closest<HTMLElement>('[data-feed]');
+      if (feed) {
+        this.toggleLive(false);
+        location.hash = `#/t/${feed.dataset.feed}/${feed.dataset.dir}`;
+        return;
+      }
+      if (t.closest('[data-el=livePill]')) return this.toggleLive();
+    });
+    document.addEventListener('click', (e) => {
+      const t = e.target as Node;
+      if (!this.el.ccPop.contains(t) && !(t as HTMLElement).closest?.('[data-act=countries]')) this.closeCountries();
+      if (!this.el.liveSheet.contains(t) && !this.el.livePill.contains(t)) this.toggleLive(false);
+    });
+    this.el.ccPop.addEventListener('input', () => this.renderCountries());
+
+    this.el.tower.addEventListener('scroll', () => {
+      const l = this.el.tower;
+      if (!this.searching() && l.scrollTop + l.clientHeight > l.scrollHeight - 400) this.more();
+    });
+
+    this.el.pit.addEventListener('click', (e) => this.pitClick(e));
+
+    addEventListener('keydown', (e) => {
+      if (root.hidden || e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || this.closeEditor) return;
+      if (document.querySelector('.cl-page, .mp-lobby:not([hidden]), .profile-pop:not([hidden])')) return;
+      const typing = isTyping(e);
+      if (e.key === '/' && !typing) {
+        e.preventDefault();
+        root.classList.add('search-open');
+        search.focus();
+        search.select();
+      } else if (e.key === 'Escape' && !typing) {
+        if (!this.el.ccPop.hidden) this.closeCountries();
+        else if (!this.el.liveSheet.hidden) this.toggleLive(false);
+        else if (this.routed) location.hash = this.tabHash();
+      } else if (e.key === 'Enter' && !typing && !(e.target as HTMLElement)?.closest?.('button, a')) {
+        e.preventDefault();
+        if (this.cursor && this.cursor !== (this.selected ? `t:${this.selected.id}` : null)) this.openKey(this.cursor);
+        else if (this.selected && (this.routed || !small())) this.start(this.rival?.pid);
+        else this.boxRace();
+      } else if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !typing) {
+        e.preventDefault();
+        this.moveCursor(e.key === 'ArrowDown' ? 1 : -1);
+      }
+    });
+    addEventListener('hashchange', () => this.route());
+  }
+
+  private pitClick(e: MouseEvent) {
+    const t = e.target as HTMLElement;
+    const act = t.closest<HTMLElement>('[data-act]')?.dataset.act;
+    if (act === 'back') {
+      location.hash = this.tabHash();
+      return;
+    }
+    if (act === 'race') return this.start(this.rival?.pid);
+    if (act === 'challenge') return void this.shareChallenge();
+    if (act === 'friends') {
+      location.hash = '#/room';
+      return;
+    }
+    if (act === 'edit') return this.editLayout();
+    const ghost = t.closest<HTMLElement>('[data-rival]');
+    if (ghost) return this.start(ghost.dataset.rival);
+    const sib = t.closest<HTMLElement>('.sib[data-track]');
+    if (sib && sib.dataset.track !== this.selected?.id) return this.open(sib.dataset.track!);
+    const d = t.closest<HTMLElement>('[data-dir]')?.dataset.dir as Dir | undefined;
+    if (d && this.selected && d !== this.dir) {
+      if (this.routed) location.hash = `#/t/${this.selected.id}/${d}`;
+      else {
+        this.dir = d;
+        this.board = null;
+        this.renderPit();
+        this.pollBoard();
+      }
+      return;
+    }
+    const time = t.closest<HTMLElement>('[data-time]')?.dataset.time as TimePref | undefined;
+    if (time) {
+      saveTimePref(time);
+      this.renderPit();
+      this.renderBox();
+      return;
+    }
+    const ctl = t.closest<HTMLElement>('[data-controls]')?.dataset.controls as ControlScheme | undefined;
+    if (ctl) {
+      saveControlsPref(ctl);
+      this.renderPit();
     }
   }
 
-  // ------------------------------------------------------------------ routing
+  private boxRace() {
+    const p = this.nowPick();
+    if (p) this.race(p.t, p.dir);
+  }
 
-  private route(): boolean {
+  /** Open a tower row: a known circuit's pit board, or load a venue's layouts first. */
+  private openKey(key: string) {
+    this.cursor = null;
+    if (key.startsWith('t:')) return this.open(key.slice(2));
+    const v = this.world?.venues[Number(key.slice(2))];
+    if (v) this.openVenue(v);
+  }
+
+  /** ↑/↓ through the tower. On desktop a known circuit goes up on the wall straight away. */
+  private moveCursor(step: number) {
+    if (!this.rows.length) return;
+    const cur = this.cursor ?? (this.selected ? `t:${this.selected.id}` : null);
+    let i = this.rows.findIndex((r) => r.key === cur);
+    i = Math.max(0, Math.min(this.rows.length - 1, i + step));
+    if (i >= this.shown) this.more(i - this.shown + BATCH);
+    const key = this.rows[i].key;
+    this.cursor = key;
+    for (const r of this.el.tower.querySelectorAll<HTMLElement>('[data-key]')) r.classList.toggle('sel', r.dataset.key === key);
+    this.el.tower.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: 'nearest' });
+    if (!small() && key.startsWith('t:') && this.tracks.has(key.slice(2))) {
+      this.cursor = null;
+      this.select(key.slice(2), true);
+    }
+  }
+
+  private toggleLive(open?: boolean) {
+    const s = this.el.liveSheet;
+    const show = open ?? s.hidden;
+    if (show === !s.hidden) return;
+    s.hidden = !show;
+    this.el.livePill.setAttribute('aria-expanded', String(show));
+  }
+
+  // ------------------------------------------------------------------ routing and the pit board
+
+  private route() {
     const h = location.hash;
     const m = /^#\/t\/([^/]+)\/?(fwd|rev)?(?:\/vs\/([0-9a-f]{12}))?/.exec(h);
     if (m) {
       this.dir = (m[2] as Dir) || 'fwd';
-      this.setRival(m[3] ?? null, decodeURIComponent(m[1]));
       const id = decodeURIComponent(m[1]);
+      this.setRival(m[3] ?? null, id);
       const alias = this.aliases.get(id);
       if (alias) {
         history.replaceState(null, '', `#/t/${alias}/${this.dir}`);
         this.select(alias);
       } else this.select(id);
-      return true;
+      return;
     }
-    const wasOpen = !!this.selected;
-    if (this.selected) this.closeDetail();
+    this.routed = false;
+    this.o.root.classList.remove('pit-open');
     const c = /^#\/c\/([A-Za-z]{3})$/.exec(h);
     if (c) {
-      const cc = c[1].toUpperCase();
-      const same = this.filter.kind === 'country' && this.filter.cc === cc;
-      if (!same) this.applyFilter({ kind: 'country', cc });
-      else if (wasOpen) this.applyFilter(this.filter); // back from a track: show the country again
-      return true;
+      this.worldCC = c[1].toUpperCase();
+      this.tab = 'world';
+      this.tabTouched = true;
+      this.renderTabs();
+      this.renderTower();
     }
-    if (this.filter.kind === 'country') this.applyFilter({ kind: 'featured' });
-    return false;
+    this.rival = null;
+    // On desktop the wall always shows a circuit: the one you'd race with Box box.
+    if (!small()) {
+      const p = this.nowPick();
+      if (p && (!this.selected || this.selected.id !== p.t.id)) {
+        this.dir = p.dir;
+        this.select(p.t.id, true);
+      } else if (this.selected) this.renderPit();
+    } else {
+      this.selected = null;
+      this.board = null;
+      this.el.pit.innerHTML = '';
+      this.markSelected();
+    }
   }
 
   private open(id: string) {
@@ -1089,7 +1012,8 @@ export class Atlas {
     else location.hash = hash;
   }
 
-  private async select(id: string) {
+  /** Put a circuit on the pit board. `quiet`: the desktop wall's own pick, not an address. */
+  private async select(id: string, quiet = false) {
     let t = this.tracks.get(id);
     if (!t) {
       const route = location.hash;
@@ -1097,15 +1021,14 @@ export class Atlas {
       try {
         const fetched = (await api.track(id).catch(() => null)) ?? (await trackFromId(id));
         if (!fetched) throw new Error('not found');
-        const fromFeed = this.feed?.laps.find((l) => l.track === id) ?? this.feed?.onTrack?.find((l) => l.track === id && l.trackName);
-        const name = fromFeed && ('trackName' in fromFeed ? fromFeed.trackName : null);
-        if (name) fetched.name = name;
+        const r = this.remote.get(id);
+        if (r?.name) fetched.name = r.name;
         this.addTrack(fetched);
         this.persist();
-        this.refreshVenues();
         t = fetched;
         this.toast('');
         if (location.hash !== route) return; // you went elsewhere while it loaded
+        this.renderTower(true);
       } catch {
         this.toast("Couldn't load that track. OpenStreetMap may be busy.", 'warn');
         return;
@@ -1113,176 +1036,62 @@ export class Atlas {
     }
     const changed = this.selected?.id !== t.id;
     this.selected = t;
-    this.o.root.classList.add('detail-open');
-    this.closeSearch();
-    this.renderDetail();
-    this.markSelectedPin();
-    this.el.here.classList.remove('show');
-    if (changed) {
-      const bounds = L.latLngBounds(t.points.map((p) => L.latLng(p[0], p[1])));
-      this.map.flyToBounds(bounds, { maxZoom: 18, duration: 1.4, ...this.mapPadding() });
-      this.board = null;
-      this.el.sheetScroll.scrollTop = 0;
-    }
-    this.placeStartMarker();
-    this.drawOutlines();
+    this.routed = !quiet;
+    this.o.root.classList.toggle('pit-open', this.routed);
+    if (changed) this.board = null;
+    this.renderPit();
+    this.markSelected();
+    if (changed) this.el.pit.scrollTop = 0;
     this.pollBoard();
   }
 
-  private closeDetail() {
-    this.stopEditing();
-    this.selected = null;
-    this.board = null;
-    this.o.root.classList.remove('detail-open');
-    this.sfMarker?.remove();
-    this.sfMarker = null;
-    this.markSelectedPin();
-    this.drawOutlines();
-    if (this.map.getZoom() > 12) this.map.flyTo(this.map.getCenter(), 10, { duration: 1 });
-    this.updateHere();
+  private markSelected() {
+    const key = this.selected ? `t:${this.selected.id}` : null;
+    for (const r of this.el.tower.querySelectorAll<HTMLElement>('[data-key]')) r.classList.toggle('sel', r.dataset.key === key);
   }
 
-  private placeStartMarker() {
-    this.sfMarker?.remove();
+  private renderPit() {
     const t = this.selected;
     if (!t) return;
-    const at = pointAtFrac(t.points, shapeOf(t).startFrac);
-    this.sfMarker = L.marker(at, {
-      icon: L.divIcon({ className: 'sf-wrap', html: '<div class="sf-flag"><i></i><span>Start / finish</span></div>', iconSize: [0, 0] }),
-      interactive: false,
-    }).addTo(this.map);
-  }
-
-  private mapPadding(): { paddingTopLeft: L.PointExpression; paddingBottomRight: L.PointExpression } {
-    if (small()) {
-      // The sheet covers the dock and the lower part of the map on phones.
-      const mapH = this.el.map.clientHeight || innerHeight * 0.6;
-      const cover = this.selected ? Math.max(0, innerHeight * 0.74 - (innerHeight - this.el.map.getBoundingClientRect().bottom)) : 0;
-      return { paddingTopLeft: [20, 20], paddingBottomRight: [20, Math.min(mapH - 80, cover + 20)] };
-    }
-    const sheet = this.selected || location.hash.startsWith('#/t/') ? 440 : 40;
-    const live = this.el.live.classList.contains('collapsed') ? 40 : 330;
-    return { paddingTopLeft: [sheet, 40], paddingBottomRight: [live, 40] };
-  }
-
-  // ------------------------------------------------------------------ layout editor
-
-  private editAction(act: string) {
-    if (act === 'edit-start') return this.startEditing();
-    if (!this.editor || !this.selected) return;
-    if (act === 'edit-cancel') this.stopEditing(true);
-    if (act === 'edit-restart') this.editor.startOver();
-    if (act === 'edit-reverse') this.editor.reverse();
-    if (act === 'edit-reset') this.editor.reset(this.selected.corrected?.osmPoints ?? this.selected.points);
-    if (act === 'edit-save') this.saveLayout();
-  }
-
-  private startEditing() {
-    const t = this.selected;
-    if (!t || this.editor) return;
-    this.sfMarker?.remove();
-    this.o.root.classList.add('editing');
-    const original = t.corrected?.osmPoints ?? t.points;
-    this.el.detail.innerHTML = `
-      <div class="d-top"><button class="back" data-act="edit-cancel"><span class="mono">←</span> Cancel</button><span class="label">Layout editor</span></div>
-      <h1 class="display d-name">Fix the layout</h1>
-      <p class="ed-lede">Line the orange route up with the <b>middle of the asphalt</b>, in race direction. Your version replaces the OpenStreetMap trace for everyone and starts a fresh leaderboard.</p>
-      <ol class="ed-steps">
-        <li><b class="mono">01</b><span>Drag the white points onto the centre of the track.</span></li>
-        <li><b class="mono">02</b><span>Click a small dot on the line to add a point. Right-click (or long-press) a point to remove it.</span></li>
-        <li><b class="mono">03</b><span>Way off? <b>Start over</b> and click your way round, then click the first point to close the loop.</span></li>
-      </ol>
-      <dl class="d-stats ed-stats">
-        <div><dt class="label">Length</dt><dd class="mono" data-el="edLen">–</dd></div>
-        <div><dt class="label">Points</dt><dd class="mono" data-el="edPts">–</dd></div>
-        <div><dt class="label">OSM trace</dt><dd class="mono">${loopLengthKm(original).toFixed(2)}<small>km</small></dd></div>
-      </dl>
-      <div class="ed-tools">
-        <button class="btn" data-act="edit-restart">Start over</button>
-        <button class="btn" data-act="edit-reverse">Reverse</button>
-        <button class="btn" data-act="edit-reset">Reset to OSM</button>
-      </div>
-      <p class="ed-status" data-el="edStatus"></p>
-      <button class="btn primary lg block" data-act="edit-save">Save layout <span class="arrow">→</span></button>`;
-    this.el.detail.querySelectorAll<HTMLElement>('[data-el]').forEach((e) => (this.el[e.dataset.el!] = e));
-    this.drawOutlines();
-    this.map.flyToBounds(L.latLngBounds(t.points.map((p) => L.latLng(p[0], p[1]))), { maxZoom: 19, duration: 0.8, ...this.mapPadding() });
-    this.editor = new LayoutEditor(this.map, t.points, {
-      onChange: (i) => {
-        this.el.edLen.innerHTML = `${(i.lengthM / 1000).toFixed(2)}<small>km</small>`;
-        this.el.edPts.textContent = String(i.points);
-        this.el.edStatus.textContent = i.drawing ? (i.points < 4 ? 'Click along the track in race direction…' : 'Click the first point to close the loop.') : '';
-      },
-    });
-    this.el.edPts.textContent = String(this.editor.points.length);
-    this.el.edLen.innerHTML = `${loopLengthKm(this.editor.points).toFixed(2)}<small>km</small>`;
-  }
-
-  private stopEditing(rerender = false) {
-    if (!this.editor) return;
-    this.editor.destroy();
-    this.editor = null;
-    this.o.root.classList.remove('editing');
-    if (rerender && this.selected) {
-      this.renderDetail();
-      this.placeStartMarker();
-      this.drawOutlines();
-      this.pollBoard();
-    }
-  }
-
-  private async saveLayout() {
-    const t = this.selected;
-    const ed = this.editor;
-    if (!t || !ed) return;
-    if (!ed.valid) {
-      this.el.edStatus.textContent = 'Close the loop first: click the first point.';
-      return;
-    }
-    this.el.edStatus.textContent = 'Saving…';
-    try {
-      const base = t.corrected?.baseId ?? t.id;
-      const res = await api.saveLayout({ base, points: ed.points, center: t.center, trackName: t.name, width: t.width, name: this.o.driver.name, driverId: this.o.driver.id });
-      const lay: CommunityLayout = { id: res.id, points: ed.points, lengthM: res.lengthM, by: this.o.driver.name, pid: this.o.driver.pid, at: Date.now() };
-      this.stopEditing();
-      this.applyLayouts({ [base]: lay });
-      this.persist();
-      this.toast('Layout saved. It now has its own leaderboard.');
-      location.hash = `#/t/${res.id}/fwd`;
-      this.renderRail();
-    } catch (e) {
-      this.el.edStatus.textContent = `Couldn't save: ${(e as Error).message}`;
-    }
-  }
-
-  // ------------------------------------------------------------------ rendering
-
-  private renderDetail() {
-    const t = this.selected!;
-    const featured = [...this.tracks.values()].filter((x) => x.preset);
-    const idx = featured.indexOf(t);
+    const record = this.feed?.records[`${t.id}|${this.dir}`]?.ms;
     const siblings = [...this.tracks.values()].filter((x) => x.id !== t.id && distM(x.center, t.center) < 800);
-    this.el.detail.innerHTML = V.sheet({
+    const mine = this.board?.entries.find((e) => e.pid === this.o.driver.pid);
+    this.el.pit.innerHTML = V.pit({
       t,
       shape: shapeOf(t),
+      code: circuitCode(t.name),
       dir: this.dir,
-      num: idx >= 0 ? idx + 1 : undefined,
-      total: featured.length,
       pb: localPB(t.id, this.dir),
+      rank: mine?.rank ?? null,
+      live: this.liveOf(t.id),
       siblings,
       shapeOf,
       countryName: t.country ? this.countryName(t.country) : undefined,
       nightNow: isNightAt(t.center),
-      medals: { targets: targets(this.feed?.records[`${t.id}|${this.dir}`]?.ms, t.lengthM), earned: earnedMedal(t.id, this.dir) },
+      medals: { targets: targets(record, t.lengthM), earned: earnedMedal(t.id, this.dir) },
       daily: this.isDaily(t, this.dir) ? V.dailyBoard(this.daily?.track === t.id ? this.daily : null, this.o.driver.pid, msLeftToday()) : undefined,
       challenge: this.rival && this.rival.pid !== this.o.driver.pid ? { name: this.rival.name, ms: this.rival.ms } : undefined,
+      time: timePref(),
+      controls: controlsPref(),
+      lapS: (record ?? t.lengthM * 80) / 1000,
     });
-    this.sheetRecord = this.feed?.records[`${t.id}|${this.dir}`]?.ms;
-    this.el.detail.querySelectorAll<HTMLElement>('[data-el]').forEach((e) => (this.el[e.dataset.el!] = e));
+    this.el.pit.querySelectorAll<HTMLElement>('[data-el]').forEach((e) => (this.el[e.dataset.el!] = e));
+    this.pitRecord = record;
     if (this.board) this.renderBoard();
   }
+  private pitRecord: number | undefined;
 
-  /** A challenge link (#/t/ID/DIR/vs/PID): look up whose lap it is, for the sheet. */
+  private renderBoard() {
+    if (!this.el.dBoard?.isConnected || !this.board) return;
+    const b = V.classification(this.board, this.o.driver.pid);
+    this.el.dCount.textContent = b.count;
+    this.el.dLive.innerHTML = b.live;
+    this.el.dBoard.innerHTML = b.list;
+    const mine = this.board.entries.find((e) => e.pid === this.o.driver.pid);
+    if (this.el.pitRank?.isConnected) this.el.pitRank.textContent = `P${mine?.rank ?? '–'}`;
+  }
+
+  /** A challenge link (#/t/ID/DIR/vs/PID): look up whose lap it is. */
   private setRival(pid: string | null, track: string) {
     if (!pid) return void (this.rival = null);
     if (this.rival?.pid === pid) return;
@@ -1292,7 +1101,7 @@ export class Atlas {
       .then((r) => {
         if (this.rival?.pid !== pid) return;
         this.rival = { pid, name: r.name, ms: r.ms };
-        if (this.selected && !this.editor) this.renderDetail();
+        if (this.selected) this.renderPit();
       })
       .catch(() => undefined);
   }
@@ -1315,21 +1124,43 @@ export class Atlas {
     }
   }
 
-  private renderBoard() {
-    if (!this.el.dBoard?.isConnected) return;
-    const b = V.board(this.board!, this.o.driver.pid);
-    this.el.dCount.textContent = b.count;
-    this.el.dLive.innerHTML = b.live;
-    this.el.dBoard.innerHTML = b.list;
+  private editLayout() {
+    const t = this.selected;
+    if (!t || this.closeEditor) return;
+    this.closeEditor = openLayoutEditor({
+      track: t,
+      driver: this.o.driver,
+      onSaved: (lay, base) => {
+        this.closeEditor = null;
+        this.applyLayouts({ [base]: lay });
+        this.persist();
+        this.toast('Layout saved. It now has its own leaderboard.');
+        location.hash = `#/t/${lay.id}/fwd`;
+        this.renderTower(true);
+      },
+      onClose: () => (this.closeEditor = null),
+    });
   }
+
+  // ------------------------------------------------------------------ live timing
 
   private renderFeed() {
     const f = this.feed!;
     const live = Object.values(f.live).reduce((a, n) => a + n, 0);
     this.el.liveCount.textContent = String(live);
-    this.el.liveCount2.textContent = String(live);
     this.el.livePill.classList.toggle('idle', !live);
-    this.el.live.classList.toggle('idle', !live);
+    // Circuits others are racing that this browser hasn't loaded go on the tower too.
+    for (const l of f.laps) if (!this.tracks.has(l.track) && !this.remote.has(l.track)) this.remote.set(l.track, { id: l.track, name: l.trackName, center: l.center });
+    for (const x of f.onTrack ?? []) if (!this.tracks.has(x.track) && !this.remote.has(x.track)) this.remote.set(x.track, { id: x.track, name: x.trackName ?? 'Kart track', center: x.center ?? undefined });
+    for (const t of this.tracks.values())
+      for (const dir of ['fwd', 'rev'] as Dir[]) {
+        // Your own new best goes green on the tower.
+        const pb = localPB(t.id, dir);
+        const k = `${t.id}|${dir}`;
+        const seen = this.pbSeen.get(k);
+        if (pb && seen !== undefined && pb < seen) this.flashes.set(t.id, { kind: 'g', until: Date.now() + FLASH_MS });
+        if (pb) this.pbSeen.set(k, pb);
+      }
     const rows: V.LiveRow[] = (f.onTrack ?? []).map((o) => ({
       track: o.track,
       dir: o.dir,
@@ -1337,51 +1168,40 @@ export class Atlas {
       color: o.color,
       where: this.tracks.get(o.track)?.name ?? o.trackName ?? f.laps.find((l) => l.track === o.track)?.trackName ?? 'A kart track',
     }));
-    this.el.liveBody.innerHTML = V.liveBody(rows, f.laps);
-    for (const id of this.pins.keys()) this.markLive(id);
-    // Tracks other drivers are using that this browser hasn't seen yet.
-    const remote = [
-      ...f.laps.map((l) => ({ id: l.track, name: l.trackName, center: l.center })),
-      ...(f.onTrack ?? []).map((o) => ({ id: o.track, name: o.trackName ?? 'Kart track', center: o.center ?? undefined })),
-    ];
-    for (const r of remote) {
-      if (this.tracks.has(r.id) || this.pins.has(r.id) || !r.center) continue;
-      const icon = L.divIcon({ className: 'pin-wrap', html: `<div class="pin remote"><i></i><span>${V.esc(r.name)}</span><b class="pin-live mono"></b></div>`, iconSize: [0, 0] });
-      const m = L.marker(r.center, { icon }).on('click', () => (location.hash = `#/t/${r.id}/fwd`));
-      m.addTo(this.map);
-      this.pins.set(r.id, m);
-      this.markLive(r.id);
+    this.el.liveBody.innerHTML = V.liveSheet(rows, f.laps);
+    const items = f.laps.slice(0, 10).map((l) => V.rcLine(l));
+    this.el.rcm.innerHTML = items.length ? items.join('') + items.join('') : '<span class="rc-item">ALL QUIET · SET THE FIRST LAP OF THE DAY</span>';
+    this.el.rcm.classList.toggle('run', items.length > 0);
+    if (!this.searching()) this.renderTower(true);
+    this.renderBox();
+    if (this.selected && !this.closeEditor) {
+      // A new record moves the medal targets; the live count changes the dots.
+      const t = this.selected;
+      if (f.records[`${t.id}|${this.dir}`]?.ms !== this.pitRecord) this.renderPit();
+      else if (this.el.pitLive?.isConnected) {
+        const n = this.liveOf(t.id);
+        this.el.pitLive.textContent = `${n} ON TRACK`;
+        this.el.pitLive.classList.toggle('z', !n);
+      }
     }
-    // Refresh live badges and records on the cards without re-rendering the rail.
-    for (const card of this.el.rail.querySelectorAll<HTMLElement>('[data-card^="t:"]')) {
-      const id = card.dataset.card!.slice(2);
-      const n = (f.live[`${id}|fwd`] ?? 0) + (f.live[`${id}|rev`] ?? 0);
-      const top = card.querySelector('.card-top')!;
-      top.querySelector('.card-live')?.remove();
-      if (n) top.insertAdjacentHTML('beforeend', `<span class="card-live"><i class="live-dot"></i>${n} live</span>`);
-      const rec = card.querySelector('.card-rec');
-      if (rec) rec.innerHTML = V.recordHtml(f.records[`${id}|fwd`]?.ms);
-    }
-    if (!this.selected) this.renderNow();
-    // A new record moves the medal targets on the open sheet.
-    else if (!this.editor && f.records[`${this.selected.id}|${this.dir}`]?.ms !== this.sheetRecord) this.renderDetail();
   }
 
   private toast(msg: string, kind: '' | 'warn' | 'busy' = '') {
     clearTimeout(this.toastTimer);
     this.el.toast.textContent = msg;
-    this.el.toast.className = `map-toast ${kind}${msg ? ' show' : ''}`;
+    this.el.toast.className = `pw-toast ${kind}${msg ? ' show' : ''}`;
     if (msg && kind !== 'busy') this.toastTimer = window.setTimeout(() => this.el.toast.classList.remove('show'), 4200);
   }
 
   show() {
     this.o.root.hidden = false;
-    setTimeout(() => this.map.invalidateSize(), 0);
     if (this.selected) {
-      this.renderDetail();
+      this.renderPit();
       this.pollBoard();
     }
-    this.renderRail(true);
+    this.renderTower(true);
+    this.renderBox();
+    this.renderDaily();
     this.pollFeed();
     this.pollDaily();
   }
@@ -1389,50 +1209,44 @@ export class Atlas {
   hide() {
     this.o.root.hidden = true;
     this.profile.close();
-    this.closeSearch();
     this.closeCountries();
+    this.toggleLive(false);
   }
 }
 
 const ATLAS_HTML = /* html */ `
-<header class="topbar">
-  <a class="wordmark" href="#" aria-label="ApexKart home"><span class="wm-chk"></span><span class="display">Apex<b>Kart</b></span></a>
-  <div class="search-wrap" data-el="searchWrap">
-    <form class="search" data-el="searchForm" role="search">
-      ${V.SEARCH_ICON}
-      <input data-el="search" type="search" placeholder="Search circuits, countries or any city" autocomplete="off" spellcheck="false" aria-label="Search circuits, countries or any city" />
-      <kbd>/</kbd>
-    </form>
-    <div class="search-pop" data-el="searchPop" hidden></div>
-  </div>
-  <div class="top-right">
-    <button class="live-pill idle" data-el="livePill" title="Drivers on track right now"><i class="live-dot"></i><b class="mono" data-el="liveCount">0</b><span>on track</span></button>
-    <button class="profile-btn" data-el="profileBtn" aria-haspopup="dialog"></button>
-  </div>
+<header class="pw-top">
+  <a class="pw-logo" href="#" aria-label="ApexKart home"><span class="chq"></span><span>APEX<b>KART</b></span></a>
+  <button class="pw-livep idle" data-el="livePill" aria-haspopup="dialog" aria-expanded="false" title="Drivers on track right now"><i></i><span class="lp-k">LIVE</span><b class="mono" data-el="liveCount">0</b><span class="lp-on">ON TRACK</span></button>
+  <form class="pw-search" data-el="searchForm" role="search">
+    ${V.ICON.search}
+    <input data-el="search" type="search" placeholder="Search circuits, countries, cities" autocomplete="off" spellcheck="false" aria-label="Search circuits, countries or cities" />
+    <kbd class="ps-kbd">/</kbd>
+    <button type="button" class="ps-x" data-act="search-clear" aria-label="Close search">${V.ICON.close}</button>
+  </form>
+  <button class="pw-icon ps-open" data-act="search-open" aria-label="Search">${V.ICON.search}</button>
+  <div class="top-right"><button class="profile-btn" data-el="profileBtn" aria-haspopup="dialog"></button></div>
 </header>
-<main class="atlas">
-  <div class="map" data-el="map"></div>
-  <button class="here-btn" data-el="here">${V.SEARCH_ICON}<span>List tracks here</span></button>
-  <div class="map-toast" data-el="toast"></div>
-  <aside class="live idle" data-el="live" aria-label="Live timing">
-    <header><span><i class="live-dot"></i><b class="mono" data-el="liveCount2">0</b> on track now</span><button data-act="live-toggle" aria-label="Collapse live timing">–</button></header>
-    <div class="live-body" data-el="liveBody"><p class="lv-empty">Connecting…</p></div>
-  </aside>
-  <section class="sheet" data-el="sheet" aria-label="Circuit">
-    <div class="sheet-scroll" data-el="sheetScroll"><div class="view-detail" data-el="detail"></div></div>
-  </section>
-</main>
-<footer class="dock">
-  <div class="dock-bar">
-    <div class="chips" data-el="chips" role="group" aria-label="Show tracks"></div>
-    <button class="all-btn" data-el="allBtn" aria-haspopup="dialog"><b class="mono">0</b> countries <span class="mono">▾</span></button>
-  </div>
-  <div class="dock-main">
-    <div class="now-slot" data-el="now"></div>
-    <div class="rail-wrap"><div class="rail" data-el="rail" aria-label="Circuits"></div></div>
-  </div>
-  <div class="cc-pop" data-el="ccPop" role="dialog" aria-label="All countries" hidden>
-    <input type="search" placeholder="Filter countries" aria-label="Filter countries" autocomplete="off" spellcheck="false" />
-    <div class="cc-list" data-el="ccList"></div>
-  </div>
-</footer>`;
+<section class="pw-towercol" aria-label="Timing tower">
+  <div class="tw-daily" data-el="daily"></div>
+  <nav class="pw-tabs tw-tabs" data-el="tabs" role="tablist" aria-label="Show">
+    <button data-tab="live" role="tab">LIVE</button>
+    <button data-tab="near" role="tab">NEAR ME</button>
+    <button data-tab="world" role="tab">WORLD <span class="mono" data-el="worldN"></span></button>
+  </nav>
+  <div class="tw-sub" data-el="sub" hidden></div>
+  <div class="tw-head" data-el="head"></div>
+  <div class="tw-list" data-el="tower"></div>
+  <div class="tw-box" data-el="box"></div>
+</section>
+<section class="pw-pit" data-el="pit" aria-label="Circuit"></section>
+<aside class="pw-live" data-el="liveSheet" aria-label="Live timing" hidden>
+  <header><span><i class="live-dot"></i> LIVE TIMING</span><button data-act="live-close" aria-label="Close live timing">${V.ICON.close}</button></header>
+  <div class="pw-live-body" data-el="liveBody"><p class="pit-empty">Connecting…</p></div>
+</aside>
+<footer class="pw-rc" aria-label="Race control"><span class="pw-rck">RACE CONTROL</span><div class="pw-rcm-wrap"><div class="pw-rcm" data-el="rcm"></div></div></footer>
+<div class="cc-pop" data-el="ccPop" role="dialog" aria-label="Countries" hidden>
+  <input type="search" placeholder="Filter countries" aria-label="Filter countries" autocomplete="off" spellcheck="false" />
+  <div class="cc-list" data-el="ccList"></div>
+</div>
+<div class="pw-toast" data-el="toast" role="status"></div>`;

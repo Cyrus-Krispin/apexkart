@@ -1,19 +1,19 @@
 # 🏁 ApexKart
 
-Browser kart racing on **real tracks**. Track layouts come from OpenStreetMap, the ground
-under them is real satellite imagery, and every lap feeds a live worldwide leaderboard with
-ghost replays.
+Browser kart racing on **real tracks**. Track layouts come from OpenStreetMap and are rebuilt as a
+stylised 3D world, and every lap feeds a live worldwide leaderboard with ghost replays.
 
 Start with **KF1 Karting Circuit, Singapore**, or pick any of the thousands of kart tracks on the
-world map (every one mapped on OSM) and race it.
+timing tower (every one mapped on OSM) and race it.
 
 ## Design
 
-The UI uses a style I call "Paddock Paper": warm paper, ink, signal orange, real circuit outlines on
-graph paper, Archivo Expanded for display type and JetBrains Mono for numerals. The home screen is
-"race control": a dark world map with every kart track as a signal-orange dot, and paper cards laid
-over it like a race programme on the pit wall. In the race, the HUD switches to dark broadcast-style
-timing panels with F1 sector colours. Tokens live in `src/styles/base.css`.
+The UI is **Pit Wall**: every circuit is a live session, so the game reads like an F1 timing screen.
+It's carbon black, with Barlow Condensed for broadcast type and Chivo Mono for numerals, and the
+timing palette: yellow for actions and flags, green for Go and personal bests, purple for the
+fastest, red for live. Circuits are drawn as layouts with timing-coloured sectors, not maps. The
+spec is [docs/pit-wall.md](docs/pit-wall.md); tokens and shared components live in
+`src/styles/base.css`.
 
 ## Features
 
@@ -24,15 +24,14 @@ timing panels with F1 sector colours. Tokens live in `src/styles/base.css`.
   real height, land use is painted into a crisp stylised ground, and trees fill the mapped woods
   and parks. The circuit gets raised kerbs, a branded tyre wall on the physics barrier,
   floodlights, hoardings, a grandstand, a pit building and marshal posts. Featured circuits ship
-  with baked surroundings in `public/tracks/env/`. A satellite-imagery ground is available as the
-  "World" setting.
+  with baked surroundings in `public/tracks/env/`.
 - **Renderer** (`src/game/render.ts`): golden-hour light, GTAO ambient occlusion, bloom, sky
   reflections, and quality levels that step down automatically if the frame rate drops.
 - **Correct layouts**: the loop finder rejects routes that U-turn at a junction, so pit lanes and
   links can't sneak into a lap. When OpenStreetMap itself is wrong, **Fix the layout** on a circuit
-  page opens an editor over the satellite imagery. Corrections are shared through `/api/layout`
+  page opens a full-screen editor over satellite imagery (`src/ui/editorScreen.ts`). Corrections are shared through `/api/layout`
   and get their own leaderboard.
-- **22 featured circuits** on five continents, baked with their surroundings into
+- **22 pre-built circuits** on five continents, baked with their surroundings into
   `public/tracks/presets.json` and `public/tracks/env/`: KF1 (Singapore), South Garda (Lonato), Genk,
   PF International, Kerpen, the Algarve, Adria, Zuera, Valencia, Franciacorta, Buckmore Park, Rye
   House, Ampfing, Paul Ricard, Sepang, Dubai, Bahrain, Eastern Creek, Granja Viana, New Castle,
@@ -48,16 +47,20 @@ timing panels with F1 sector colours. Tokens live in `src/styles/base.css`.
   synchronised start, positions and results). Peer-to-peer over WebRTC; see [MULTIPLAYER.md](MULTIPLAYER.md).
 - **Live leaderboard**: per-track top 10, "who's on track now" presence, and a global feed
   of the latest laps.
-- **World map** (`src/ui/atlas.ts`): every kart venue on OpenStreetMap with a raceable loop
-  (`public/tracks/world.json`) as a dot. Tapping one opens instantly: each venue's layouts are
-  pre-stitched into `public/tracks/venues/<cell>.json` by the **Bake venue layouts** GitHub Actions
-  workflow (`scripts/build-venues.ts`), and tracks without baked surroundings start racing at once
-  while buildings and trees stream in from Overpass. Country filters,
-  a rail of circuits with one-tap racing, **Race now** (Enter) for your last circuit, live pins where
-  people are driving, and one search box for circuits, countries, venues and cities. Each circuit has
-  a sheet with numbered turns, its other layouts, rotation and the live board.
-- **Pre-race briefing**: the circuit drawing animates in while satellite tiles load, alongside
-  controls and rules, then you press any key to go.
+- **Timing tower** (`src/ui/atlas.ts`): the home screen ranks circuits like a timing screen.
+  **LIVE** ranks them by drivers on track, **NEAR ME** by distance (from you or any city you search
+  for), and **WORLD** lists every kart venue on OpenStreetMap with a raceable loop
+  (`public/tracks/world.json`) by country. A venue opens instantly: its layouts are pre-stitched
+  into `public/tracks/venues/<cell>.json` by `scripts/build-venues.ts` (`npm run venues`). The
+  daily circuit is a yellow flag bar, **Box box** (Enter) races your last circuit, and one search
+  box covers circuits, countries, venues and cities. On desktop the tower sits beside the circuit
+  as a broadcast wall, with race control (the latest laps) running along the bottom.
+- **Pit board**: each circuit's page draws the layout with sector colours, numbered turns,
+  direction and dots for the drivers on track. It shows your position, best lap and gap to the next
+  medal, the medal targets, the classification with a ghost button on every lap, and a green
+  **Start** with five red lights.
+- **Grid screen**: before the race, a dot laps the circuit as the world loads, lighting each sector,
+  beside your targets and controls. Then you press Start, or any key, to go.
 - Two control schemes (Simple and Classic) on keyboard, gamepad and touch;
   synthesized engine and tyre audio; skid marks; four cameras.
 
@@ -68,16 +71,15 @@ the device (`ak:controls` in localStorage).
 
 - **Simple** (the default): the kart accelerates by itself, so you only brake and
   steer. Hold brake when you've stopped to reverse, say off a wall.
-- **Classic**: throttle, brake and drift yourself.
+- **Classic**: throttle and brake yourself. There's no drift in either scheme.
 
 | Action | Simple | Classic |
 | --- | --- | --- |
 | Steer | `A D` / `← →` | `A D` / `← →` |
 | Throttle | automatic | `W` / `↑` |
-| Brake (and reverse when stopped) | `Space` / `S` / `↓` | `S` / `↓` |
-| Drift | – | `Space` / `Shift` |
-| Gamepad | stick or d-pad steers, LT or B brakes | RT or A throttle, LT or B brake, stick steers, X or RB drift |
-| Touch | ◀ ▶ on the left, Brake on the right | ◀ ▶ on the left, Gas, Brake and Drift on the right |
+| Brake (and reverse when stopped) | `Space` / `S` / `↓` | `Space` / `S` / `↓` |
+| Gamepad | stick or d-pad steers, LT or B brakes | RT or A throttle, LT or B brake, stick steers |
+| Touch | ◀ ▶ on the left, Brake on the right | ◀ ▶ on the left, Brake and Gas on the right |
 
 In every scheme:
 
@@ -154,7 +156,7 @@ stops casual nonsense, but it isn't cheat-proof, because the client is trusted.
 ## Data & attribution
 
 - Track geometry © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright) (ODbL).
-- Satellite imagery and basemap © Esri, Maxar, Earthstar Geographics. Check Esri's terms
+- Satellite imagery in the layout editor © Esri, Maxar, Earthstar Geographics. Check Esri's terms
   before any commercial use.
 - Geocoding by Nominatim; live track discovery through the public Overpass API, which is
   sometimes overloaded. The app retries across mirrors.

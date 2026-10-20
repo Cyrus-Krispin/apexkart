@@ -9,7 +9,7 @@ import { awardMedal, earnedMedal, MEDAL_NAME, MEDALS, medalFor, targets } from '
 import { recordDailyLap } from '../shared/daily';
 import { floodlit } from './floodlights';
 import { RenderPipeline, autoQuality, initialQuality, type Quality, type QualitySetting } from './render';
-import { buildWorld, fetchLiveEnv, initialStyle, type World, type WorldStyle } from './world';
+import { buildWorld, fetchLiveEnv, type World } from './world';
 import { Hud, type SectorColor } from './hud';
 import { RaceIntro } from '../ui/intro';
 import { rotationLabel } from '../ui/trackArt';
@@ -67,12 +67,11 @@ export class Race {
   private pipeline: RenderPipeline;
   private scene = new THREE.Scene();
   private qualitySetting: QualitySetting = initialQuality();
-  private style: WorldStyle = initialStyle();
   private world: World | null = null;
   private atmos!: Atmosphere;
   /** Live, Day or Night; a shared session (multiplayer room) fixes it for everyone. */
   private timeSetting: TimePref;
-  private worldBuild = 0; // world style toggles can overlap; only the newest build is kept
+  private worldBuild = 0; // rebuilds can overlap (surroundings arriving late); only the newest is kept
   private rival: { name: string; ms: number; beaten: boolean } | null = null;
   private liveEnvAsked = false;
   private frameTimes: number[] = [];
@@ -137,6 +136,7 @@ export class Race {
     const shape = analyzeShape(opts.track.points);
     const rot = rotationLabel(shape, opts.dir === 'rev');
     this.pbKey = `ak:pb:${opts.track.id}:${opts.dir}`;
+    localStorage.removeItem('ak:style'); // the satellite world is gone; every world is the stylised one
     if (opts.mode?.ghosts === false) this.showGhosts = false;
     this.pb = this.loadPB();
     this.bestSectors = this.pb?.sectors.slice() ?? [];
@@ -226,7 +226,6 @@ export class Race {
     const world = await buildWorld({
       track: this.track,
       data: this.opts.track,
-      style: this.style,
       quality: this.pipeline.quality,
       aniso: this.pipeline.renderer.capabilities.getMaxAnisotropy(),
       onStage: (label, f) => this.intro.stage(label, f),
@@ -297,18 +296,18 @@ export class Race {
       g.closePath();
     };
     path();
-    g.strokeStyle = 'rgba(242,238,229,0.16)';
+    g.strokeStyle = 'rgba(242,243,245,0.14)';
     g.lineWidth = 18;
     g.stroke();
     path();
-    g.strokeStyle = '#f2eee5';
+    g.strokeStyle = '#f2f3f5';
     g.lineWidth = 6;
     g.stroke();
     for (const frac of [1 / 3, 2 / 3]) {
       const i = Math.floor(frac * t.n);
       const [x, y] = map(t.px[i], t.pz[i]);
       const [nx, nz] = t.normal(i);
-      g.strokeStyle = '#ff4d00';
+      g.strokeStyle = '#ffd60a';
       g.lineWidth = 3;
       g.beginPath();
       g.moveTo(x - nx * 11, y - nz * 11);
@@ -324,7 +323,7 @@ export class Race {
       g.rotate(Math.atan2(nz, nx));
       for (let k = -3; k < 3; k++)
         for (let r = 0; r < 2; r++) {
-          g.fillStyle = (k + r) % 2 ? '#141414' : '#ffffff';
+          g.fillStyle = (k + r) % 2 ? '#0b0c10' : '#ffffff';
           g.fillRect(k * 4, -4 + r * 4, 4, 4);
         }
       g.restore();
@@ -385,12 +384,6 @@ export class Race {
       localStorage.setItem('ak:quality', this.qualitySetting);
       this.applyQuality(this.qualitySetting === 'auto' ? autoQuality() : this.qualitySetting);
     }
-    if (a === 'style') {
-      this.style = this.style === 'stylised' ? 'satellite' : 'stylised';
-      localStorage.setItem('ak:style', this.style);
-      this.hud.toast(this.style === 'stylised' ? 'Stylised world' : 'Satellite world');
-      this.rebuildWorld();
-    }
     if (a === 'time') this.setTime(({ live: 'day', day: 'night', night: 'live' } as const)[this.timeSetting], true);
     if (a === 'controls') {
       const all = availableSchemes();
@@ -437,7 +430,7 @@ export class Race {
     const q = this.qualitySetting === 'auto' ? `Auto · ${this.pipeline.quality}` : this.qualitySetting;
     const night = this.atmos?.time === 'night';
     const time = this.timeSetting === 'live' ? `Live · ${night ? 'Night' : 'Day'}` : night ? 'Night' : 'Day';
-    this.hud.toggles({ controls: SCHEME_LABEL[this.input.scheme], muted: this.audio.muted, ghosts: this.showGhosts, cam: CAMS[this.camMode].label, quality: q, style: this.style === 'stylised' ? 'Stylised' : 'Satellite', night, time });
+    this.hud.toggles({ controls: SCHEME_LABEL[this.input.scheme], muted: this.audio.muted, ghosts: this.showGhosts, cam: CAMS[this.camMode].label, quality: q, night, time });
   }
 
   private resetToGrid() {
@@ -804,6 +797,7 @@ export class Race {
       const b = await api.board(this.opts.track.id, this.opts.dir, presence);
       if (this.disposed) return;
       this.board = b;
+      this.intro.board(b);
       this.showTarget();
       this.hud.board(b, d.pid);
       if (this.pb && !this.pb.synced) {
@@ -1018,7 +1012,7 @@ export class Race {
       g.fill();
       if (ring) {
         g.lineWidth = 2.5;
-        g.strokeStyle = '#111110';
+        g.strokeStyle = '#0b0c10';
         g.stroke();
       }
     });
@@ -1028,7 +1022,7 @@ export class Race {
     g.fillStyle = this.opts.driver.color;
     g.fill();
     g.lineWidth = 3.5;
-    g.strokeStyle = '#f2eee5';
+    g.strokeStyle = '#f2f3f5';
     g.stroke();
   }
 

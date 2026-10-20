@@ -60,19 +60,18 @@ export class RaceOverlay {
     this.set('pos', `P${v.pos}<small> / ${n}</small>`);
     this.set('lap', v.finished ? 'FINISHED' : `LAP ${Math.min(v.lap, v.laps)}/${v.laps}`);
     const leader = v.rows[0]?.ms;
+    // Interval to the leader, like a timing tower: the winner's time in purple (fastest), then gaps.
     const right = (r: StandingRow) =>
       r.status === 'finished'
         ? r.ms === leader
-          ? formatMs(r.ms)
-          : `+${((r.ms! - leader!) / 1000).toFixed(3)}`
+          ? `<span class="tm p">${formatMs(r.ms)}</span>`
+          : `<span class="tm">+${((r.ms! - leader!) / 1000).toFixed(3)}</span>`
         : r.status === 'racing'
-          ? `L${Math.min(r.lap, v.laps)}`
-          : r.status === 'dnf'
-            ? 'DNF'
-            : 'OUT';
-    const row = (r: StandingRow, i: number) =>
-      `<li class="${r.me ? 'me' : ''} ${r.status}"><span class="pos">${String(i + 1).padStart(2, '0')}</span><span class="bar" style="background:${escapeHtml(r.color)}"></span><span class="nm">${escapeHtml(r.name)}</span><span class="tm">${right(r)}</span></li>`;
-    this.set('rows', v.rows.map(row).join(''));
+          ? `<span class="tm lap">L${Math.min(r.lap, v.laps)}</span>`
+          : `<span class="tm">${r.status === 'dnf' ? 'DNF' : 'OUT'}</span>`;
+    const row = (r: StandingRow, pos: string, tm = right(r)) =>
+      `<li class="${r.me ? 'me' : ''} ${r.status}"><span class="pos">${pos}</span><span class="pw-stripe" style="--c1:${escapeHtml(r.color)};--c2:${escapeHtml(r.color)}"></span><span class="nm">${escapeHtml(r.name)}</span>${tm}</li>`;
+    this.set('rows', v.rows.map((r, i) => row(r, String(i + 1))).join(''));
 
     this.$.countdown.hidden = v.countdown === null;
     if (v.countdown !== null) this.set('countdown', `On the grid · lights in <b>${Math.ceil(v.countdown)}</b>`);
@@ -80,17 +79,16 @@ export class RaceOverlay {
     this.$.results.hidden = !v.finished && !v.final;
     if (!this.$.results.hidden) {
       const me = v.rows.find((r) => r.me);
-      const title = v.final ? 'Final results' : me?.status === 'finished' ? `You finished P${v.pos}` : 'You retired';
+      const title = v.final ? 'Classification' : me?.status === 'finished' ? `You finished P${v.pos}` : 'You retired';
       this.set('resTitle', title);
-      this.set('resKicker', `${v.laps} lap${v.laps > 1 ? 's' : ''} · ${v.rows.length} driver${v.rows.length > 1 ? 's' : ''}`);
-      const full = (r: StandingRow) =>
-        r.status === 'finished' ? formatMs(r.ms) : r.status === 'racing' ? `racing · lap ${Math.min(r.lap, v.laps)}/${v.laps}` : r.status === 'dnf' ? 'DNF' : 'left';
+      this.set('resKicker', `${v.final ? 'Final · ' : ''}${v.laps} lap${v.laps > 1 ? 's' : ''} · ${v.rows.length} driver${v.rows.length > 1 ? 's' : ''}`);
       this.set(
         'resRows',
         v.rows
-          .map(
-            (r, i) =>
-              `<li class="${r.me ? 'me' : ''} ${r.status}"><span class="pos">${r.status === 'finished' ? String(i + 1).padStart(2, '0') : '–'}</span><span class="bar" style="background:${escapeHtml(r.color)}"></span><span class="nm">${escapeHtml(r.name)}</span><span class="tm">${full(r)}</span></li>`,
+          .map((r, i) =>
+            r.status === 'racing'
+              ? row(r, String(i + 1), `<span class="tm lap">LAP ${Math.min(r.lap, v.laps)}/${v.laps}</span>`)
+              : row(r, r.status === 'finished' ? String(i + 1) : '–'),
           )
           .join(''),
       );

@@ -4,19 +4,12 @@ import { fetchEnv, type EnvData } from '../../track/env';
 import type { TrackData } from '../../track/osm';
 import type { TrackModel } from '../track';
 import type { Quality } from '../render';
-import { buildSatelliteGround } from '../satellite';
 import { GroundPainter, GROUND } from './ground';
 import { buildBuildings } from './buildings';
 import { buildTrees } from './trees';
 import { buildTrackside } from './trackside';
 import { trackExtent, type Extent } from './common';
 import type { Lamp } from '../floodlights';
-
-export type WorldStyle = 'stylised' | 'satellite';
-
-export function initialStyle(): WorldStyle {
-  return localStorage.getItem('ak:style') === 'satellite' ? 'satellite' : 'stylised';
-}
 
 export interface World {
   group: THREE.Group;
@@ -72,7 +65,6 @@ const frame = () => new Promise((r) => setTimeout(r, 16));
 export async function buildWorld(o: {
   track: TrackModel;
   data: TrackData;
-  style: WorldStyle;
   quality: Quality;
   aniso: number;
   onStage: (label: string, frac: number) => void;
@@ -94,8 +86,7 @@ export async function buildWorld(o: {
 
   o.onStage('Painting the ground', 0.25);
   await frame();
-  const stylised = o.style === 'stylised';
-  const painter = new GroundPainter(track, env, extent, stylised ? (o.quality === 'low' ? 2048 : 4096) : 1024);
+  const painter = new GroundPainter(track, env, extent, o.quality === 'low' ? 2048 : 4096);
   painter.paint();
   if (o.isDisposed()) return null;
 
@@ -114,20 +105,10 @@ export async function buildWorld(o: {
   const side = buildTrackside(track, painter, data.id, o.aniso);
   group.add(side.group);
 
-  let groundColor = new THREE.Color(GROUND.grass);
-  if (stylised) {
-    o.onStage('Finishing touches', 0.9);
-    await frame();
-    group.add(painter.toMesh(o.aniso));
-  } else {
-    o.onStage('Loading satellite imagery', 0.75);
-    const sat = await buildSatelliteGround(track, o.aniso, (d, t) => o.onStage('Loading satellite imagery', 0.75 + 0.25 * (d / Math.max(1, t))));
-    if (sat) {
-      sat.mesh.position.y = -0.02;
-      group.add(sat.mesh);
-      groundColor = sat.edgeColor;
-    } else group.add(painter.toMesh(o.aniso));
-  }
+  o.onStage('Finishing touches', 0.9);
+  await frame();
+  group.add(painter.toMesh(o.aniso));
+  const groundColor = new THREE.Color(GROUND.grass);
   o.onStage('Ready', 1);
   return { group, groundColor, emissive: side.emissive, lamps: side.lamps, stats: { buildings: b.footprints.length, trees: trees.count, env: !!env } };
 }

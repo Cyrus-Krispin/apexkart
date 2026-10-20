@@ -1,106 +1,216 @@
-/* ApexKart · "Paddock Paper" design system
-   Paper and ink like a printed race programme, signal orange for action,
-   F1 timing colours for sectors. Sharp corners, hairline rules, mono numerals. */
+/* ApexKart · "Pit Wall" design system (docs/pit-wall.md)
+   Every circuit is a live session, so the game reads like a timing screen: carbon black,
+   condensed broadcast type, mono numerals, and the timing palette. Yellow is for actions and
+   flags, green is Go, purple and green mark fastest and personal best, red means live. */
 
 :root {
-  --paper: #f2eee5;
-  --paper-2: #e9e4d8;
-  --paper-3: #ddd6c6;
-  --ink: #141414;
-  --ink-2: #3b3a36;
-  --ink-3: #75716a;
-  --rule: rgba(20, 20, 20, 0.14);
-  --rule-strong: rgba(20, 20, 20, 0.3);
-  --signal: #ff4d00;
-  --signal-deep: #e04300;
-  --night: #111110;
-  --night-2: #1c1b19;
-  --night-rule: rgba(242, 238, 229, 0.1);
-  --night-text: #f2eee5;
-  --night-muted: #9a958a;
-  --purple: #8b5cf6;
-  --green: #16a34a;
-  --green-bright: #22c55e;
-  --yellow: #eab308;
-  --red: #e5383b;
+  /* Surfaces */
+  --carbon: #0b0c10;
+  --carbon-2: #060708; /* bars, recessed wells */
+  --panel: #14161b;
+  --panel-2: #1a1d24;
+  --panel-3: #22252d;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-2: rgba(255, 255, 255, 0.16);
+  --line-3: rgba(255, 255, 255, 0.28);
+  /* Text */
+  --text: #f2f3f5;
+  --text-2: #c9ccd4;
+  --muted: #8a90a0;
+  --dim: #5d6372;
+  /* Broadcast palette */
+  --yellow: #ffd60a; /* actions, flags, the daily circuit */
+  --yellow-2: #e6c000;
+  --green: #2bd46b; /* Go, personal best */
+  --purple: #b66dff; /* fastest overall */
+  --purple-text: #c792ff;
+  --red: #ff3b30; /* live, brake */
+  --blue: #5ac8fa;
+  /* Medals */
+  --bronze: #c98a4b;
+  --silver: #c4cad4;
+  --gold: #ffcf3f;
+  --platinum: #9fe7ff;
 
-  --display: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
-  --body: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
-  --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
-  --radius: 2px;
+  /* Type */
+  --display: 'Barlow Condensed', 'Arial Narrow', system-ui, sans-serif;
+  --ui: 'Barlow Condensed', 'Arial Narrow', system-ui, sans-serif;
+  --body: 'Barlow', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'Chivo Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --radius: 4px;
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
-  color-scheme: light;
+  --hatch: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.017) 0 2px, transparent 2px 6px), repeating-linear-gradient(-45deg, rgba(255, 255, 255, 0.017) 0 2px, transparent 2px 6px);
+
+  /* Old "Paddock Paper" names, mapped onto Pit Wall so anything not yet restyled stays legible.
+     New code uses the names above. */
+  --paper: var(--carbon);
+  --paper-2: var(--panel);
+  --paper-3: var(--panel-2);
+  --ink: var(--text);
+  --ink-2: var(--text-2);
+  --ink-3: var(--muted);
+  --rule: var(--line);
+  --rule-strong: var(--line-3);
+  --signal: var(--yellow);
+  --signal-deep: var(--yellow-2);
+  --night: var(--carbon);
+  --night-2: var(--panel);
+  --night-rule: var(--line);
+  --night-text: var(--text);
+  --night-muted: var(--muted);
+  --green-bright: var(--green);
+
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; }
 body {
-  background: var(--paper);
-  color: var(--ink);
+  background-color: var(--carbon);
+  background-image: var(--hatch);
+  color: var(--text);
   font-family: var(--body);
   font-size: 15px;
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
-button, input { font: inherit; color: inherit; }
+button, input, select { font: inherit; color: inherit; }
 button { cursor: pointer; background: none; border: 0; padding: 0; }
 a { color: inherit; }
 [hidden] { display: none !important; }
-::selection { background: var(--signal); color: var(--ink); }
-:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+::selection { background: var(--yellow); color: var(--carbon); }
+:focus-visible { outline: 2px solid var(--yellow); outline-offset: 2px; }
+* { scrollbar-width: thin; scrollbar-color: var(--panel-3) transparent; }
 
-/* Type */
-.display { font-family: var(--display); font-stretch: 125%; font-weight: 800; letter-spacing: -0.015em; line-height: 0.98; text-transform: uppercase; }
-.label { font-family: var(--mono); font-size: 11px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
-.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+/* ---------- Type */
+/* Headlines: condensed, heavy, italic capitals, like a broadcast caption. */
+.display { font-family: var(--display); font-weight: 800; font-style: italic; letter-spacing: 0.01em; line-height: 0.95; text-transform: uppercase; }
+/* Small caps labels above data ("POS", "BEST TODAY", "MEDAL TARGETS"). */
+.label, .pw-k { font-family: var(--ui); font-size: 12px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+/* Times, gaps, counts. */
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.ui { font-family: var(--ui); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
 
-/* Buttons */
+/* ---------- Buttons */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 10px;
   height: 44px; padding: 0 18px; border-radius: var(--radius);
-  font-weight: 700; font-size: 14px; letter-spacing: 0.01em;
-  border: 1px solid var(--ink); background: transparent; color: var(--ink);
-  transition: background 0.15s, color 0.15s, transform 0.08s;
+  font-family: var(--ui); font-weight: 700; font-size: 15px; letter-spacing: 0.08em; text-transform: uppercase;
+  border: 1.5px solid var(--line-2); background: var(--panel); color: var(--text);
+  transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.08s, filter 0.15s;
 }
-.btn:hover { background: var(--ink); color: var(--paper); }
+.btn:hover { border-color: var(--line-3); background: var(--panel-2); }
 .btn:active { transform: translateY(1px); }
-.btn.primary { background: var(--signal); border-color: var(--signal); color: var(--ink); }
-.btn.primary:hover { background: var(--ink); border-color: var(--ink); color: var(--signal); }
+/* Yellow: the one action on a screen (Box box, Create room). */
+.btn.primary { background: var(--yellow); border-color: var(--yellow); color: var(--carbon); font-weight: 800; font-style: italic; }
+.btn.primary:hover { filter: brightness(1.08); }
+/* Green: lights out (Start). */
+.btn.go { background: var(--green); border-color: var(--green); color: #05170b; font-weight: 800; font-style: italic; }
+.btn.go:hover { filter: brightness(1.08); }
+.btn.go:disabled { background: #1c231e; border-color: #1c231e; color: var(--dim); filter: none; cursor: default; }
+.btn.ghost-btn { background: transparent; }
 .btn.block { width: 100%; }
-.btn.lg { height: 58px; font-family: var(--display); font-stretch: 125%; font-weight: 800; font-size: 17px; text-transform: uppercase; letter-spacing: 0.02em; }
+.btn.lg { height: 56px; font-size: 22px; letter-spacing: 0.04em; }
 .btn .arrow { font-family: var(--mono); transition: transform 0.2s var(--ease); }
 .btn:hover .arrow { transform: translateX(4px); }
 
-.live-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--signal); flex: none; animation: live 1.8s infinite; }
-@keyframes live { 0% { box-shadow: 0 0 0 0 rgba(255, 77, 0, 0.55); } 70% { box-shadow: 0 0 0 7px rgba(255, 77, 0, 0); } 100% { box-shadow: 0 0 0 0 rgba(255, 77, 0, 0); } }
-
 kbd {
   display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; padding: 0 6px;
-  font-family: var(--mono); font-size: 11px; font-weight: 700; border-radius: var(--radius);
-  border: 1px solid var(--rule-strong); border-bottom-width: 2px; background: var(--paper); color: var(--ink);
+  font-family: var(--mono); font-size: 11px; font-weight: 600; font-style: normal; border-radius: 3px;
+  border: 1.5px solid currentColor; background: transparent; color: inherit; opacity: 0.85;
 }
 
-/* Track art */
+/* ---------- Live */
+.live-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--red); flex: none; animation: live 1.2s infinite; }
+@keyframes live { 50% { opacity: 0.3; } }
+
+/* ---------- Pit Wall pieces (shared by every screen) */
+
+/* Position block: white tab with a black italic number, the left edge of every tower row. */
+.pw-pos { display: grid; place-items: center; min-width: 34px; align-self: stretch; background: var(--text); color: var(--carbon); font-family: var(--display); font-weight: 800; font-style: italic; font-size: 18px; border-radius: 3px 0 0 3px; }
+.pw-pos.me { background: var(--yellow); }
+
+/* Country stripe: the flag's two main colours, set with --c1 / --c2 (src/ui/pitwall.ts). */
+.pw-stripe { display: inline-block; flex: none; width: 5px; height: 26px; border-radius: 1px; background: linear-gradient(var(--c1, #888) 50%, var(--c2, #444) 50%); }
+.pw-stripe.big { width: 6px; height: 40px; }
+
+/* Circuit code: the three-letter tag (KF1, GNK, SGK). */
+.pw-code { font-family: var(--display); font-weight: 800; font-style: italic; font-size: 20px; letter-spacing: 0.02em; line-height: 1; }
+
+/* Tower row: a dark bar; each screen sets its own grid-template-columns. */
+.pw-row { display: grid; align-items: center; gap: 8px; height: 42px; padding-right: 8px; background: linear-gradient(90deg, var(--panel-2), var(--panel)); border-radius: 3px; text-align: left; color: var(--text); }
+.pw-row:hover { background: linear-gradient(90deg, var(--panel-3), var(--panel-2)); }
+.pw-row.sel { box-shadow: inset 0 0 0 2px var(--yellow); }
+
+/* A timing cell; .p and .g flash fastest and personal best. */
+.pw-t { font-family: var(--mono); font-size: 14px; font-variant-numeric: tabular-nums; color: var(--text); padding: 3px 5px; border-radius: 2px; transition: background 0.3s, color 0.3s; }
+.pw-t.p { background: var(--purple); color: #fff; }
+.pw-t.g { background: var(--green); color: #05170b; }
+.pw-t.none { color: var(--dim); }
+
+/* Live count: red dot and a number, grey when nobody's there. */
+.pw-lv { display: inline-flex; align-items: center; justify-content: flex-end; gap: 5px; font-family: var(--mono); font-weight: 600; font-size: 14px; }
+.pw-lv::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--red); }
+.pw-lv.z { color: var(--dim); }
+.pw-lv.z::before { background: #3a3e48; }
+
+/* Tabs: segmented, the picked one is a white block. */
+.pw-tabs { display: flex; gap: 4px; }
+.pw-tabs > * { flex: 1; min-width: 0; height: 34px; display: flex; align-items: center; justify-content: center; gap: 4px; padding: 0 8px; font-family: var(--ui); font-weight: 700; font-size: 14.5px; letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; background: var(--panel); color: var(--muted); border-radius: 3px; }
+.pw-tabs > *:hover { color: var(--text); }
+.pw-tabs > .on, .pw-tabs > [aria-pressed='true'], .pw-tabs > [aria-selected='true'] { background: var(--text); color: var(--carbon); }
+/* A quieter variant for settings rows (time of day, controls): underline instead of a block. */
+.pw-tabs.soft > .on, .pw-tabs.soft > [aria-pressed='true'] { background: var(--panel-3); color: var(--text); box-shadow: inset 0 -2px 0 var(--yellow); }
+
+/* Panels */
+.pw-panel { background: var(--panel); border-radius: var(--radius); }
+.pw-well { background: var(--carbon-2); border-radius: var(--radius); }
+
+/* Chequered strip (the daily circuit, flags). */
+.chq { display: inline-block; flex: none; width: 34px; align-self: stretch; background: conic-gradient(#000 25%, #fff 0 50%, #000 0 75%, #fff 0) 0 0 / 12px 12px; }
+
+/* Pit board: the signboard held over the wall. Three rows of big condensed type in a steel frame. */
+.pw-board { background: linear-gradient(#a4aab4, #5b616b); padding: 6px; border-radius: 6px; box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5); }
+.pw-board-in { display: grid; background: #060708; border-radius: 3px; padding: 4px 12px; }
+.pw-board-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 4px 0 2px; border-bottom: 2px solid #1d2026; font-family: var(--display); font-weight: 800; font-size: 34px; line-height: 1; letter-spacing: 0.04em; color: var(--text); }
+.pw-board-row:last-child { border: 0; }
+.pw-board-row .y { color: var(--yellow); }
+.pw-board-row .sm { font-family: var(--mono); font-weight: 600; font-size: 26px; letter-spacing: -0.03em; }
+
+/* Medal dot */
+.medal { display: inline-block; flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--m, var(--dim)); }
+.medal.bronze { --m: var(--bronze); } .medal.silver { --m: var(--silver); } .medal.gold { --m: var(--gold); } .medal.platinum { --m: var(--platinum); }
+
+/* Sector chips (S1 S2 S3) */
+.pw-sec { display: inline-flex; gap: 2px; }
+.pw-sec i { width: 13px; height: 6px; border-radius: 1px; background: var(--panel-3); }
+.pw-sec i.p { background: var(--purple); } .pw-sec i.g { background: var(--green); } .pw-sec i.y { background: var(--yellow); }
+
+/* ---------- Track art (src/ui/trackArt.ts): light line on carbon */
 .track-art { display: block; width: 100%; height: auto; overflow: visible; }
-.track-art .ta-line { fill: none; stroke: var(--ink); stroke-linejoin: round; stroke-linecap: round; }
-.track-art .ta-casing { fill: none; stroke: var(--ink); stroke-linejoin: round; }
-.track-art .ta-road { fill: none; stroke: var(--paper); stroke-linejoin: round; }
-.track-art .ta-center { fill: none; stroke: var(--ink); stroke-dasharray: 3 4; opacity: 0.35; }
-.track-art .ta-arrow { fill: none; stroke: var(--signal); stroke-linecap: round; stroke-linejoin: round; }
+.track-art .ta-line { fill: none; stroke: var(--text); stroke-linejoin: round; stroke-linecap: round; }
+.track-art .ta-casing { fill: none; stroke: #2a2e37; stroke-linejoin: round; }
+.track-art .ta-road { fill: none; stroke: #1b1e25; stroke-linejoin: round; }
+.track-art .ta-center { fill: none; stroke: var(--text); stroke-dasharray: 3 4; opacity: 0.18; }
+.track-art .ta-sector { fill: none; stroke-linejoin: round; stroke-linecap: round; }
+.track-art .ta-s1 { stroke: var(--purple); } .track-art .ta-s2 { stroke: var(--green); } .track-art .ta-s3 { stroke: var(--yellow); }
+.track-art .ta-arrow { fill: none; stroke: var(--yellow); stroke-linecap: round; stroke-linejoin: round; }
 .track-art .ta-chk-w { fill: #fff; }
-.track-art .ta-chk-b { fill: var(--ink); }
-.track-art .ta-sf-frame { fill: var(--ink); }
-.track-art .ta-turn circle { fill: var(--paper); stroke: var(--ink); stroke-width: 1.2; }
-.track-art .ta-turn text { font-family: var(--mono); font-size: 9px; font-weight: 700; text-anchor: middle; fill: var(--ink); }
+.track-art .ta-chk-b { fill: #000; }
+.track-art .ta-sf-frame { fill: #000; }
+.track-art .ta-turn circle { fill: var(--carbon); stroke: var(--text-2); stroke-width: 1.2; }
+.track-art .ta-turn text { font-family: var(--mono); font-size: 9px; font-weight: 600; text-anchor: middle; fill: var(--text); }
+.track-art .ta-live { fill: #fff; stroke: var(--carbon); stroke-width: 1; }
+.track-art .ta-live-1 { fill: var(--yellow); } .track-art .ta-live-2 { fill: var(--purple); } .track-art .ta-live-3 { fill: var(--green); } .track-art .ta-live-4 { fill: var(--blue); } .track-art .ta-live-5 { fill: #ff6b6b; }
 .track-art.draw .ta-line, .track-art.draw .ta-road { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw 2.4s var(--ease) forwards 0.2s; }
 @keyframes draw { to { stroke-dashoffset: 0; } }
 
+/* Faint grid behind track drawings */
 .graph-paper {
-  background-color: var(--paper);
-  background-image:
-    linear-gradient(rgba(20, 20, 20, 0.055) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(20, 20, 20, 0.055) 1px, transparent 1px);
+  background-color: var(--carbon-2);
+  background-image: linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
   background-size: 16px 16px;
 }
 

@@ -62,7 +62,8 @@ const log = parseChangelog(raw);
 export const APP_VERSION = log.releases.find((r) => r.version !== 'Unreleased')?.version ?? '0.0.0';
 
 const ROUTE = /^#\/changelog\/?$/;
-const SECTION_KIND: Record<string, string> = { Added: 'added', Changed: 'changed', Fixed: 'fixed', Removed: 'removed', Security: 'fixed', Deprecated: 'removed' };
+// Timing colours: Added green, Changed yellow, Fixed purple, Removed red, Security red outline.
+const SECTION_KIND: Record<string, string> = { Added: 'added', Changed: 'changed', Fixed: 'fixed', Removed: 'removed', Security: 'security', Deprecated: 'removed' };
 
 function formatDate(iso: string) {
   const d = new Date(`${iso}T12:00:00Z`);
@@ -78,17 +79,18 @@ function renderPage() {
       const sections = r.sections
         .filter((s) => s.items.length)
         .map(
-          (s) => `<h3 class="cl-kind ${SECTION_KIND[s.title] ?? ''}"><i></i><span class="label">${escapeHtml(s.title)}</span></h3>
-          <ul>${s.items
+          (s) => `<h3 class="cl-kind ${SECTION_KIND[s.title] ?? ''}"><span>${escapeHtml(s.title)}</span></h3>
+          <ul class="cl-list ${SECTION_KIND[s.title] ?? ''}">${s.items
             .map((it) => `<li>${inline(it.text)}${it.children.length ? `<ul>${it.children.map((c) => `<li>${inline(c)}</li>`).join('')}</ul>` : ''}</li>`)
             .join('')}</ul>`,
         )
         .join('');
-      return `<section class="cl-rel${r.version === APP_VERSION ? ' current' : ''}" id="${id}">
-        <header>
+      const current = r.version === APP_VERSION;
+      return `<section class="cl-rel${current ? ' current' : ''}${unreleased ? ' unreleased' : ''}" id="${id}">
+        <header class="cl-cap">
           <h2 class="display">${unreleased ? 'Unreleased' : `<span class="cl-v">v</span>${escapeHtml(r.version)}`}</h2>
-          <span class="label">${unreleased ? 'Live now · not yet in a numbered release' : escapeHtml(formatDate(r.date))}</span>
-          ${r.version === APP_VERSION ? '<span class="cl-now mono">Current</span>' : ''}
+          <span class="cl-date ui">${unreleased ? 'Live now · not yet in a numbered release' : escapeHtml(formatDate(r.date))}</span>
+          ${current ? '<span class="cl-now ui">Current</span>' : ''}
         </header>
         ${sections}
       </section>`;
@@ -96,11 +98,15 @@ function renderPage() {
     .join('');
   return /* html */ `
     <article class="cl-card">
-      <header class="cl-head">
-        <div><p class="label">Changelog · version ${escapeHtml(APP_VERSION)}</p><h1 class="display">What’s new</h1></div>
-        <button class="cl-back" data-act="close"><span class="mono">←</span> Circuits</button>
+      <header class="cl-bar">
+        <button class="cl-back ui" data-act="close"><span class="mono">‹</span> Circuits</button>
+        <span class="cl-bar-t ui">Changelog</span>
       </header>
-      <p class="cl-intro">${inline(log.intro)}</p>
+      <div class="cl-head">
+        <p class="label">Changelog · version <span class="mono">${escapeHtml(APP_VERSION)}</span></p>
+        <h1 class="display">What’s new</h1>
+        <p class="cl-intro">${inline(log.intro)}</p>
+      </div>
       ${releases}
     </article>`;
 }
@@ -128,7 +134,7 @@ export function initChangelog(o: { entryParent?: HTMLElement | null }) {
     const open = ROUTE.test(location.hash);
     if (open && !page) {
       page = document.createElement('div');
-      page.className = 'cl-page graph-paper';
+      page.className = 'cl-page';
       page.setAttribute('role', 'dialog');
       page.setAttribute('aria-label', 'Changelog');
       page.innerHTML = renderPage();
