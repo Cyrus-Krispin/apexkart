@@ -634,6 +634,14 @@ export class Race {
       this.splits = [];
       this.hud.lap(this.lapNo);
     }
+    // Wrong way: moving backwards along the part of the lap the kart is on. The continuous progress
+    // index keeps that the leg being driven, never a neighbouring one. The out-lap counts too.
+    const tr = this.track;
+    const i = this.phys.hint;
+    const along = this.phys.vx * tr.tx[i] + this.phys.vz * tr.tz[i];
+    this.wrongWayT = along < -3 && !rejoin ? this.wrongWayT + dt : 0;
+    if (this.wrongWayT > 1.2) this.hud.banner('Wrong way', 'warn', 0.4);
+
     if (this.lapStart === null) return;
 
     const lapT = (this.simT - this.lapStart) * 1000;
@@ -650,12 +658,6 @@ export class Race {
       }
     }
     if (!this.invalid && Math.abs(this.phys.offset) > this.track.limit) this.invalidate('Track limits'); // four wheels off
-
-    const t = this.track;
-    const i = this.phys.hint;
-    const along = this.phys.vx * t.tx[i] + this.phys.vz * t.tz[i];
-    this.wrongWayT = along < -3 ? this.wrongWayT + dt : 0;
-    if (this.wrongWayT > 1.2) this.hud.banner('Wrong way', 'warn', 0.4);
 
     while (this.ghostRec.length * GHOST_DT * 1000 <= lapT) this.ghostRec.push({ x: this.phys.x, z: this.phys.z, h: this.phys.heading });
     const si = Math.floor(s / SPLIT);
