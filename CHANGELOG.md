@@ -6,6 +6,10 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+### Added
+- **7 more tracks on the world map**, in Togo, Venezuela, South Africa, Zambia and the USA. Every
+  venue in the world has now been checked: the map shows all 4,901 that have a layout you can race.
+
 ## [0.13.0] - 2026-10-20
 
 ### Changed
