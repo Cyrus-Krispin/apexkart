@@ -297,18 +297,18 @@ export class Race {
       g.closePath();
     };
     path();
-    g.strokeStyle = 'rgba(242,238,229,0.16)';
+    g.strokeStyle = 'rgba(242,243,245,0.14)';
     g.lineWidth = 18;
     g.stroke();
     path();
-    g.strokeStyle = '#f2eee5';
+    g.strokeStyle = '#f2f3f5';
     g.lineWidth = 6;
     g.stroke();
     for (const frac of [1 / 3, 2 / 3]) {
       const i = Math.floor(frac * t.n);
       const [x, y] = map(t.px[i], t.pz[i]);
       const [nx, nz] = t.normal(i);
-      g.strokeStyle = '#ff4d00';
+      g.strokeStyle = '#ffd60a';
       g.lineWidth = 3;
       g.beginPath();
       g.moveTo(x - nx * 11, y - nz * 11);
@@ -324,7 +324,7 @@ export class Race {
       g.rotate(Math.atan2(nz, nx));
       for (let k = -3; k < 3; k++)
         for (let r = 0; r < 2; r++) {
-          g.fillStyle = (k + r) % 2 ? '#141414' : '#ffffff';
+          g.fillStyle = (k + r) % 2 ? '#0b0c10' : '#ffffff';
           g.fillRect(k * 4, -4 + r * 4, 4, 4);
         }
       g.restore();
@@ -804,6 +804,7 @@ export class Race {
       const b = await api.board(this.opts.track.id, this.opts.dir, presence);
       if (this.disposed) return;
       this.board = b;
+      this.intro.board(b);
       this.showTarget();
       this.hud.board(b, d.pid);
       if (this.pb && !this.pb.synced) {
@@ -1018,7 +1019,7 @@ export class Race {
       g.fill();
       if (ring) {
         g.lineWidth = 2.5;
-        g.strokeStyle = '#111110';
+        g.strokeStyle = '#0b0c10';
         g.stroke();
       }
     });
@@ -1028,7 +1029,7 @@ export class Race {
     g.fillStyle = this.opts.driver.color;
     g.fill();
     g.lineWidth = 3.5;
-    g.strokeStyle = '#f2eee5';
+    g.strokeStyle = '#f2f3f5';
     g.stroke();
   }
 
