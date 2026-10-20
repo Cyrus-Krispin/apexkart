@@ -10,10 +10,10 @@ import type { Quality } from './render';
 import type { TrackModel } from './track';
 
 /** Pool sizes and emission rates per graphics tier (phones run Low). */
-const TIER: Record<Quality, { particles: number; rate: number; skids: number }> = {
-  low: { particles: 96, rate: 0.45, skids: 1200 },
-  medium: { particles: 256, rate: 1, skids: 3000 },
-  high: { particles: 384, rate: 1.25, skids: 4000 },
+const TIER: Record<Quality, { particles: number; rate: number; skids: number; maxPx: number }> = {
+  low: { particles: 96, rate: 0.45, skids: 1200, maxPx: 0.18 }, // maxPx: largest sprite, × buffer height
+  medium: { particles: 256, rate: 1, skids: 3000, maxPx: 0.3 },
+  high: { particles: 384, rate: 1.25, skids: 4000, maxPx: 0.3 },
 };
 const MAX_PARTICLES = 384;
 const MAX_SKIDS = 4000;
@@ -48,7 +48,7 @@ const SPECS = {
   puff: { life: [0.7, 1.2], size: [0.5, 0.8], grow: 2.6, alpha: 0.42, color: col(0xb7aa95), color2: col(0x8e8a84), additive: false, drag: 2.4, grav: -0.2, hard: 0, bounce: 0 },
   dust: { life: [0.7, 1.2], size: [0.28, 0.45], grow: 2.6, alpha: 0.5, color: col(0xcdb68c), color2: col(0xa8936c), additive: false, drag: 2.2, grav: -0.1, hard: 0, bounce: 0 },
   clod: { life: [0.45, 0.75], size: [0.07, 0.12], grow: 0.8, alpha: 0.95, color: col(0x3d6a20), color2: col(0x4a3423), additive: false, drag: 0.6, grav: 11, hard: 1, bounce: 0.15 },
-  spark: { life: [0.22, 0.42], size: [0.06, 0.1], grow: 0.4, alpha: 1, color: col(0xffd27a, 3.2), color2: col(0xff8a2a, 2.4), additive: true, drag: 1.2, grav: 9.8, hard: 0.6, bounce: 0.35 },
+  spark: { life: [0.22, 0.42], size: [0.06, 0.1], grow: 0.4, alpha: 1, color: col(0xffd27a, 2.6), color2: col(0xff8a2a, 1.9), additive: true, drag: 1.2, grav: 9.8, hard: 0.6, bounce: 0.35 },
 } satisfies Record<string, Spec>;
 
 const VERT = /* glsl */ `
@@ -61,10 +61,11 @@ varying vec2 vInfo;
 void main() {
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
   gl_Position = projectionMatrix * mv;
-  gl_PointSize = min(uMaxPx, aInfo.x * uScale / max(0.2, -mv.z));
+  // Fade out right in front of the lens, where a puff would only be a big blur (and costs the most).
+  float near = smoothstep(0.7, 2.6, -mv.z);
+  gl_PointSize = near > 0.0 ? min(uMaxPx, aInfo.x * uScale / -mv.z) : 0.0;
   vColor = aColor;
-  // Fade out right in front of the lens, where a puff would only be a big blur.
-  vInfo = vec2(aInfo.y * smoothstep(0.7, 2.6, -mv.z), aInfo.z);
+  vInfo = vec2(aInfo.y * near, aInfo.z);
 }`;
 
 const FRAG = /* glsl */ `
@@ -520,7 +521,7 @@ export class KartFx {
     const hpx = renderer.getDrawingBufferSize(this.bufSize).y;
     const u = this.parts.uniforms;
     u.uScale.value = hpx / (2 * Math.tan((camera.fov * Math.PI) / 360));
-    u.uMaxPx.value = Math.min(this.maxPoint, hpx * 0.35);
+    u.uMaxPx.value = Math.min(this.maxPoint, hpx * TIER[quality].maxPx);
     u.uLight.value = night ? 0.42 : 1;
     this.skids.frame(this.time);
     Object.assign(this.view, this.gather);
