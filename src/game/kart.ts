@@ -10,6 +10,8 @@ export interface KartVisual {
   frontPivots: THREE.Group[];
   wheels: THREE.Mesh[]; // spin about x (the rear pair is one mesh on its axle)
   materials: THREE.Material[];
+  steering?: THREE.Object3D; // turns about its own z with the steering (poseDriver)
+  helmet?: THREE.Object3D; // tilts into corners (poseDriver)
 }
 
 // ------------------------------------------------------------------ kart model
@@ -20,7 +22,7 @@ export interface KartVisual {
 // Every part's surface (colour, roughness, metalness, glow) rides along as vertex attributes, so the
 // whole kart is one material and about 6 draws instead of 39. Ghosts merge everything into one mesh.
 
-type Kind = 'paint' | 'suit' | 'ink' | 'paper' | 'steel' | 'rubber' | 'visor';
+type Kind = 'paint' | 'suit' | 'ink' | 'paper' | 'steel' | 'rubber' | 'tread' | 'treadLight' | 'visor' | 'lamp';
 type NodeId = 'body' | 'steer' | 'helmet' | 'front' | 'rear';
 
 /** Colour (null: the driver's colour), roughness, metalness, glow. */
@@ -31,7 +33,10 @@ const SURFACE: Record<Kind, [number | null, number, number, number]> = {
   paper: [0xf2eee5, 0.45, 0.05, 0],
   steel: [0xa7abb0, 0.3, 0.85, 0],
   rubber: [0x151515, 0.92, 0.05, 0],
+  tread: [0x060607, 0.97, 0, 0],
+  treadLight: [0x2c2c30, 0.85, 0, 0],
   visor: [0x0b0b10, 0.08, 0.7, 0],
+  lamp: [0xff1206, 0.35, 0, 1],
 };
 
 /** Where each moving node sits in its parent (body or root), and its rest rotation. */
@@ -43,6 +48,8 @@ const NODES: Record<Exclude<NodeId, 'body' | 'front'>, { pos: [number, number, n
 const FRONT_X = 0.56;
 const FRONT_Z = 0.62;
 const FRONT_R = 0.13;
+/** The rear number plate: centre and backward tilt (it faces up and back, at the chase camera). */
+const PLATE = { pos: [0, 0.37, -0.99] as [number, number, number], tilt: 0.3 };
 
 interface Part {
   geo: THREE.BufferGeometry; // in its node's space, indexed, position + normal only
@@ -50,8 +57,8 @@ interface Part {
   node: NodeId;
 }
 
-function tyreGeometry(r: number, w: number, segments = 20): THREE.BufferGeometry {
-  // Lathe a rounded tyre profile around the axle (lathe axis = y, rotated to x later).
+/** A rounded tyre's profile (radius, axle position): rim, shoulder arc, tread, shoulder arc, rim. */
+function tyreProfile(r: number, w: number): THREE.Vector2[] {
   const pts: THREE.Vector2[] = [];
   const rim = r * 0.62;
   const s = 0.35; // sidewall roundness
@@ -65,7 +72,28 @@ function tyreGeometry(r: number, w: number, segments = 20): THREE.BufferGeometry
     pts.push(new THREE.Vector2(r - w * s * (1 - Math.cos(a)), w / 2 - w * s * (1 - Math.sin(a))));
   }
   pts.push(new THREE.Vector2(rim, w / 2));
-  return new THREE.LatheGeometry(pts, segments).rotateZ(Math.PI / 2);
+  return pts;
+}
+
+// Lathe a profile around the axle (lathe axis = y, rotated to x).
+const lathe = (pts: THREE.Vector2[], segments: number, phi = 0, len = Math.PI * 2) => new THREE.LatheGeometry(pts, segments, phi, len).rotateZ(Math.PI / 2);
+
+/** The ghost's plain tyre. */
+function tyreGeometry(r: number, w: number, segments = 20): THREE.BufferGeometry {
+  return lathe(tyreProfile(r, w), segments);
+}
+
+/** The kart's tyre: plain sidewalls and a darker tread band in blocks, so you can see the wheels turn. */
+function tyreParts(r: number, w: number, blocks = 14): [THREE.BufferGeometry, Kind][] {
+  const pts = tyreProfile(r, w); // 16 points: the tread runs from the middle of one shoulder to the other's
+  // Sidewalls with two segments per block too, so their vertices meet the blocks' (no T-junction cracks).
+  const out: [THREE.BufferGeometry, Kind][] = [
+    [lathe(pts.slice(0, 5), blocks * 2), 'rubber'],
+    [lathe(pts.slice(11), blocks * 2), 'rubber'],
+  ];
+  const step = (Math.PI * 2) / blocks;
+  for (let k = 0; k < blocks; k++) out.push([lathe(pts.slice(4, 12), 2, k * step, step), k % 2 ? 'treadLight' : 'tread']);
+  return out;
 }
 
 const partsCache: { full?: Part[]; lite?: Part[] } = {};
@@ -91,7 +119,7 @@ function kartParts(lite = false): Part[] {
     if (!geo.index) geo.setIndex([...Array(geo.attributes.position.count).keys()]);
     parts.push({ geo, kind, node });
   };
-  const rbox = (w: number, h: number, d: number, r: number) => new RoundedBoxGeometry(w, h, d, L(3, 1), r);
+  const rbox = (w: number, h: number, d: number, r: number) => new RoundedBoxGeometry(w, h, d, L(2, 1), r);
 
   // Chassis: floor tray, side rails, rear axle
   put(rbox(0.7, 0.04, 1.45, 0.015), 'ink', 0, 0.1, 0);
@@ -122,6 +150,13 @@ function kartParts(lite = false): Part[] {
   // Rear bumper
   put(rbox(1.28, 0.07, 0.1, 0.03), 'ink', 0, 0.21, -0.98);
   for (const sx of [-1, 1]) put(rbox(0.06, 0.07, 0.3, 0.02), 'ink', sx * 0.4, 0.21, -0.85);
+  // Rear number plate on two stays above the bumper (the chase camera sees it most), and a red rain
+  // light in the bumper that glows at night.
+  put(rbox(0.3, 0.2, 0.03, 0.015), 'paint', ...PLATE.pos, PLATE.tilt);
+  if (!lite) {
+    for (const sx of [-1, 1]) put(new THREE.CylinderGeometry(0.009, 0.009, 0.08, 6), 'steel', sx * 0.1, 0.27, -0.99);
+    put(rbox(0.12, 0.04, 0.02, 0.008), 'lamp', 0, 0.21, -1.035);
+  }
   // Engine block, cylinder head and silencer (right rear)
   put(rbox(0.24, 0.26, 0.3, 0.03), 'steel', 0.32, 0.3, -0.48);
   put(new THREE.CylinderGeometry(0.075, 0.09, 0.12, 12), 'steel', 0.32, 0.48, -0.48);
@@ -131,6 +166,12 @@ function kartParts(lite = false): Part[] {
   // Steering column, and the wheel on its own node
   if (!lite) put(new THREE.CylinderGeometry(0.018, 0.018, 0.46, 6).rotateX(Math.PI / 2 - 0.92), 'steel', 0, 0.33, 0.3);
   put(new THREE.TorusGeometry(0.13, 0.02, L(8, 4), L(20, 12)), 'ink', 0, 0, 0, 0, 0, 0, 'steer');
+  if (!lite) {
+    // Hub, three spokes (left, right, down) and a marker at twelve o'clock in the kart's colour, so you see it turn.
+    put(new THREE.CylinderGeometry(0.032, 0.032, 0.03, 10).rotateX(Math.PI / 2), 'ink', 0, 0, 0, 0, 0, 0, 'steer');
+    for (const a of [0, Math.PI, -Math.PI / 2]) put(new THREE.BoxGeometry(0.014, 0.1, 0.008), 'steel', Math.cos(a) * 0.075, Math.sin(a) * 0.075, 0, 0, 0, a - Math.PI / 2, 'steer');
+    put(rbox(0.04, 0.034, 0.05, 0.01), 'paint', 0, 0.13, 0, 0, 0, 0, 'steer');
+  }
 
   // Driver: torso, arms; the helmet with visor and livery stripe on its own node (pivot at the neck)
   put(new THREE.CapsuleGeometry(0.17, 0.26, L(4, 3), L(10, 8)), 'suit', 0, 0.62, -0.22, -0.35);
@@ -145,9 +186,17 @@ function kartParts(lite = false): Part[] {
 
   // Wheels: rounded tyre, paper rim, ink cap. One front wheel (both sides share it), and the rear axle's pair.
   const wheel = (x: number, r: number, w: number, node: NodeId) => {
-    put(tyreGeometry(r, w, L(20, 12)), 'rubber', x, 0, 0, 0, 0, 0, node);
+    if (lite) put(tyreGeometry(r, w, 12), 'rubber', x, 0, 0, 0, 0, 0, node);
+    else for (const [geo, kind] of tyreParts(r, w)) put(geo, kind, x, 0, 0, 0, 0, 0, node);
     put(new THREE.CylinderGeometry(r * 0.6, r * 0.6, w * 0.9, L(14, 10)).rotateZ(Math.PI / 2), 'paper', x, 0, 0, 0, 0, 0, node);
-    if (!lite) put(new THREE.CylinderGeometry(r * 0.2, r * 0.2, w * 0.95, 8).rotateZ(Math.PI / 2), 'ink', x, 0, 0, 0, 0, 0, node);
+    if (lite) return;
+    put(new THREE.CylinderGeometry(r * 0.2, r * 0.2, w * 0.95, 8).rotateZ(Math.PI / 2), 'ink', x, 0, 0, 0, 0, 0, node);
+    // Three wheel nuts on each face of the rim.
+    for (const side of [-1, 1])
+      for (let k = 0; k < 3; k++) {
+        const a = (k / 3) * Math.PI * 2;
+        put(new THREE.CylinderGeometry(0.012, 0.012, 0.014, 6).rotateZ(Math.PI / 2), 'ink', x + side * w * 0.45, Math.cos(a) * r * 0.37, Math.sin(a) * r * 0.37, 0, 0, 0, node);
+      }
   };
   wheel(0, FRONT_R, 0.13, 'front');
   for (const sx of [-1, 1]) wheel(sx * 0.6, 0.14, 0.2, 'rear');
@@ -214,7 +263,8 @@ function nodeMatrix(id: Exclude<NodeId, 'body' | 'front'>) {
   return new THREE.Matrix4().compose(new THREE.Vector3(...n.pos), new THREE.Quaternion().setFromEuler(new THREE.Euler(...n.rot)), new THREE.Vector3(1, 1, 1));
 }
 
-function numberBoard(n: number): THREE.Mesh {
+/** The driver's number, front (on the panel) and rear (on the plate): one mesh, one texture. */
+function numberDecals(n: number): THREE.Mesh {
   const c = document.createElement('canvas');
   c.width = 96;
   c.height = 64;
@@ -228,9 +278,14 @@ function numberBoard(n: number): THREE.Mesh {
   g.fillText(String(n), 48, 36);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
-  // On the front panel (0, 0.3, 0.52, tilted -0.55), just proud of its face.
-  const geo = new THREE.PlaneGeometry(0.3, 0.2).translate(0, 0, 0.037).rotateX(-0.55).translate(0, 0.3, 0.52);
-  return new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: t }));
+  // On the front panel (0, 0.3, 0.52, tilted -0.55), just proud of its face; on the rear plate, facing back.
+  const front = new THREE.PlaneGeometry(0.3, 0.2).translate(0, 0, 0.037).rotateX(-0.55).translate(0, 0.3, 0.52);
+  const rear = new THREE.PlaneGeometry(0.21, 0.14).rotateY(Math.PI).translate(0, 0, -0.0165).rotateX(PLATE.tilt).translate(...PLATE.pos);
+  const geo = mergeGeometries([front, rear]);
+  if (!geo) throw new Error('kart: merge failed');
+  const m = new THREE.MeshBasicMaterial({ map: t });
+  m.userData.akDecal = true; // dimmed at night (kartLights): it's unlit
+  return new THREE.Mesh(geo, m);
 }
 
 /** Low-poly racing kart facing +z, origin on the ground at the kart's centre. */
@@ -269,9 +324,14 @@ export function buildKart(color: string, opts: { ghost?: boolean; number?: numbe
   const body = new THREE.Group();
   root.add(body);
   mesh(mergeParts(of('body'), paint), body).onBeforeRender = syncDepth;
-  mesh(mergeParts(of('steer'), paint), body, 'steer');
-  mesh(mergeParts(of('helmet'), paint), body, 'helmet');
-  if (opts.number !== undefined) body.add(numberBoard(opts.number));
+  const steering = mesh(mergeParts(of('steer'), paint), body, 'steer');
+  const helmet = mesh(mergeParts(of('helmet'), paint), body, 'helmet');
+  const materials: THREE.Material[] = [material, depth];
+  if (opts.number !== undefined) {
+    const decals = numberDecals(opts.number);
+    body.add(decals);
+    materials.push(decals.material as THREE.Material);
+  }
 
   const frontGeo = mergeParts(of('front'), paint);
   const frontPivots: THREE.Group[] = [];
@@ -285,7 +345,28 @@ export function buildKart(color: string, opts: { ghost?: boolean; number?: numbe
   }
   wheels.push(mesh(mergeParts(of('rear'), paint), root, 'rear'));
 
-  return { root, body, frontPivots, wheels, materials: [material, depth] };
+  return { root, body, frontPivots, wheels, materials, steering, helmet };
+}
+
+/**
+ * The driver at work (render only): the steering wheel turns with the front wheels (about 2.8 turns
+ * of lock to one of the wheels, as drawn), and the helmet leans into the corner, up to 6 degrees at
+ * about 1.5 g. `steer` is the front wheels' angle (rad, + right), `lateral` the yaw rate times
+ * forward speed (m/s², + left).
+ */
+export function poseDriver(v: KartVisual, steer: number, lateral: number, dt: number) {
+  if (v.steering) v.steering.rotation.z = THREE.MathUtils.clamp(steer * 3.4, -1.7, 1.7);
+  if (v.helmet) v.helmet.rotation.z += (THREE.MathUtils.clamp(-lateral * 0.007, -0.105, 0.105) - v.helmet.rotation.z) * Math.min(1, dt * 6);
+}
+
+/**
+ * Lamps: a lit red by day, glowing at night (every kart shares it). With bloom (Medium, High) the lamp
+ * has to be bright enough to pass its threshold, and the halo carries the red; without (Low), any
+ * brighter than this and tone mapping washes it out to pink. The unlit number boards dim at night.
+ */
+export function kartLights(v: KartVisual, night: boolean, bloom: boolean) {
+  lampGlow.value = night ? (bloom ? 5.5 : 1.3) : 0.8;
+  for (const m of v.materials) if (m.userData.akDecal) (m as THREE.MeshBasicMaterial).color.setScalar(night ? 0.42 : 1);
 }
 
 // ------------------------------------------------------------------ ghosts

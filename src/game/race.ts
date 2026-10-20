@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { TrackModel } from './track';
 import { buildTrackScene, type TrackScene } from './trackMesh';
-import { buildGhost, buildKart, KartPhysics, type KartVisual } from './kart';
+import { buildGhost, buildKart, kartLights, KartPhysics, poseDriver, type KartVisual } from './kart';
 import { availableSchemes, controlsPref, Input, saveControlsPref, SCHEME_LABEL, type ControlScheme } from './input';
 import { KartAudio } from './audio';
 import { KartFx, type FxFrame } from './fx';
@@ -1377,6 +1377,8 @@ export class Race {
     k.body.position.y = p.surface === 'grass' ? Math.sin(this.simT * 40) * 0.012 : p.onKerb ? stripe * 0.014 * Math.min(1, p.speed / 10) : 0;
     for (const f of k.frontPivots) f.rotation.y = -p.steerAngle * 1.2;
     for (const w of k.wheels) w.rotation.x = p.wheelSpin;
+    poseDriver(k, p.steerAngle, p.yawRate * vf, dt);
+    kartLights(k, this.atmos.time === 'night', this.pipeline.quality !== 'low');
     const live = this.state === 'grid' || this.state === 'racing';
     const fb = this.fx.frame(live ? dt : 0, this.camera, this.pipeline.renderer, this.pipeline.quality, this.atmos.time === 'night');
     if (live) {
