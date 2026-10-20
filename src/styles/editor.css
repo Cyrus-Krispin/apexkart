@@ -1,0 +1,14 @@
+/* Layout editor screen (src/ui/editorScreen.ts) and its map handles (src/ui/layoutEditor.ts). */
+.ed-lede { margin: 0 0 14px; font-size: 14px; color: var(--ink-2); }
+.ed-steps { list-style: none; margin: 0 0 16px; padding: 0; display: grid; gap: 8px; font-size: 13.5px; }
+.ed-steps li { display: grid; grid-template-columns: 28px 1fr; }
+.ed-steps b.mono { color: var(--signal-deep); font-size: 12px; padding-top: 1px; }
+.ed-stats { border-top: 1px solid var(--ink); margin-bottom: 12px; }
+.ed-tools { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 10px; }
+.ed-tools .btn { height: 38px; padding: 0 8px; font-size: 13px; }
+.ed-status { min-height: 20px; margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--signal-deep); }
+.ed-handle { background: #fff; border: 2.5px solid var(--signal); border-radius: 50%; box-shadow: 0 0 0 1.5px var(--ink); cursor: grab; }
+.ed-handle.first { background: conic-gradient(#111 0 25%, #fff 0 50%, #111 0 75%, #fff 0) 0 0 / 7px 7px; border-color: var(--ink); width: 18px !important; height: 18px !important; margin: -9px 0 0 -9px !important; }
+.ed-handle.closable { animation: live 1.2s infinite; }
+.ed-mid { background: rgba(255, 255, 255, 0.55); border: 1.5px solid var(--ink); border-radius: 50%; cursor: copy; opacity: 0.7; }
+.ed-mid:hover { opacity: 1; background: var(--signal); }
