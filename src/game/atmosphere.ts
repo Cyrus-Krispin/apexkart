@@ -66,9 +66,9 @@ const PRESETS: Record<TimeOfDay, Preset> = {
 // Real lights only add what the baked pools can't (light on the kart, nearby walls,
 // the floodlight shadow), so a few are enough. One shadow caster, none on Low.
 const RIGS: Record<Quality, RigOptions> = {
-  high: { pool: 3, shadow: 2048, glare: 0.55 },
-  medium: { pool: 2, shadow: 1024, glare: 0.65 },
-  low: { pool: 2, shadow: 0, glare: 0.9 },
+  high: { pool: 3, shadow: 2048, glare: 0.55, cones: true },
+  medium: { pool: 2, shadow: 1024, glare: 0.65, cones: true },
+  low: { pool: 2, shadow: 0, glare: 0.9, cones: false },
 };
 
 export class Atmosphere {
