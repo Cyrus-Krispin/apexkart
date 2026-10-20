@@ -181,6 +181,18 @@ export interface Impact {
   nz: number;
 }
 
+/**
+ * Another kart touching this one (KartPhysics.kartHit; multiplayer only): for sound, haptics,
+ * sparks and the camera. Same shape as Impact, with the other kart in place of the wall.
+ */
+export interface KartHit {
+  closing: number; // closing speed between the two karts along the contact normal, m/s (> 0)
+  x: number; // contact point, on this kart's outline towards the other kart
+  z: number;
+  nx: number; // unit normal from the other kart towards this one
+  nz: number;
+}
+
 // Wall response: friction from the normal impulse, restitution, and a little extra loss on hard hits.
 const WALL_MU = 0.5;
 const WALL_E = 0.2;
@@ -216,6 +228,13 @@ export class KartPhysics {
   stuckT = 0;
   /** The last lap position on this part of the lap's own asphalt: where a reset puts the kart. */
   goodS = 0;
+  /**
+   * Multiplayer kart-to-kart contact starting (RemoteKarts.collide, run by the multiplayer add-on
+   * right after each physics step), null otherwise. It's cleared by the next contact check, so it
+   * stays set for one step: whatever reads the kart after step() sees each contact exactly once.
+   * Never set in a time trial.
+   */
+  kartHit: KartHit | null = null;
   private gripLossT = 0; // after a hard wall hit: the tyres take a moment to bite again
 
   readonly vmax = 27; // ~97 km/h

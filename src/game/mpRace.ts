@@ -9,6 +9,7 @@ import { gridPose, type RaceAddon, type RaceContext, type RaceMode } from './rac
 import type { KartPhysics } from './kart';
 
 const SEND_MS = 50; // 20 Hz
+const RELAY_CHECK_MS = 500; // how often to ask which links are relayed (their karts are ghosts)
 const LIGHTS_LEAD = 3.5; // s before lights out that the first red light comes on (Race: SYNC_GO - 0.9)
 
 /**
@@ -68,6 +69,7 @@ export class MultiplayerRace implements RaceAddon {
   private final = false;
   private lastSend = 0;
   private lastHud = 0;
+  private lastRelayCheck = 0;
   private lastLap = 1;
   private offs: (() => void)[] = [];
 
@@ -91,7 +93,7 @@ export class MultiplayerRace implements RaceAddon {
     this.offs.push(
       room.on('pose', (mid, p) => p[9] === this.o.race && this.karts.push(mid, p)),
       room.on('ctl', (mid, m) => {
-        if (m.k === 'fin' && m.race === this.o.race) this.remoteFin.set(mid, m.ms);
+        if (m.k === 'fin' && m.race === this.o.race) this.setRemoteFin(mid, m.ms);
         if (m.k === 'bye') {
           this.gone.add(mid);
           this.karts.setGone(mid, true);
@@ -110,14 +112,20 @@ export class MultiplayerRace implements RaceAddon {
       else this.gone.add(g.mid);
       this.karts.setGone(g.mid, !here);
     }
-    for (const p of s.players) if (p.fin?.r === this.o.race) this.remoteFin.set(p.mid, p.fin.ms);
+    for (const p of s.players) if (p.fin?.r === this.o.race) this.setRemoteFin(p.mid, p.fin.ms);
     // Server closed the race (everyone done, or the grace period ran out).
     if (s.cfg.race !== this.o.race || s.cfg.phase === 'lobby') {
       this.final = true;
       const last = s.cfg.last;
-      if (last?.race === this.o.race) for (const r of last.rows) this.remoteFin.set(r.mid, r.ms);
+      if (last?.race === this.o.race) for (const r of last.rows) this.setRemoteFin(r.mid, r.ms);
       if (this.finishMs === undefined) this.finishMs = null; // out of time
     }
+  }
+
+  /** Someone took the flag (ms) or retired (null): their kart is a ghost from now on. */
+  private setRemoteFin(mid: string, ms: number | null) {
+    this.remoteFin.set(mid, ms);
+    this.karts.setFinished(mid);
   }
 
   tick(dt: number) {
@@ -131,7 +139,10 @@ export class MultiplayerRace implements RaceAddon {
         this.crossSimT = this.ctx.simT - dt * (1 - frac);
       }
     }
-    this.karts.collide(phys);
+    // Contact: no ghosts before the lights; after your flag everyone passes through you.
+    this.karts.setLocal(phys, dt, this.ctx.state === 'racing', this.finishMs !== undefined || this.crossSimT !== null);
+    // The state just stepped is one step newer than ctx.physTime (Race lowers it after tick()).
+    this.karts.collide(phys, this.o.room.clock.at(this.ctx.physTime + dt * 1000));
   }
 
   frame(dt: number) {
@@ -161,6 +172,10 @@ export class MultiplayerRace implements RaceAddon {
       room.localPose = pose;
     }
 
+    if (perf - this.lastRelayCheck >= RELAY_CHECK_MS) {
+      this.lastRelayCheck = perf;
+      this.karts.setRelayed(room.mesh.relayPeers());
+    }
     this.karts.update(dt, now, ctx.viewW, ctx.viewH);
 
     const lap = this.currentLap();

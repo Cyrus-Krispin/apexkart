@@ -99,8 +99,19 @@ Lifecycle and rules (housekeeping runs lazily inside any request that loads the 
   moves with the kart's velocity and is pulled towards that target (no steady-state lag, smooth corrections, snap
   beyond 8 m). Measured on localhost: median 4 cm / p90 17 cm off at racing speed (direct link),
   ≈1 m through the relay.
-- **Contact**: each client resolves its own kart against the karts it sees (ellipse footprints, push
-  out and remove closing speed). This is symmetric enough without a server.
+- **Contact** (`RemoteKarts.collide`, after every physics step): each client resolves its own kart
+  against the others, dead-reckoned to the exact time of that physics state (ellipse footprints).
+  Each side moves out half the overlap and takes 0.6 of the closing speed once per contact, so the
+  pair separates at 0.2 of the approach speed: a 5 m/s rear-end costs the hitter 3 m/s and gives
+  the leader 3 m/s. Sliding contact rubs a little speed off; a hit off the kart's axis gives a small
+  yaw kick. `KartPhysics.kartHit` is set for one step per contact (for sound, haptics, the camera).
+  - A kart is a **ghost** (no contact, drawn at 45% opacity) when its pose is over 250 ms old or
+    relayed, it finished (or you did), it jumped more than 3 m in the last 2 s (a reset; yours
+    too), or it has been under 3 m/s for 2 s (stuck karts aren't walls). Karts that overlap when a
+    ghost rule ends stay ghosts until they're apart. All of these are local facts, so the pose
+    format didn't change.
+  - Safety net: a contact still closing after two impulses means the other side isn't resolving
+    it (you're a ghost to them), so the karts pass through rather than one shoving the other.
 - **Progress / laps**: `MultiplayerRace` integrates distance along the centreline. It wraps at the
   line and ignores jumps no kart could make in one step, so going back and forth over the line or
   cutting across the infield earns nothing. The flag is at `laps × length`, and the crossing
