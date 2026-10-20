@@ -62,6 +62,7 @@ interface Lap {
 export class RaceIntro {
   readonly el: HTMLDivElement;
   private canStart = false;
+  private safety = 0;
   private started = false;
   private count: HTMLElement;
   private pct: HTMLElement;
@@ -194,7 +195,9 @@ export class RaceIntro {
     this.go.addEventListener('click', () => this.start());
     addEventListener('keydown', this.onKey);
     // START waits for the race to say it's settled (world built, shaders and textures warm), or for
-    // the world build to fail; a timer alone would let you start into a scene still compiling.
+    // the world build to fail. A long safety net covers a download that never finishes: starting
+    // into a scene that's still compiling beats being stuck on the grid.
+    this.safety = window.setTimeout(() => this.ready(), 20000);
   }
 
   /** Show a scheme as picked, with its keys. */
@@ -350,6 +353,7 @@ export class RaceIntro {
   }
 
   ready() {
+    clearTimeout(this.safety); // only the first load needs it
     if (this.canStart) return;
     this.canStart = true;
     this.goal = 1; // the dot sprints for the line; START doesn't wait for it
@@ -371,6 +375,7 @@ export class RaceIntro {
 
   dispose() {
     cancelAnimationFrame(this.raf);
+    clearTimeout(this.safety);
     removeEventListener('keydown', this.onKey);
     this.el.remove();
   }
