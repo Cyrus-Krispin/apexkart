@@ -360,9 +360,6 @@ export class KartFx {
   private quality: Quality | null = null;
   private rate = 1;
   private acc = new Float32Array(16); // fractional emission carried between steps
-  private prevBump = 0;
-  private prevSpeed = 0;
-  private sinceContact = 1;
   private time = 0;
   private gather: FxFrame = { impact: 0, nx: 0, nz: 0, scrape: 0, kerb: 0, grass: 0, squeal: 0 };
   private view: FxFrame = { ...this.gather };
@@ -414,7 +411,6 @@ export class KartFx {
     const g = this.gather;
     const t = this.track;
     const hw = t.halfWidth;
-    const wall = hw + t.runoff;
     const h = p.heading;
     const fx = Math.sin(h);
     const fz = Math.cos(h);
@@ -427,26 +423,9 @@ export class KartFx {
     const speed = p.speed;
     const vf = p.forwardSpeed;
 
-    // ---- wall contact. The impulse wall model publishes `impact` for one step; until then (or if it
-    // never lands) a rise in `bump` or a sudden loss of speed at the barrier tells the same story.
-    let hit = 0;
-    const phys = p as KartPhysics & { impact?: { speed: number } | null; bump?: number };
-    const atWall = p.offset * side >= wall - 0.12;
-    if ('impact' in phys) {
-      if (phys.impact && phys.impact.speed > 0.8) hit = phys.impact.speed;
-    } else if (typeof phys.bump === 'number') {
-      const rise = phys.bump - this.prevBump * Math.exp(-dt * 6);
-      if (rise > 0.005) {
-        if (this.sinceContact > 0.25 && rise * 10 > 0.8) hit = rise * 10;
-        this.sinceContact = 0;
-      } else this.sinceContact += dt;
-      this.prevBump = phys.bump;
-    } else {
-      const drop = this.prevSpeed - speed;
-      if (atWall && drop > 0.6 && this.sinceContact > 0.25) hit = drop * 1.5;
-      this.sinceContact = atWall ? 0 : this.sinceContact + dt;
-    }
-    this.prevSpeed = speed;
+    // ---- wall contact: the wall model publishes `impact` for the one step a contact starts.
+    const hit = p.impact && p.impact.speed > 0.8 ? p.impact.speed : 0;
+    const atWall = p.onWall;
     const cx = p.x + wnx * 0.55;
     const cz = p.z + wnz * 0.55;
     if (hit > 0) {
