@@ -560,6 +560,7 @@ export class Race {
     this.simT += dt;
     this.phys.step(dt, c);
     if (this.state === 'racing') this.timing(dt);
+    this.sectorFlash();
     this.fx.sense(this.phys, c, dt, this.simT);
     this.throttle = c.throttle;
     this.opts.mode?.addon?.tick?.(dt);
@@ -632,6 +633,41 @@ export class Race {
     while (this.ghostRec.length * GHOST_DT * 1000 <= lapT) this.ghostRec.push({ x: this.phys.x, z: this.phys.z, h: this.phys.heading });
     const si = Math.floor(s / SPLIT);
     if (s < L - 5) while (this.splits.length <= si) this.splits.push(lapT);
+  }
+
+  // What timing() had at the end of the previous step, so a sector completed in this one can be shown.
+  private secSeen = { lap: 0, n: 0, start: null as number | null, invalid: false, times: [0, 0], best: [0, 0, 0] };
+
+  /** A sector just completed on a clean lap: flash its chip with the gap to your best sector, chime on purple. */
+  private sectorFlash() {
+    const s = this.secSeen;
+    const n = this.sectorTimes.length;
+    let k = -1;
+    let t = 0;
+    let color: SectorColor = '';
+    if (this.lapNo !== s.lap) {
+      // A new lap began, so timing() has already reset the sectors: S3 = lap time − S1 − S2.
+      if (s.start !== null && this.lapStart !== null && s.n === 2 && !s.invalid) {
+        k = 2;
+        t = (this.lapStart - s.start) * 1000 - s.times[0] - s.times[1];
+        const lead = this.board?.entries[0]?.sectors?.[2];
+        color = !s.best[2] || t <= s.best[2] ? (!lead || t <= lead ? 'purple' : 'green') : 'yellow';
+      }
+    } else if (n > s.n && !this.invalid) {
+      k = n - 1;
+      t = this.sectorTimes[k];
+      color = this.sectorColors[k];
+    }
+    if (k >= 0 && s.best[k] && !this.autopilot) {
+      this.hud.sectorFlash(k, color, (t - s.best[k]) / 1000);
+      if (color === 'purple') this.audio.chime();
+    }
+    s.lap = this.lapNo;
+    s.n = n;
+    s.start = this.lapStart;
+    s.invalid = this.invalid;
+    for (let i = 0; i < 2; i++) s.times[i] = this.sectorTimes[i] ?? 0;
+    for (let i = 0; i < 3; i++) s.best[i] = this.bestSectors[i] ?? 0;
   }
 
   private sectorColor(k: number, t: number): SectorColor {

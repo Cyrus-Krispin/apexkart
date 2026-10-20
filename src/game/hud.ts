@@ -66,6 +66,7 @@ export class Hud {
   private hintTimer = 0;
   private lightsTimer = 0;
   private boardSig = '';
+  private flashTimers: number[] = [];
   // The medal target panel: the next medal and its time.
   private goal: { medal: Medal; ms: number } | null = null;
 
@@ -215,6 +216,18 @@ export class Hud {
       const txt = t !== undefined ? (t / 1000).toFixed(final ? 3 : 2) : `S${k + 1}`;
       if (label.textContent !== txt) label.textContent = txt;
     }
+  }
+
+  /** A sector just completed: its chip flashes in its colour with the gap to your best sector for a moment. */
+  sectorFlash(k: number, color: SectorColor, delta: number) {
+    const el = this.$.sectors.children[k] as HTMLElement | undefined;
+    if (!el) return;
+    el.removeAttribute('data-flash');
+    void el.offsetWidth; // restart the animation
+    el.dataset.dl = signed(delta, 3);
+    el.dataset.flash = color || 'yellow';
+    clearTimeout(this.flashTimers[k]);
+    this.flashTimers[k] = window.setTimeout(() => el.removeAttribute('data-flash'), 1600);
   }
 
   last(ms: number | null, valid = true) {
