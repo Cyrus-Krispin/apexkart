@@ -6,6 +6,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-10-21
+
 ### Added
 - **Instant flying-lap restart** in time trials: press Backspace, gamepad Select, or ↺ in the lap
   panel. You're put about 150 m before the line at a sensible speed, with no lights, and the next
@@ -480,7 +482,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 ### Fixed
 - Leaderboard and lap submission on the live site.
 
-[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.26.0...HEAD
+[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.27.0...HEAD
+[0.27.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.23.0...v0.24.0
