@@ -31,6 +31,7 @@ const ICON = {
   sound: '<svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path d="M16 8.5a5 5 0 010 7M18.5 6a8.5 8.5 0 010 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   left: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   right: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  reset: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.5 9.5A7 7 0 1 1 5 14" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/><path d="M4.5 4.5v5h5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 };
 
 /** On-screen controls for each scheme (touch screens only; see the touch rules in race.css). */
@@ -105,6 +106,10 @@ export class Hud {
       <div class="h-notes" data-el="notes" aria-live="polite"></div>
 
       <section class="h-speed">
+        <div class="h-stuck" data-el="stuck" hidden>
+          <button class="h-reset" data-act="reset" title="Back on the track (R)" aria-label="Reset: back on the track">${ICON.reset}<span>Reset</span><kbd>R</kbd></button>
+          <span class="h-stuck-tip" data-el="stuckTip"></span>
+        </div>
         <div class="h-hint" data-el="hint"></div>
         <div class="h-speed-box">
           <div class="h-speed-num"><b class="mono" data-el="speed">0</b><span class="pw-k">km/h</span></div>
@@ -364,6 +369,13 @@ export class Hud {
     clearTimeout(this.hintTimer);
     this.$.hint.classList.toggle('show', show);
     if (show && autoHideMs) this.hintTimer = window.setTimeout(() => this.$.hint.classList.remove('show'), autoHideMs);
+  }
+
+  /** Stuck, off the track a while, or facing the wrong way: offer Reset above the speed. */
+  stuck(show: boolean) {
+    if (this.$.stuck.hidden !== show) return;
+    if (show) this.$.stuckTip.innerHTML = touchDevice() ? 'Or hold Brake to reverse' : 'Or hold <kbd>S</kbd> to reverse';
+    this.$.stuck.hidden = !show;
   }
 
   /** Lay out the on-screen controls and the hint for a control scheme. */

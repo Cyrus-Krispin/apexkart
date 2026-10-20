@@ -477,3 +477,32 @@
   .io-go { height: 54px; font-size: 22px; }
 }
 
+/* ---------- Reset when stuck (Lane A: hud.ts stuck()). A yellow action above the speed, bottom
+   centre, with how to reverse beside it; it shows when the kart is wedged, on the grass a while or
+   facing the wrong way, and R does the same on a keyboard. */
+.h-stuck { display: flex; align-items: center; gap: 8px; animation: h-rise 0.25s var(--ease); }
+.h-stuck:not([hidden]) + .h-hint { display: none; } /* Reset says what matters now */
+.h-reset {
+  display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 14px 0 11px; border-radius: var(--radius);
+  background: var(--yellow); color: var(--carbon); box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45); touch-action: manipulation;
+  font-family: var(--display); font-weight: 800; font-style: italic; font-size: 20px; letter-spacing: 0.04em; text-transform: uppercase;
+  transition: filter 0.15s, transform 0.08s;
+}
+.h-reset svg { flex: none; width: 20px; height: 20px; }
+.h-reset kbd { height: 20px; min-width: 20px; padding: 0 5px; font-size: 10px; }
+.h-reset:hover { filter: brightness(1.08); }
+.h-reset:active { transform: translateY(1px); }
+.h-stuck-tip {
+  display: flex; align-items: center; gap: 4px; padding: 5px 10px; border-radius: 3px; background: var(--hud);
+  font-family: var(--ui); font-weight: 700; font-size: 14px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-2); white-space: nowrap;
+}
+.h-stuck-tip kbd { height: 18px; min-width: 18px; padding: 0 4px; font-size: 9.5px; }
+@media (hover: none) and (pointer: coarse) {
+  .h-reset { height: 48px; padding: 0 16px 0 13px; }
+  .h-reset kbd { display: none; }
+}
+@media (max-width: 640px), (pointer: coarse) and (max-height: 520px) {
+  .h-stuck { gap: 6px; }
+  .h-reset { font-size: 18px; }
+  .h-stuck-tip { padding: 4px 8px; font-size: 12px; }
+}
