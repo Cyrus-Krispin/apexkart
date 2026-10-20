@@ -50,7 +50,7 @@ interface Part {
   node: NodeId;
 }
 
-function tyreGeometry(r: number, w: number): THREE.BufferGeometry {
+function tyreGeometry(r: number, w: number, segments = 20): THREE.BufferGeometry {
   // Lathe a rounded tyre profile around the axle (lathe axis = y, rotated to x later).
   const pts: THREE.Vector2[] = [];
   const rim = r * 0.62;
@@ -65,15 +65,20 @@ function tyreGeometry(r: number, w: number): THREE.BufferGeometry {
     pts.push(new THREE.Vector2(r - w * s * (1 - Math.cos(a)), w / 2 - w * s * (1 - Math.sin(a))));
   }
   pts.push(new THREE.Vector2(rim, w / 2));
-  return new THREE.LatheGeometry(pts, 20).rotateZ(Math.PI / 2);
+  return new THREE.LatheGeometry(pts, segments).rotateZ(Math.PI / 2);
 }
 
-let partsCache: Part[] | null = null;
+const partsCache: { full?: Part[]; lite?: Part[] } = {};
 
-/** The kart's parts, built once (never added to a scene, so never disposed). */
-function kartParts(): Part[] {
-  if (partsCache) return partsCache;
+/**
+ * The kart's parts, built once (never added to a scene, so never disposed). `lite` is the ghost's:
+ * fewer segments, no thin rods, about half the triangles (a translucent silhouette doesn't need them).
+ */
+function kartParts(lite = false): Part[] {
+  const cached = partsCache[lite ? 'lite' : 'full'];
+  if (cached) return cached;
   const parts: Part[] = [];
+  const L = <T,>(full: T, ghost: T) => (lite ? ghost : full);
   const m4 = new THREE.Matrix4();
   const q = new THREE.Quaternion();
   const e = new THREE.Euler();
@@ -86,12 +91,14 @@ function kartParts(): Part[] {
     if (!geo.index) geo.setIndex([...Array(geo.attributes.position.count).keys()]);
     parts.push({ geo, kind, node });
   };
-  const rbox = (w: number, h: number, d: number, r: number) => new RoundedBoxGeometry(w, h, d, 3, r);
+  const rbox = (w: number, h: number, d: number, r: number) => new RoundedBoxGeometry(w, h, d, L(3, 1), r);
 
   // Chassis: floor tray, side rails, rear axle
   put(rbox(0.7, 0.04, 1.45, 0.015), 'ink', 0, 0.1, 0);
-  for (const sx of [-1, 1]) put(new THREE.CylinderGeometry(0.022, 0.022, 1.5, 8).rotateX(Math.PI / 2), 'steel', sx * 0.36, 0.12, 0);
-  put(new THREE.CylinderGeometry(0.025, 0.025, 1.18, 8).rotateZ(Math.PI / 2), 'steel', 0, 0.14, -0.62);
+  if (!lite) {
+    for (const sx of [-1, 1]) put(new THREE.CylinderGeometry(0.022, 0.022, 1.5, 8).rotateX(Math.PI / 2), 'steel', sx * 0.36, 0.12, 0);
+    put(new THREE.CylinderGeometry(0.025, 0.025, 1.18, 8).rotateZ(Math.PI / 2), 'steel', 0, 0.14, -0.62);
+  }
 
   // Nose cone: extruded rounded trapezoid (top view), bevelled
   const nose = new THREE.Shape();
@@ -102,7 +109,7 @@ function kartParts(): Part[] {
   nose.lineTo(-0.38, -1.02);
   nose.quadraticCurveTo(-0.5, -1.02, -0.5, -0.9);
   nose.quadraticCurveTo(-0.5, -0.7, -0.28, -0.62);
-  const noseGeo = new THREE.ExtrudeGeometry(nose, { depth: 0.1, bevelEnabled: true, bevelSize: 0.03, bevelThickness: 0.03, bevelSegments: 3, curveSegments: 10 });
+  const noseGeo = new THREE.ExtrudeGeometry(nose, { depth: 0.1, bevelEnabled: true, bevelSize: 0.03, bevelThickness: 0.03, bevelSegments: L(3, 1), curveSegments: L(10, 4) });
   noseGeo.rotateX(-Math.PI / 2); // shape y = -z, extrusion goes up
   put(noseGeo, 'paint', 0, 0.1, 0);
   // Front panel ahead of the driver's legs (the number board sits on it)
@@ -122,38 +129,44 @@ function kartParts(): Part[] {
   // Seat
   put(rbox(0.42, 0.42, 0.12, 0.05), 'ink', 0, 0.36, -0.33, -0.32);
   // Steering column, and the wheel on its own node
-  put(new THREE.CylinderGeometry(0.018, 0.018, 0.46, 6).rotateX(Math.PI / 2 - 0.92), 'steel', 0, 0.33, 0.3);
-  put(new THREE.TorusGeometry(0.13, 0.02, 8, 20), 'ink', 0, 0, 0, 0, 0, 0, 'steer');
+  if (!lite) put(new THREE.CylinderGeometry(0.018, 0.018, 0.46, 6).rotateX(Math.PI / 2 - 0.92), 'steel', 0, 0.33, 0.3);
+  put(new THREE.TorusGeometry(0.13, 0.02, L(8, 4), L(20, 12)), 'ink', 0, 0, 0, 0, 0, 0, 'steer');
 
   // Driver: torso, arms; the helmet with visor and livery stripe on its own node (pivot at the neck)
-  put(new THREE.CapsuleGeometry(0.17, 0.26, 4, 10), 'suit', 0, 0.62, -0.22, -0.35);
-  put(new THREE.CapsuleGeometry(0.172, 0.04, 4, 10), 'paper', 0, 0.5, -0.18, -0.35);
-  for (const sx of [-1, 1]) put(new THREE.CapsuleGeometry(0.045, 0.32, 4, 8), 'suit', sx * 0.16, 0.62, -0.02, Math.PI / 2 - 0.55, 0, sx * 0.28);
+  put(new THREE.CapsuleGeometry(0.17, 0.26, L(4, 3), L(10, 8)), 'suit', 0, 0.62, -0.22, -0.35);
+  if (!lite) put(new THREE.CapsuleGeometry(0.172, 0.04, 4, 10), 'paper', 0, 0.5, -0.18, -0.35);
+  for (const sx of [-1, 1]) put(new THREE.CapsuleGeometry(0.045, 0.32, L(4, 2), L(8, 6)), 'suit', sx * 0.16, 0.62, -0.02, Math.PI / 2 - 0.55, 0, sx * 0.28);
   const [hx, hy, hz] = NODES.helmet.pos;
-  put(new THREE.SphereGeometry(0.155, 20, 16), 'paper', -hx, 0.99 - hy, -0.16 - hz, 0, 0, 0, 'helmet');
-  put(new THREE.SphereGeometry(0.157, 20, 10, -Math.PI / 2.6, Math.PI / 1.3, Math.PI / 2.75, Math.PI / 4.2), 'visor', -hx, 0.99 - hy, -0.16 - hz, 0, 0, 0, 'helmet');
-  put(new THREE.TorusGeometry(0.153, 0.022, 6, 24), 'paint', -hx, 0.99 - hy, -0.16 - hz, 0, Math.PI / 2, 0, 'helmet');
+  put(new THREE.SphereGeometry(0.155, L(20, 14), L(16, 10)), 'paper', -hx, 0.99 - hy, -0.16 - hz, 0, 0, 0, 'helmet');
+  if (!lite) {
+    put(new THREE.SphereGeometry(0.157, 20, 10, -Math.PI / 2.6, Math.PI / 1.3, Math.PI / 2.75, Math.PI / 4.2), 'visor', -hx, 0.99 - hy, -0.16 - hz, 0, 0, 0, 'helmet');
+    put(new THREE.TorusGeometry(0.153, 0.022, 6, 24), 'paint', -hx, 0.99 - hy, -0.16 - hz, 0, Math.PI / 2, 0, 'helmet');
+  }
 
   // Wheels: rounded tyre, paper rim, ink cap. One front wheel (both sides share it), and the rear axle's pair.
   const wheel = (x: number, r: number, w: number, node: NodeId) => {
-    put(tyreGeometry(r, w), 'rubber', x, 0, 0, 0, 0, 0, node);
-    put(new THREE.CylinderGeometry(r * 0.6, r * 0.6, w * 0.9, 14).rotateZ(Math.PI / 2), 'paper', x, 0, 0, 0, 0, 0, node);
-    put(new THREE.CylinderGeometry(r * 0.2, r * 0.2, w * 0.95, 8).rotateZ(Math.PI / 2), 'ink', x, 0, 0, 0, 0, 0, node);
+    put(tyreGeometry(r, w, L(20, 12)), 'rubber', x, 0, 0, 0, 0, 0, node);
+    put(new THREE.CylinderGeometry(r * 0.6, r * 0.6, w * 0.9, L(14, 10)).rotateZ(Math.PI / 2), 'paper', x, 0, 0, 0, 0, 0, node);
+    if (!lite) put(new THREE.CylinderGeometry(r * 0.2, r * 0.2, w * 0.95, 8).rotateZ(Math.PI / 2), 'ink', x, 0, 0, 0, 0, 0, node);
   };
   wheel(0, FRONT_R, 0.13, 'front');
   for (const sx of [-1, 1]) wheel(sx * 0.6, 0.14, 0.2, 'rear');
 
-  return (partsCache = parts);
+  return (partsCache[lite ? 'lite' : 'full'] = parts);
 }
 
-/** Merge parts into one geometry with per-vertex colour and surface (roughness, metalness, glow). */
-function mergeParts(list: { part: Part; matrix?: THREE.Matrix4 }[], color: THREE.Color): THREE.BufferGeometry {
+/**
+ * Merge parts into one geometry with per-vertex colour and surface (roughness, metalness, glow), or
+ * with no colour (null: the ghost's, whose colour is its material's).
+ */
+function mergeParts(list: { part: Part; matrix?: THREE.Matrix4 }[], color: THREE.Color | null): THREE.BufferGeometry {
   const c = new THREE.Color();
   const geos = list.map(({ part, matrix }) => {
     const g = new THREE.BufferGeometry();
     g.setIndex(part.geo.index);
     g.setAttribute('position', part.geo.attributes.position);
     g.setAttribute('normal', part.geo.attributes.normal);
+    if (!color) return matrix ? g.clone().applyMatrix4(matrix) : g;
     const [hex, rough, metal, glow] = SURFACE[part.kind];
     if (hex === null) c.copy(color);
     else c.setHex(hex); // sRGB in, linear out (vertex colours are linear)
@@ -275,26 +288,81 @@ export function buildKart(color: string, opts: { ghost?: boolean; number?: numbe
   return { root, body, frontPivots, wheels, materials: [material, depth] };
 }
 
-/** A ghost: the whole kart merged into one translucent mesh in the ghost's colour. */
-export function buildGhost(color: string): KartVisual {
-  const parts = kartParts();
-  const at: Record<NodeId, THREE.Matrix4[]> = {
-    body: [new THREE.Matrix4()],
-    steer: [nodeMatrix('steer')],
-    helmet: [nodeMatrix('helmet')],
-    front: [-1, 1].map((sx) => new THREE.Matrix4().makeTranslation(sx * FRONT_X, FRONT_R, FRONT_Z)),
-    rear: [nodeMatrix('rear')],
-  };
-  const geo = mergeParts(
-    parts.flatMap((part) => at[part.node].map((matrix) => ({ part, matrix }))),
-    new THREE.Color(color),
+// ------------------------------------------------------------------ ghosts
+//
+// A ghost is the whole kart merged into one mesh, drawn twice: a depth-only pass, then the colour pass
+// with depth test "less or equal", so only its outer surface shows (a clean translucent silhouette,
+// not 39 parts seen through each other). The colour pass is lit, with a Fresnel rim in the ghost's
+// colour, and both fade out within ~3 m of the camera so a ghost never fills the screen. Colour is
+// a uniform, so every ghost shares the same two programs (the warm-up's ghost compiles them all).
+
+/** Distance from the camera (m) where a ghost starts to show, and where it's fully there. */
+const GHOST_NEAR = 1.5;
+const GHOST_FAR = 4;
+/** Ghost pair draw slot: after other transparent things, each ghost's two passes back to front. */
+const GHOST_ORDER = 2;
+
+function ghostFade(shader: THREE.WebGLProgramParametersWithUniforms) {
+  shader.fragmentShader = shader.fragmentShader.replace(
+    '#include <opaque_fragment>',
+    /* glsl */ `
+    // Fresnel rim in the ghost's colour: bright where the surface turns away, faint face-on.
+    float akFace = saturate(dot(normal, geometryViewDir));
+    float akRim = pow(1.0 - akFace, 2.6);
+    // Mostly its own colour (it shouldn't light up like a solid kart in a floodlight or the headlight),
+    // with enough of the real lighting left to read its shape.
+    outgoingLight = outgoingLight * 0.4 + diffuse * 0.3 + mix(diffuse, vec3(1.0), 0.35) * akRim * 1.1;
+    diffuseColor.a = min(1.0, opacity + akRim * 0.5) * smoothstep(${GHOST_NEAR.toFixed(2)}, ${GHOST_FAR.toFixed(2)}, length(vViewPosition));
+    #include <opaque_fragment>`,
   );
-  const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.05, transparent: true, opacity: 0.34, depthWrite: false });
-  m.emissive = new THREE.Color(color);
-  m.emissiveIntensity = 0.25;
+}
+
+function ghostDepthCut(shader: THREE.WebGLProgramParametersWithUniforms) {
+  // Where the colour pass is mostly faded (near the camera), write no depth either.
+  const cut = (GHOST_NEAR + (GHOST_FAR - GHOST_NEAR) * 0.35).toFixed(2);
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', '#include <common>\nvarying float vAkDist;')
+    .replace('#include <project_vertex>', '#include <project_vertex>\nvAkDist = length(mvPosition.xyz);');
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', '#include <common>\nvarying float vAkDist;')
+    .replace('void main() {', `void main() {\n  if (vAkDist < ${cut}) discard;`);
+}
+
+/**
+ * A ghost in `color`. Pass another ghost (`share`) to reuse its geometry: every ghost has the same
+ * shape, so a ghost arriving mid-race uploads nothing.
+ */
+export function buildGhost(color: string, share?: THREE.Object3D): KartVisual {
+  let geo = (share?.children[0] as THREE.Mesh | undefined)?.geometry;
+  if (!geo) {
+    const at: Record<NodeId, THREE.Matrix4[]> = {
+      body: [new THREE.Matrix4()],
+      steer: [nodeMatrix('steer')],
+      helmet: [nodeMatrix('helmet')],
+      front: [-1, 1].map((sx) => new THREE.Matrix4().makeTranslation(sx * FRONT_X, FRONT_R, FRONT_Z)),
+      rear: [nodeMatrix('rear')],
+    };
+    geo = mergeParts(
+      kartParts(true).flatMap((part) => at[part.node].map((matrix) => ({ part, matrix }))),
+      null,
+    );
+  }
+  const depth = new THREE.MeshBasicMaterial({ colorWrite: false, transparent: true, depthWrite: true });
+  depth.polygonOffset = true; // a hair behind, so the colour pass always passes "less or equal" on it
+  depth.polygonOffsetFactor = 1;
+  depth.polygonOffsetUnits = 1;
+  depth.onBeforeCompile = ghostDepthCut;
+  const tint = new THREE.MeshStandardMaterial({ color, roughness: 0.45, metalness: 0.1, transparent: true, opacity: 0.14, depthWrite: false });
+  tint.onBeforeCompile = ghostFade;
   const root = new THREE.Group();
-  root.add(new THREE.Mesh(geo, m));
-  return { root, body: root, frontPivots: [], wheels: [], materials: [m] };
+  // Same position, same draw slot: three sorts them by distance and then by id, so each ghost's depth
+  // pass (made first) draws just before its colour pass, and ghosts go back to front.
+  for (const m of [depth, tint]) {
+    const mesh = new THREE.Mesh(geo, m);
+    mesh.renderOrder = GHOST_ORDER;
+    root.add(mesh);
+  }
+  return { root, body: root, frontPivots: [], wheels: [], materials: [depth, tint] };
 }
 
 export interface Controls {

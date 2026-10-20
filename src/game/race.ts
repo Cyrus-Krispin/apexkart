@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { TrackModel } from './track';
 import { buildTrackScene, type TrackScene } from './trackMesh';
-import { buildKart, KartPhysics, type KartVisual } from './kart';
+import { buildGhost, buildKart, KartPhysics, type KartVisual } from './kart';
 import { availableSchemes, controlsPref, Input, saveControlsPref, SCHEME_LABEL, type ControlScheme } from './input';
 import { KartAudio } from './audio';
 import { KartFx, type FxFrame } from './fx';
@@ -1255,11 +1255,12 @@ export class Race {
 
   private ghostTemplates = new Map<string, THREE.Group>();
 
-  /** Ghost karts are cloned from one template per colour: shared geometry and materials, no rebuild hitch. */
+  /** Ghost karts are cloned from one template per colour: shared geometry and materials, no rebuild hitch.
+   *  Every template shares one geometry too, so a ghost of a new colour uploads nothing. */
   private ghostVisual(color: string): KartVisual {
     let tpl = this.ghostTemplates.get(color);
     if (!tpl) {
-      tpl = buildKart(color, { ghost: true }).root;
+      tpl = buildGhost(color, this.ghostTemplates.values().next().value).root;
       this.ghostTemplates.set(color, tpl);
     }
     const root = tpl.clone();
