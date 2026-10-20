@@ -1,5 +1,5 @@
 // HTML for the home screen in the Pit Wall design (docs/pit-wall.md): the timing tower, the daily
-// and Box box bars, the pit board for a circuit, search results and the live sheet. Pure functions
+// circuit bar, the pit board for a circuit, search results and the live sheet. Pure functions
 // of their inputs; atlas.ts wires them up.
 import type { TrackData } from '../track/osm';
 import type { TrackShape } from '../track/shape';
@@ -85,17 +85,11 @@ export function towerEmpty(msg: string, action?: { act: string; label: string })
 export function dailyBar(d: { t: TrackData; msLeft: number; streak: number; board: DailyResponse | null; me: string } | null): string {
   if (!d) return '';
   const mine = d.board?.entries.find((e) => e.pid === d.me);
-  const tag = mine ? `P${mine.rank}` : d.streak ? `STREAK ${d.streak}` : 'NEW';
-  return `<button class="pw-daily" data-act="daily" aria-label="Today's daily circuit: ${esc(d.t.name)}">
-    <span class="chq"></span><span class="dl-k">DAILY</span><b class="dl-nm">${esc(d.t.name)}</b>
-    <span class="dl-clk mono" data-el="dailyClock">${clock(d.msLeft)}</span><span class="dl-tag">${tag}</span>
-  </button>`;
-}
-
-export function boxBar(p: { code: string; name: string; why: string } | null): string {
-  if (!p) return `<button class="pw-box" disabled><span class="bx-k">BOX BOX</span><span class="bx-main"><b>LOADING…</b></span></button>`;
-  return `<button class="pw-box" data-act="box" aria-label="Race ${esc(p.name)} (Enter)">
-    <span class="bx-k">BOX BOX</span><span class="bx-main"><b>RACE ${esc(p.code)}</b><small>${esc(p.why)}</small></span><kbd>↵</kbd>
+  const tag = mine ? `YOU P${mine.rank}` : d.streak ? `STREAK ${d.streak}` : '';
+  return `<button class="pw-daily" data-act="daily" aria-label="Race today's daily circuit, ${esc(d.t.name)}">
+    <span class="chq"></span>
+    <span class="dl-t"><span class="dl-k">TODAY'S DAILY · ENDS <span class="mono" data-el="dailyClock">${clock(d.msLeft)}</span>${tag ? ` · ${tag}` : ''}</span><b class="dl-nm">${esc(d.t.name)}</b></span>
+    <span class="dl-go">RACE <span aria-hidden="true">›</span></span>
   </button>`;
 }
 
@@ -211,7 +205,6 @@ export function pit(d: PitData): string {
     </div>
     ${fixable ? `<button class="pit-fix" data-act="edit">Layout looks wrong? <b>Fix it</b></button>` : ''}
     <div class="pit-go">
-      <div class="pit-lights" aria-hidden="true">${'<i><b></b><b></b></i>'.repeat(5)}</div>
       <button class="btn go lg block" data-act="race">START ${esc(d.code)} <kbd>↵</kbd></button>
     </div>
   </div>`;

@@ -6,6 +6,17 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+### Changed
+- **One tap to race.** Tap a circuit, press **Start**, and you're on the grid. The screen before the
+  race no longer asks you to start again: it draws the track while the world loads, then goes
+  straight to the start lights.
+- Today's daily circuit bar at the top has a **Race** button, so it's clear you can race it. It opens
+  today's circuit like any other track.
+
+### Removed
+- **Box box**, the bar that raced your last circuit. On desktop the circuit you raced last is already
+  on screen, one Start away.
+
 ## [0.16.0] - 2026-10-20
 
 ### Changed

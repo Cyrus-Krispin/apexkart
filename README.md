@@ -51,16 +51,17 @@ spec is [docs/pit-wall.md](docs/pit-wall.md); tokens and shared components live 
   **LIVE** ranks them by drivers on track, **NEAR ME** by distance (from you or any city you search
   for), and **WORLD** lists every kart venue on OpenStreetMap with a raceable loop
   (`public/tracks/world.json`) by country. A venue opens instantly: its layouts are pre-stitched
-  into `public/tracks/venues/<cell>.json` by `scripts/build-venues.ts` (`npm run venues`). The
-  daily circuit is a yellow flag bar, **Box box** (Enter) races your last circuit, and one search
-  box covers circuits, countries, venues and cities. On desktop the tower sits beside the circuit
+  into `public/tracks/venues/<cell>.json` by `scripts/build-venues.ts` (`npm run venues`). Today's
+  daily circuit is a yellow bar with a Race button, and one search box covers circuits, countries,
+  venues and cities. On desktop the tower sits beside the circuit
   as a broadcast wall, with race control (the latest laps) running along the bottom.
 - **Pit board**: each circuit's page draws the layout with sector colours, numbered turns,
   direction and dots for the drivers on track. It shows your position, best lap and gap to the next
   medal, the medal targets, the classification with a ghost button on every lap, and a green
   **Start** with five red lights.
-- **Grid screen**: before the race, a dot laps the circuit as the world loads, lighting each sector,
-  beside your targets and controls. Then you press Start, or any key, to go.
+- **One tap to race**: tap a circuit, press **Start**, and you're on the grid. The grid screen shows
+  a dot lapping the circuit as the world loads, lighting each sector, and goes straight to the start
+  lights when it's ready. There's nothing to press twice.
 - Two control schemes (Simple and Classic) on keyboard, gamepad and touch;
   synthesized engine and tyre audio; skid marks; four cameras.
 

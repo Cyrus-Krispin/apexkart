@@ -66,7 +66,7 @@ export class RaceIntro {
   private started = false;
   private count: HTMLElement;
   private pct: HTMLElement;
-  private go: HTMLButtonElement;
+  private go: HTMLElement; // status line: the race starts on its own once the world is ready
   private help: HTMLElement;
   private medals: HTMLElement;
   private record: HTMLElement;
@@ -156,13 +156,13 @@ export class RaceIntro {
       </section>
 
       <footer class="io-foot">
-        <button class="btn go lg block io-go" data-el="go" disabled>Start ${escapeHtml(code)}<span class="io-go-sub">${touchDevice() ? '' : 'or press any key'}</span></button>
+        <p class="io-go" data-el="go" role="status" aria-live="polite"><i class="live-dot"></i><span>On the grid at ${escapeHtml(code)} as soon as the world is ready</span></p>
       </footer>`;
     o.container.appendChild(this.el);
     const $ = (k: string) => this.el.querySelector<HTMLElement>(`[data-el=${k}]`)!;
     this.count = $('count');
     this.pct = $('pct');
-    this.go = $('go') as HTMLButtonElement;
+    this.go = $('go');
     this.help = $('help');
     this.medals = $('medals');
     this.record = $('rec');
@@ -219,9 +219,8 @@ export class RaceIntro {
       }),
     );
     this.el.querySelector('[data-act=back]')!.addEventListener('click', () => o.onBack());
-    this.go.addEventListener('click', () => this.start());
     addEventListener('keydown', this.onKey);
-    // Don't hold people hostage to slow tiles: allow starting after a few seconds regardless.
+    // Don't hold people hostage to slow tiles: go after a few seconds regardless.
     setTimeout(() => this.ready(), 5000);
   }
 
@@ -339,10 +338,12 @@ export class RaceIntro {
       this.paintLap(lap, this.shown);
     }
     if (this.shown >= 1) {
-      // Back at the line: it flashes, and the lap is done.
+      // Back at the line: it flashes, the lap is done, and the lights come on. You already pressed
+      // Start on the circuit, so there's nothing to press here.
       this.flagged = true;
       this.art.classList.add('flag');
       this.paintText();
+      setTimeout(() => this.start(), this.still ? 0 : 320);
       return;
     }
     this.raf = requestAnimationFrame(this.tick);
@@ -364,10 +365,13 @@ export class RaceIntro {
   ready() {
     if (this.canStart) return;
     this.canStart = true;
-    this.goal = 1; // the dot sprints for the line; START doesn't wait for it
-    this.go.disabled = false;
+    this.goal = 1; // the dot sprints for the line, and the race starts when it gets there
+    this.go.querySelector('span')!.textContent = 'Lights';
     this.el.classList.add('ready');
-    if (!this.lap) this.paintText();
+    if (!this.lap) {
+      this.paintText();
+      setTimeout(() => this.start(), 300);
+    }
   }
 
   private start() {
