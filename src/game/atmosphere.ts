@@ -35,13 +35,14 @@ interface Preset {
 }
 
 const PRESETS: Record<TimeOfDay, Preset> = {
-  // Golden-hour sun from the side for long, readable shadows.
+  // Golden-hour sun from the side for long, readable shadows. Warm key, cool sky fill and a green
+  // bounce from the grass: warm light against cool shadows is what gives the stylised look its depth.
   day: {
     dir: new THREE.Vector3(0.55, 0.5, 0.35).normalize(),
-    key: [0xffe2bd, 3.1],
-    hemi: [0xcfe0f2, 0x6a5a42, 0.8],
+    key: [0xfff0d6, 3.4],
+    hemi: [0xbcd4f0, 0x5b6b3a, 0.8],
     fog: [SKY.horizon, 340, 1800],
-    exposure: 1.05,
+    exposure: 1,
     env: 0.55,
     bloom: { strength: 0.32, radius: 0.45, threshold: 0.93 },
     lampHeads: 0.6,
@@ -52,7 +53,7 @@ const PRESETS: Record<TimeOfDay, Preset> = {
     key: [0xa8bcff, 0.32],
     hemi: [0x3a4a70, 0x15130f, 0.42],
     fog: [NIGHT_SKY.horizon, 180, 1400],
-    exposure: 1.1,
+    exposure: 1, // Neutral keeps more of the midtones than ACES did: no need to push it
     env: 0.35,
     bloom: { strength: 0.62, radius: 0.55, threshold: 1.1 },
     lampHeads: 16,

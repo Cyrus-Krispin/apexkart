@@ -6,6 +6,22 @@ import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 
+// The grade: Neutral tone mapping, which keeps the Pit Wall's reds and oranges true where ACES
+// turned them salmon (the start lights read orange), plus a touch of saturation so the stylised
+// palette doesn't wash out. One function serves both paths: Low tone maps in every material,
+// Medium and High once in the OutputPass. ALU only, so it costs nothing on any tier.
+const NO_GRADE = 'vec3 CustomToneMapping( vec3 color ) { return color; }';
+const GRADED = THREE.ShaderChunk.tonemapping_pars_fragment.includes(NO_GRADE);
+if (GRADED)
+  THREE.ShaderChunk.tonemapping_pars_fragment = THREE.ShaderChunk.tonemapping_pars_fragment.replace(
+    NO_GRADE,
+    /* glsl */ `vec3 CustomToneMapping( vec3 color ) {
+  color = NeutralToneMapping( color );
+  float l = dot( color, vec3( 0.2126, 0.7152, 0.0722 ) );
+  return clamp( mix( vec3( l ), color, 1.08 ), 0.0, 1.0 );
+}`,
+  );
+
 export type Quality = 'high' | 'medium' | 'low';
 export type QualitySetting = Quality | 'auto';
 
@@ -110,8 +126,8 @@ export class RenderPipeline {
     // r186 dropped PCFSoft and swaps in PCF at the first shadow render. Shaders compiled before that
     // carry the old type in their cache key and compile again later, so name PCF from the start.
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMapping = GRADED ? THREE.CustomToneMapping : THREE.NeutralToneMapping;
+    this.renderer.toneMappingExposure = 1;
     this.quality = quality;
     this.gpu = gpuName(this.renderer.getContext());
   }

@@ -12,7 +12,7 @@ export interface Lamp {
 
 /** One floodlight, shared by the baked map and the real lights so they match exactly. */
 export const LAMP = {
-  color: 0xffe0b5,
+  color: 0xffe8c8, // warm, but not so amber that lit grass turns neon under Neutral tone mapping
   intensity: 150, // candela
   angle: 1.15, // cone half-angle (rad)
   penumbra: 0.6,

@@ -224,6 +224,8 @@ export class Race {
 
     const aniso = this.pipeline.renderer.capabilities.getMaxAnisotropy();
     this.trackScene = buildTrackScene(this.track, aniso);
+    // Start lights: a pure red that stays red through tone mapping when lit (the grid drives them at 4).
+    for (const m of this.trackScene.lights) m.emissive.setRGB(0.3, 0.004, 0.004);
     s.add(this.trackScene.group);
     floodlit(this.ground);
     floodlit(this.trackScene.group);
