@@ -5,18 +5,9 @@ import { Floodlights, floodlit, type Lamp, type RigOptions } from './floodlights
 import type { Quality, RenderPipeline } from './render';
 import { sunPosition } from './sun';
 
-export type TimeOfDay = 'day' | 'night';
-/** The player's setting: a fixed time of day, or "live" (whatever it is at the circuit right now). */
-export type TimePref = TimeOfDay | 'live';
+import type { TimeOfDay, TimePref } from './prefs';
 
-export function timePref(): TimePref {
-  const v = localStorage.getItem('ak:time');
-  return v === 'day' || v === 'night' ? v : 'live';
-}
-
-export function saveTimePref(t: TimePref) {
-  localStorage.setItem('ak:time', t);
-}
+export { saveTimePref, timePref, type TimeOfDay, type TimePref } from './prefs';
 
 /**
  * The look for a setting at a circuit. "Live" puts the sun where it really is (kept between 12°

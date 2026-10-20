@@ -9,10 +9,9 @@ import { analyzeShape, type TrackShape } from '../track/shape';
 import { ProfileMenu } from './profile';
 import { LayoutEditor } from './layoutEditor';
 import { api, type BoardResponse, type CommunityLayout, type DailyResponse, type Dir, type Driver, type FeedResponse } from '../net/api';
-import { localPB } from '../game/race';
+import { localPB, timePref } from '../game/prefs';
 import { earnedMedal, targets } from '../game/medals';
 import { isNightAt } from '../game/sun';
-import { timePref } from '../game/atmosphere';
 import { coreBounds, distM, loadWorld, localeCountry, type Venue, type WorldIndex } from './world';
 import * as V from './atlasViews';
 
@@ -121,6 +120,8 @@ export class Atlas {
   private hits: V.SearchHit[] = [];
   private hitSel = 0;
   private cells = new Map<string, Promise<VenueCell | null>>(); // pre-stitched layouts per 5° cell
+  private hiddenSig = ''; // the known tracks hiddenVenues was worked out for
+  private dotStyle: ('on' | 'dim' | 'off')[] = []; // what each venue dot currently shows
   private sheetRecord: number | undefined; // the record the open sheet's medal targets use
   private daily: DailyResponse | null = null;
   private feedFails = 0;
@@ -240,6 +241,8 @@ export class Atlas {
 
   private drawDots() {
     const w = this.world!;
+    this.dotStyle = [];
+    this.hiddenSig = '';
     this.dots = w.venues.map((v) => {
       const m = L.circleMarker(v.at, { renderer: this.dotRenderer, radius: 3, stroke: true, weight: 1, color: '#0b0b0a', fillColor: '#ff4d00', fillOpacity: 0.9, bubblingMouseEvents: false });
       m.on('click', () => this.openVenue(v));
@@ -259,19 +262,29 @@ export class Atlas {
   private refreshVenues() {
     if (!this.world) return;
     const known = [...this.tracks.values()];
-    this.hiddenVenues.clear();
-    for (const v of this.world.venues) if (known.some((t) => Math.abs(t.center[0] - v.at[0]) < 0.02 && distM(t.center, v.at) < SAME_VENUE_M)) this.hiddenVenues.add(v.i);
+    // Which dots a known track covers only changes when tracks do (phones feel this loop).
+    const sig = known.map((t) => t.id).join();
+    if (sig !== this.hiddenSig) {
+      this.hiddenSig = sig;
+      this.hiddenVenues.clear();
+      for (const v of this.world.venues) if (known.some((t) => Math.abs(t.center[0] - v.at[0]) < 0.02 && distM(t.center, v.at) < SAME_VENUE_M)) this.hiddenVenues.add(v.i);
+    }
     const cc = this.filter.kind === 'country' ? this.filter.cc : null;
     for (const v of this.world.venues) {
       const m = this.dots[v.i];
       if (this.hiddenVenues.has(v.i) || this.emptyVenues.has(v.i)) {
-        m.remove();
+        if (this.dotStyle[v.i] !== 'off') m.remove();
+        this.dotStyle[v.i] = 'off';
         continue;
       }
+      // Restyle only the dots whose look changes (a country filter dims the rest).
       const dim = cc !== null && v.cc !== cc;
-      const empty = this.emptyVenues.has(v.i);
-      m.setStyle({ fillColor: empty ? '#75716a' : '#ff4d00', fillOpacity: dim ? 0.16 : empty ? 0.6 : 0.9, opacity: dim ? 0.2 : 1 });
-      if (!this.map.hasLayer(m)) m.addTo(this.map);
+      const style = dim ? 'dim' : 'on';
+      const was = this.dotStyle[v.i];
+      if (was === style) continue;
+      if (was !== 'on' && was !== 'dim') m.addTo(this.map);
+      m.setStyle(dim ? { fillOpacity: 0.16, opacity: 0.2 } : { fillOpacity: 0.9, opacity: 1 });
+      this.dotStyle[v.i] = style;
     }
     // Known tracks pick up their country from the venue they replaced.
     for (const t of known) if (!t.country) t.country = this.nearestVenue(t.center, 3000)?.cc || undefined;

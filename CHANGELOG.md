@@ -6,6 +6,12 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+### Changed
+- **The home screen opens much faster, especially on phones.** It now downloads about a quarter of
+  what it used to. The 3D race engine loads quietly in the background while you browse the map, so
+  races still start straight away.
+- Switching country filters and scrolling the circuit rail are several times quicker on a busy map.
+
 ## [0.12.0] - 2026-10-20
 
 ### Changed
