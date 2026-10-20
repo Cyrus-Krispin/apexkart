@@ -611,7 +611,17 @@ export class Race {
       }
       this.invalidate('Cut the track', true);
     }
-    if (crossedBack && this.lapStart !== null) this.invalidate('Reversed over the line');
+    if (crossedBack && this.lapStart !== null) {
+      // Back over the line: this lap never happened. The next forward crossing starts it again
+      // (no lap card, no lap counted).
+      this.invalidate('Reversed over the line');
+      this.lapStart = null;
+      this.lapNo = Math.max(0, this.lapNo - 1);
+      this.hud.lap(null);
+      this.hud.lapTime(0, false);
+      this.hud.delta(null);
+      this.hud.sectors([], [], -1, 0);
+    }
     if (crossedFwd) {
       // Interpolate the exact crossing moment inside this step.
       const before = L - prev;
