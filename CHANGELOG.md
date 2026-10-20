@@ -6,6 +6,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-20
+
 ### Changed
 - **A cleaner circuit page.** Everything before a race is on one page:
   - the track
@@ -327,7 +329,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 ### Fixed
 - Leaderboard and lap submission on the live site.
 
-[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.14.0...v0.15.0
