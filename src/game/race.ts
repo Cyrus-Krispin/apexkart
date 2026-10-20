@@ -263,7 +263,7 @@ export class Race {
     s.add(this.ground);
 
     const aniso = this.pipeline.renderer.capabilities.getMaxAnisotropy();
-    this.trackScene = buildTrackScene(this.track, aniso);
+    this.trackScene = buildTrackScene(this.track, aniso, this.pipeline.quality); // Lambert on Low, fixed for the race
     // Start lights: a pure red that stays red through tone mapping when lit (the grid drives them at 4).
     for (const m of this.trackScene.lights) m.emissive.setRGB(0.3, 0.004, 0.004);
     s.add(this.trackScene.group);

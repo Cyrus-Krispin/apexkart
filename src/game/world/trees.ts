@@ -5,6 +5,7 @@ import type { EnvData } from '../../track/env';
 import type { TrackModel } from '../track';
 import type { GroundPainter } from './ground';
 import { hashString, Land, pointInPolygon, projectRing, rng, type Pt } from './common';
+import type { MaterialFactory } from './materials';
 
 type Variant = 'broadleaf' | 'conifer' | 'raintree' | 'palm';
 
@@ -72,7 +73,7 @@ interface Placement {
   v: Variant;
 }
 
-export function buildTrees(track: TrackModel, env: EnvData | null, ground: GroundPainter | null, seed: string, cap: number) {
+export function buildTrees(track: TrackModel, env: EnvData | null, ground: GroundPainter | null, seed: string, cap: number, mat: MaterialFactory) {
   const rand = rng(hashString(seed + ':trees'));
   const tropical = Math.abs(track.proj.lat0) < 24;
   const pick = (): Variant => (tropical ? (rand() < 0.62 ? 'raintree' : rand() < 0.6 ? 'palm' : 'broadleaf') : rand() < 0.62 ? 'broadleaf' : 'conifer');
@@ -128,7 +129,7 @@ export function buildTrees(track: TrackModel, env: EnvData | null, ground: Groun
   }
 
   const group = new THREE.Group();
-  const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, flatShading: true });
+  const material = mat({ vertexColors: true, roughness: 0.85, flatShading: true });
   // Chunk instances spatially so the renderer can skip off-screen chunks and the shadow pass
   // only draws trees near the kart (one big InstancedMesh can't be culled at all).
   const CHUNK = 70;

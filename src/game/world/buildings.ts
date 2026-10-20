@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import type { EnvData } from '../../track/env';
 import type { TrackModel } from '../track';
 import { footprintTouchesTrack, hashString, pointInPolygon, polygonArea, projectRing, rng, type Pt } from './common';
+import type { MaterialFactory } from './materials';
 
 const WALLS = ['#ece6da', '#e4ddcf', '#d6d2c9', '#ddd7cb', '#e8d2b8', '#cfd8cc', '#d9bfae', '#c9d1d8', '#efe9df', '#d8d0c0'];
 const ROOFS = ['#8d8a83', '#7a7873', '#9a968d', '#6f6d68', '#a08670'];
@@ -53,7 +54,7 @@ interface Built {
   footprints: { pts: Pt[]; h: number }[];
 }
 
-export function buildBuildings(track: TrackModel, env: EnvData | null, seed: string): Built {
+export function buildBuildings(track: TrackModel, env: EnvData | null, seed: string, mat: MaterialFactory): Built {
   const group = new THREE.Group();
   const footprints: Built['footprints'] = [];
   if (!env?.buildings.length) return { group, footprints };
@@ -158,12 +159,12 @@ export function buildBuildings(track: TrackModel, env: EnvData | null, seed: str
     m.receiveShadow = true;
     group.add(m);
   };
-  mk(geo.office, new THREE.MeshStandardMaterial({ map: windowTexture('office'), vertexColors: true, roughness: 0.75, metalness: 0.02 }));
-  mk(geo.shed, new THREE.MeshStandardMaterial({ map: windowTexture('shed'), vertexColors: true, roughness: 0.6, metalness: 0.1 }));
-  mk(geo.roof, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }));
+  mk(geo.office, mat({ map: windowTexture('office'), vertexColors: true, roughness: 0.75, metalness: 0.02 }));
+  mk(geo.shed, mat({ map: windowTexture('shed'), vertexColors: true, roughness: 0.6, metalness: 0.1 }));
+  mk(geo.roof, mat({ vertexColors: true, roughness: 0.9 }));
 
   if (clutter.length) {
-    const inst = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0xc9c6bf, roughness: 0.6, metalness: 0.2 }), clutter.length);
+    const inst = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), mat({ color: 0xc9c6bf, roughness: 0.6, metalness: 0.2 }), clutter.length);
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     clutter.forEach((c, i) => {
