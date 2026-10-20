@@ -174,6 +174,17 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
     const c = ground.classAt(x, z);
     return c !== Land.Building && c !== Land.Water;
   };
+  // A floodlight's visible beam (night, Medium/High) only where no building stands in it: a pole can
+  // stand behind a building that sits between it and the track.
+  const beamClear = (head: THREE.Vector3, dir: THREE.Vector3) => {
+    if (!ground) return true;
+    for (let d = 1; d < 30; d += 1) {
+      const y = head.y + dir.y * d;
+      if (y < 0.3) break;
+      if (ground.classAt(head.x + dir.x * d, head.z + dir.z * d) === Land.Building) return false;
+    }
+    return true;
+  };
 
   // ---------------------------------------------------------------- kerbs (raised)
   {
@@ -407,7 +418,8 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
           poles.push(pole);
           placed.push([x, z]);
           const head = new THREE.Vector3(0, 8.7, 1.3).applyMatrix4(pole);
-          lamps.push({ pos: head, dir: new THREE.Vector3(t.px[i], 0, t.pz[i]).sub(head).normalize() });
+          const dir = new THREE.Vector3(t.px[i], 0, t.pz[i]).sub(head).normalize();
+          lamps.push({ pos: head, dir, beam: beamClear(head, dir) });
           lastS = s;
           k++;
           done = true;

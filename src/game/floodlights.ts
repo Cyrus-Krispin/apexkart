@@ -8,6 +8,7 @@ import * as THREE from 'three';
 export interface Lamp {
   pos: THREE.Vector3; // lamp head
   dir: THREE.Vector3; // unit aim, towards the track
+  beam?: boolean; // false: something (a building) stands in the beam, so draw no light cone for it
 }
 
 /** One floodlight, shared by the baked map and the real lights so they match exactly. */
@@ -336,15 +337,16 @@ export class Floodlights {
       this.cones.dispose();
       this.cones = null;
     }
-    if (lamps.length) {
+    const beams = lamps.filter((l) => l.beam !== false);
+    if (beams.length) {
       const cone = new THREE.ConeGeometry(Math.tan(CONE_ANGLE), 1, 18, 1, true).translate(0, -0.5, 0);
       cone.deleteAttribute('uv');
-      const mesh = new THREE.InstancedMesh(cone, this.coneMat, lamps.length);
+      const mesh = new THREE.InstancedMesh(cone, this.coneMat, beams.length);
       const q = new THREE.Quaternion();
       const m = new THREE.Matrix4();
       const down = new THREE.Vector3(0, -1, 0);
       const at = new THREE.Vector3();
-      lamps.forEach((l, i) => {
+      beams.forEach((l, i) => {
         const len = Math.min(LAMP.distance * 0.5, l.pos.y / Math.max(0.2, -l.dir.y)) * 0.92;
         q.setFromUnitVectors(down, l.dir);
         at.copy(l.pos).addScaledVector(l.dir, 0.25);
