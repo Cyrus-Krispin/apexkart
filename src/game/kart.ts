@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
-import type { TrackModel } from './track';
+import { KERB, type Nearest, type Rejoin, type TrackModel } from './track';
 
 export interface KartVisual {
   root: THREE.Group;
@@ -188,6 +188,10 @@ export class KartPhysics {
   s = 0;
   wheelSpin = 0;
   bump = 0; // impact intensity for camera shake / sound
+  /** Set for the one step in which the kart left its part of the lap for another (null otherwise). */
+  rejoin: Rejoin | null = null;
+  /** Metres driven in total (place() doesn't count): a lap shorter than the track allows is a cut. */
+  odo = 0;
 
   readonly vmax = 27; // ~97 km/h
   readonly wheelbase = 1.05;
@@ -201,6 +205,32 @@ export class KartPhysics {
     this.heading = p.heading;
     this.vx = this.vz = this.yawRate = this.steerAngle = 0;
     this.hint = p.i;
+    this.rejoin = null;
+  }
+
+  /**
+   * Where the kart is in the lap (hint, s, offset; rejoin), from x/z. Progress follows the lap
+   * continuously, so it never jumps to another part of it however close (hairpin infields,
+   * crossings). step() calls this after moving.
+   */
+  locate(): Nearest {
+    const t = this.track;
+    const hw = t.halfWidth;
+    let near = this.hint < 0 ? t.closest(this.x, this.z) : t.follow(this.x, this.z, this.hint);
+    this.rejoin = null;
+    if (near.dist > hw + t.runoff) {
+      // Past this part's barrier but on another part's asphalt or kerb: carry on from there, and
+      // say so (Race: a forward rejoin is a cut).
+      const other = t.closest(this.x, this.z, near.i);
+      if (other.dist <= hw + KERB) {
+        this.rejoin = { from: near.i, to: other.i, gain: t.gain(near.i, other.i) };
+        near = other;
+      }
+    }
+    this.hint = near.i;
+    this.s = near.s;
+    this.offset = near.offset;
+    return near;
   }
 
   get speed() {
@@ -259,17 +289,15 @@ export class KartPhysics {
     this.vz = nfz * vf + nfx * vl;
     this.x += this.vx * dt;
     this.z += this.vz * dt;
+    this.odo += Math.hypot(this.vx, this.vz) * dt;
     this.wheelSpin += (vf / 0.135) * dt;
 
     // Track surface + barriers.
-    const near = this.track.nearest(this.x, this.z, this.hint);
-    this.hint = near.i;
-    this.s = near.s;
-    this.offset = near.offset;
+    const near = this.locate();
     const hw = this.track.halfWidth;
-    this.surface = near.dist <= hw ? 'track' : near.dist <= hw + 1.1 ? 'kerb' : 'grass';
-    this.bump *= Math.exp(-dt * 6);
     const wall = hw + this.track.runoff;
+    this.surface = near.dist <= hw ? 'track' : near.dist <= hw + KERB ? 'kerb' : 'grass';
+    this.bump *= Math.exp(-dt * 6);
     if (near.dist > wall) {
       const [nx, nz] = this.track.normal(near.i);
       const side = Math.sign(near.offset);

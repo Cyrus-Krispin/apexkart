@@ -101,6 +101,7 @@ export class Race {
   private goTime = 0;
   private lightsLit = 0;
   private lapStart: number | null = null;
+  private lapOdo = 0; // phys.odo when this lap started
   private lapNo = 0;
   private lastS = 0;
   private sectorsHit = [false, false];
@@ -598,14 +599,21 @@ export class Race {
       this.hintShown = true;
       this.hud.banner('Cross the line to start the clock', 'info', 2.6);
     }
+    // Progress is continuous; leaving for another part of the lap is reported. Forward is a cut.
+    const rejoin = this.phys.rejoin;
+    if (rejoin && rejoin.gain > 0) this.invalidate('Cut the track', true);
     if (crossedBack && this.lapStart !== null) this.invalidate('Reversed over the line');
     if (crossedFwd) {
       // Interpolate the exact crossing moment inside this step.
       const before = L - prev;
       const frac = before / Math.max(1e-6, before + s);
       const tCross = this.simT - dt + dt * frac;
+      // Backstop: no lap can be shorter than the shortest line inside the limits.
+      if (this.lapStart !== null && this.phys.odo - this.lapOdo < this.track.minLapLength) this.invalidate('Cut the track', true);
       if (this.lapStart !== null) this.finishLap(tCross);
       this.lapStart = tCross;
+      this.lapOdo = this.phys.odo;
+      void this.track.minLapLength; // computed once, here (a few ms), rather than at the end of the lap
       this.lapNo++;
       this.sectorsHit = [false, false];
       this.sectorTimes = [];
@@ -650,8 +658,9 @@ export class Race {
     return 'yellow';
   }
 
-  private invalidate(reason: string) {
-    if (this.invalid || this.lapStart === null) return;
+  /** `again`: say so even if the lap is already invalid (a cut usually crosses the limits first). */
+  private invalidate(reason: string, again = false) {
+    if ((this.invalid && !again) || this.lapStart === null) return;
     this.invalid = true;
     this.hud.banner(`Lap invalid · ${reason}`, 'warn', 2);
   }

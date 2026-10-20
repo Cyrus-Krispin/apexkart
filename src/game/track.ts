@@ -4,6 +4,12 @@ import { analyzeShape } from '../track/shape';
 
 const R = 6378137;
 const SPACING = 1; // metres between centreline samples
+const CELL = 12; // spatial grid cell, metres
+
+/** The kerb band beyond the asphalt edge, metres. */
+export const KERB = 1.1;
+/** How far past the asphalt edge the kart's centre may go before the lap is invalid. */
+export const LIMIT_GRACE = 2.4;
 
 export interface Projection {
   lat0: number;
@@ -29,6 +35,13 @@ export interface Nearest {
   s: number; // distance along the lap, 0..length
   offset: number; // signed lateral offset from centreline (+ = right of travel)
   dist: number; // |offset| essentially
+}
+
+/** The kart left its own part of the lap and turned up on another one (KartPhysics.rejoin). */
+export interface Rejoin {
+  from: number; // sample index it left
+  to: number; // sample index it turned up on
+  gain: number; // metres along the lap: + = forward (a cut), - = backward
 }
 
 /** Centreline sampled every metre, oriented in race direction, index 0 = start/finish. */
@@ -125,12 +138,120 @@ export class TrackModel {
   }
 
   private cell(x: number, z: number) {
-    return `${Math.floor(x / 12)},${Math.floor(z / 12)}`;
+    return `${Math.floor(x / CELL)},${Math.floor(z / CELL)}`;
   }
 
   /** Lateral unit normal pointing to the right of travel. */
   normal(i: number): [number, number] {
     return [-this.tz[i], this.tx[i]];
+  }
+
+  /** (x, z) measured from sample i: distance along the lap and signed offset. */
+  private project(i: number, x: number, z: number): Nearest {
+    const dx = x - this.px[i];
+    const dz = z - this.pz[i];
+    const along = dx * this.tx[i] + dz * this.tz[i];
+    const offset = dx * -this.tz[i] + dz * this.tx[i];
+    let s = i * (this.length / this.n) + along;
+    s = ((s % this.length) + this.length) % this.length;
+    return { i, s, offset, dist: Math.abs(offset) };
+  }
+
+  private d2(i: number, x: number, z: number) {
+    const dx = x - this.px[i];
+    const dz = z - this.pz[i];
+    return dx * dx + dz * dz;
+  }
+
+  /** Metres along the lap from sample a to sample b, wrapped to ±length/2 (+ = forward). */
+  gain(a: number, b: number): number {
+    let g = (b - a) * (this.length / this.n);
+    if (g > this.length / 2) g -= this.length;
+    else if (g < -this.length / 2) g += this.length;
+    return g;
+  }
+
+  /**
+   * Continuous progress: walk from sample `from` to the nearest centreline sample along the lap.
+   * It stays on the part of the lap the kart is on however close another part comes (hairpin
+   * infields, crossings), so cutting across shows as distance from this part, never as a jump.
+   */
+  follow(x: number, z: number, from: number): Nearest {
+    const n = this.n;
+    let i = ((from % n) + n) % n;
+    let d = this.d2(i, x, z);
+    // Samples can bunch up (uneven OSM spacing), so allow a long walk; a kart moves < 0.3 m a step.
+    for (let k = 0; k < 256; k++) {
+      const a = i + 1 === n ? 0 : i + 1;
+      const b = i === 0 ? n - 1 : i - 1;
+      const da = this.d2(a, x, z);
+      const db = this.d2(b, x, z);
+      if (da < d && da <= db) {
+        i = a;
+        d = da;
+      } else if (db < d) {
+        i = b;
+        d = db;
+      } else break;
+    }
+    return this.project(i, x, z);
+  }
+
+  /**
+   * Could a kart at sample `from` be on sample `i`? Always, on today's flat tracks. A bridge's
+   * elevation profile plugs in here (e.g. |elev[i] - elev[from]| < 1.8 m), so a kart under the
+   * deck never rejoins onto it; closest() already asks.
+   */
+  sameLevel(_from: number, _i: number): boolean {
+    return true;
+  }
+
+  /** The nearest centreline point anywhere on the lap (that a kart at sample `from` could be on). */
+  closest(x: number, z: number, from = -1): Nearest {
+    let best = -1;
+    let bestD = Infinity;
+    const cx = Math.floor(x / CELL);
+    const cz = Math.floor(z / CELL);
+    // Grow the searched block until the best hit is provably the nearest: anything outside a block
+    // of radius r cells is more than r * CELL away.
+    for (let r = 1; r <= 63; r = r * 2 + 1) {
+      for (let gx = cx - r; gx <= cx + r; gx++)
+        for (let gz = cz - r; gz <= cz + r; gz++) {
+          const cell = this.grid.get(`${gx},${gz}`);
+          if (!cell) continue;
+          for (const i of cell) {
+            const d = this.d2(i, x, z);
+            if (d < bestD && (from < 0 || this.sameLevel(from, i))) {
+              bestD = d;
+              best = i;
+            }
+          }
+        }
+      if (bestD <= (r * CELL) ** 2) return this.project(best, x, z);
+    }
+    for (let i = 0; i < this.n; i++) {
+      const d = this.d2(i, x, z);
+      if (d < bestD && (from < 0 || this.sameLevel(from, i))) {
+        bestD = d;
+        best = i;
+      }
+    }
+    return this.project(best < 0 ? Math.max(0, from) : best, x, z);
+  }
+
+  /** Half-width plus the grace: beyond this offset from its own part of the lap, the lap is invalid. */
+  get limit(): number {
+    return this.halfWidth + LIMIT_GRACE;
+  }
+
+  private minLap = 0;
+  /**
+   * The shortest a lap can legally be (the kart's centre kept inside the track limits), less a
+   * margin: a backstop that catches any shortcut or teleport the progress rules miss.
+   */
+  get minLapLength(): number {
+    if (!this.minLap) this.minLap = shortestLine(this, this.limit) * 0.97 - 5;
+    return this.minLap;
   }
 
   /** Nearest centreline point; uses `hint` (last index) to stay on the right section at crossovers. */
@@ -196,4 +317,51 @@ export class TrackModel {
         }
     return true;
   }
+}
+
+/**
+ * Length of the shortest closed line that keeps within `w` of the centreline: an elastic band
+ * pulled tight through every fourth sample, each point sliding along its sample's normal. The
+ * chords between points can shave corners, so it comes out a little short: safe for a minimum.
+ * About 1-4 ms on the presets.
+ */
+function shortestLine(t: TrackModel, w: number): number {
+  const stride = 4;
+  const m = Math.floor(t.n / stride);
+  const cx = new Float64Array(m);
+  const cz = new Float64Array(m);
+  const nx = new Float64Array(m);
+  const nz = new Float64Array(m);
+  const o = new Float64Array(m);
+  for (let k = 0; k < m; k++) {
+    const i = k * stride;
+    cx[k] = t.px[i];
+    cz[k] = t.pz[i];
+    nx[k] = -t.tz[i];
+    nz[k] = t.tx[i];
+  }
+  for (let it = 0; it < 2000; it++) {
+    let moved = 0;
+    for (let k = 0; k < m; k++) {
+      const a = k === 0 ? m - 1 : k - 1;
+      const b = k === m - 1 ? 0 : k + 1;
+      const ax = cx[a] + nx[a] * o[a];
+      const az = cz[a] + nz[a] * o[a];
+      const ex = cx[b] + nx[b] * o[b] - ax;
+      const ez = cz[b] + nz[b] * o[b] - az;
+      // Where the chord from a to b crosses this sample's normal, clamped to the corridor.
+      const den = ex * nz[k] - ez * nx[k];
+      if (Math.abs(den) < 1e-9) continue;
+      const v = Math.max(-w, Math.min(w, ((ax - cx[k]) * -ez + (az - cz[k]) * ex) / den));
+      moved = Math.max(moved, Math.abs(v - o[k]));
+      o[k] = v;
+    }
+    if (moved < 1e-3) break;
+  }
+  let len = 0;
+  for (let k = 0; k < m; k++) {
+    const b = k === m - 1 ? 0 : k + 1;
+    len += Math.hypot(cx[b] + nx[b] * o[b] - cx[k] - nx[k] * o[k], cz[b] + nz[b] * o[b] - cz[k] - nz[k] * o[k]);
+  }
+  return len;
 }
