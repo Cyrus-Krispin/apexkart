@@ -5,6 +5,7 @@ import type { EnvData, AreaKind, LineKind } from '../../track/env';
 import type { TrackModel } from '../track';
 import { footprintTouchesTrack, Land, projectRing, rng, type Extent, type LandClass, type Pt } from './common';
 import { kerbWidthAt } from '../kerbs';
+import type { MaterialFactory } from './materials';
 
 export const GROUND = {
   grass: '#7da457',
@@ -362,7 +363,7 @@ export class GroundPainter {
   }
 
   /** Bake into a ground mesh. Edges fade into the base grass colour of the endless plane. */
-  toMesh(maxAniso: number): THREE.Mesh {
+  toMesh(maxAniso: number, makeMat: MaterialFactory): THREE.Mesh {
     const g = this.ctx;
     const W = this.canvas.width;
     const H = this.canvas.height;
@@ -387,7 +388,7 @@ export class GroundPainter {
     const e = this.extent;
     const geo = new THREE.PlaneGeometry(e.x1 - e.x0, e.z1 - e.z0);
     geo.rotateX(-Math.PI / 2);
-    const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.96, metalness: 0 });
+    const mat = makeMat({ map: tex, roughness: 0.96, metalness: 0 });
     addDetail(mat, 2.2, 0.26, this.fine ? { field: this.trackField(), grass: grassTexture(maxAniso) } : undefined);
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set((e.x0 + e.x1) / 2, -0.02, (e.z0 + e.z1) / 2);

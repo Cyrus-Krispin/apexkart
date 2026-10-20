@@ -4,6 +4,7 @@ import { driftSky, makeNightSky, makeSky, NIGHT_SKY, setHillsLook, SKY } from '.
 import { Floodlights, floodlit, type Lamp, type RigOptions } from './floodlights';
 import type { Quality, RenderPipeline } from './render';
 import { sunPosition } from './sun';
+import type { WorldMaterial } from './world/materials';
 
 import type { TimeOfDay, TimePref } from './prefs';
 
@@ -82,7 +83,7 @@ export class Atmosphere {
   private flood: Floodlights;
   /** A soft dark blob under the kart that seats it on the ground on every tier (one quad). */
   private blob: THREE.Mesh;
-  private lampHeads: THREE.MeshStandardMaterial[] = [];
+  private lampHeads: WorldMaterial[] = [];
   private quality: Quality;
 
   constructor(
@@ -166,7 +167,7 @@ export class Atmosphere {
   }
 
   /** Register a freshly built world: floodlight poles and the materials their pools should light. */
-  setWorld(roots: THREE.Object3D[], lamps: Lamp[], lampHeads: THREE.MeshStandardMaterial[]) {
+  setWorld(roots: THREE.Object3D[], lamps: Lamp[], lampHeads: WorldMaterial[]) {
     roots.forEach((r) => floodlit(r));
     this.flood.setLamps(lamps);
     this.lampHeads = lampHeads;

@@ -4,6 +4,8 @@ import { addDetail } from './world/ground';
 import { trackQuery } from './trackQuery';
 import { bigStops, racingLine } from './kerbs';
 import { gridPose } from './raceMode';
+import { materialFactory, type MaterialFactory } from './world/materials';
+import type { Quality } from './render';
 
 function canvasTex(w: number, h: number, draw: (c: CanvasRenderingContext2D) => void, aniso: number) {
   const c = document.createElement('canvas');
@@ -152,8 +154,8 @@ function patchNoise(x: number, y: number): number {
   return a + (b - a) * sy;
 }
 
-function roadMaterial(aniso: number) {
-  const m = new THREE.MeshStandardMaterial({ map: asphaltTexture(aniso), vertexColors: true, roughness: 0.88, metalness: 0 });
+function roadMaterial(aniso: number, mat: MaterialFactory) {
+  const m = mat({ map: asphaltTexture(aniso), vertexColors: true, roughness: 0.88, metalness: 0 });
   addDetail(m, 0.9, 0.16);
   return m;
 }
@@ -162,7 +164,7 @@ function roadMaterial(aniso: number) {
  * Painted on the asphalt, in one transparent draw: grid boxes with slot numbers and a pole line
  * behind the start, and braking marks along the racing line into the biggest stops.
  */
-function buildMarkings(track: TrackModel, aniso: number): THREE.Mesh | null {
+function buildMarkings(track: TrackModel, aniso: number, makeMat: MaterialFactory): THREE.Mesh | null {
   const tex = canvasTex(
     256,
     256,
@@ -272,7 +274,7 @@ function buildMarkings(track: TrackModel, aniso: number): THREE.Mesh | null {
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   geo.computeVertexNormals();
-  const mat = new THREE.MeshStandardMaterial({ map: tex, transparent: true, depthWrite: false, roughness: 0.85, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
+  const mat = makeMat({ map: tex, transparent: true, depthWrite: false, roughness: 0.85, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.receiveShadow = true;
   mesh.renderOrder = 1;
@@ -284,15 +286,17 @@ export interface TrackScene {
   lights: THREE.MeshStandardMaterial[]; // 5 start lights
 }
 
-export function buildTrackScene(track: TrackModel, aniso: number): TrackScene {
+/** `quality`: the tier the world is built for (Lambert road and furniture on Low; the start lights stay Standard). */
+export function buildTrackScene(track: TrackModel, aniso: number, quality: Quality = 'medium'): TrackScene {
+  const mat = materialFactory(quality);
   const group = new THREE.Group();
   const hw = track.halfWidth;
 
   // Road (closed loop: one extra row closes it).
-  const road = new THREE.Mesh(roadGeometry(track, hw * 2), roadMaterial(aniso));
+  const road = new THREE.Mesh(roadGeometry(track, hw * 2), roadMaterial(aniso, mat));
   road.receiveShadow = true;
   group.add(road);
-  const markings = buildMarkings(track, aniso);
+  const markings = buildMarkings(track, aniso, mat);
   if (markings) group.add(markings);
 
   // Start / finish: chequered strip + gantry with five start lights.
@@ -308,7 +312,7 @@ export function buildTrackScene(track: TrackModel, aniso: number): TrackScene {
     },
     aniso,
   );
-  const sf = new THREE.Mesh(new THREE.PlaneGeometry(hw * 2, 1.2), new THREE.MeshStandardMaterial({ map: checker }));
+  const sf = new THREE.Mesh(new THREE.PlaneGeometry(hw * 2, 1.2), mat({ map: checker }));
   const heading = Math.atan2(track.tx[0], track.tz[0]);
   const gantry = new THREE.Group();
   gantry.position.set(track.px[0], 0, track.pz[0]);
@@ -317,7 +321,7 @@ export function buildTrackScene(track: TrackModel, aniso: number): TrackScene {
   sf.rotation.x = -Math.PI / 2;
   gantry.add(sf);
 
-  const postMat = new THREE.MeshStandardMaterial({ color: 0x2b2d42, metalness: 0.5, roughness: 0.4 });
+  const postMat = mat({ color: 0x2b2d42, metalness: 0.5, roughness: 0.4 });
   // A post that would stand on another section of the lap (where the layout runs close by or
   // crosses over) is left out: the gantry becomes a cantilever from the other side.
   const tq = trackQuery(track);

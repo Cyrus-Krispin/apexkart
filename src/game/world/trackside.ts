@@ -9,6 +9,7 @@ import { GROUND, type GroundPainter } from './ground';
 import { hashString, Land, rng } from './common';
 import { trackQuery } from '../trackQuery';
 import { APRON_WIDTH, bigStops, KERB_PROFILE, KERB_WIDTH, kerbRuns, kerbWidthAt } from '../kerbs';
+import type { MaterialFactory, WorldMaterial } from './materials';
 
 function canvasTex(w: number, h: number, draw: (g: CanvasRenderingContext2D) => void, repeat = true) {
   const c = document.createElement('canvas');
@@ -48,7 +49,7 @@ const SPONSORS: [string, string, string][] = [
 
 export interface Trackside {
   group: THREE.Group;
-  emissive: THREE.MeshStandardMaterial[]; // floodlight heads (night/bloom)
+  emissive: WorldMaterial[]; // floodlight heads (night/bloom)
   lamps: Lamp[]; // floodlight heads, aimed at the track
 }
 
@@ -154,13 +155,13 @@ function footprint(m: THREE.Matrix4, x0: number, x1: number, z0: number, z1: num
   });
 }
 
-export function buildTrackside(track: TrackModel, ground: GroundPainter | null, seed: string, aniso: number): Trackside {
+export function buildTrackside(track: TrackModel, ground: GroundPainter | null, seed: string, aniso: number, mat: MaterialFactory): Trackside {
   const group = new THREE.Group();
   const rand = rng(hashString(seed + ':side'));
   const t = track;
   const hw = t.halfWidth;
   const wallOff = hw + t.runoff + 0.65; // inner face, where the kart body meets the physics barrier
-  const emissive: THREE.MeshStandardMaterial[] = [];
+  const emissive: WorldMaterial[] = [];
   const lamps: Lamp[] = [];
   const at = (i: number, side: number, off: number): [number, number] => {
     const q = ((i % t.n) + t.n) % t.n;
@@ -280,7 +281,7 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
       g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
       g.computeVertexNormals();
       // Every face is wound to face up (see above): front faces only, half the raster work.
-      const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: kerbTex, roughness: 0.55 }));
+      const m = new THREE.Mesh(g, mat({ map: kerbTex, roughness: 0.55 }));
       m.receiveShadow = true; // 10 cm kerbs and a flat apron: they cast no shadow (not worth the pass)
       group.add(m);
     }
@@ -370,7 +371,7 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
       g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
       g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
       g.computeVertexNormals();
-      const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: belt, roughness: 0.7 }));
+      const m = new THREE.Mesh(g, mat({ map: belt, roughness: 0.7 }));
       m.castShadow = true;
       m.receiveShadow = true;
       group.add(m);
@@ -421,8 +422,8 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
         tint(new THREE.BoxGeometry(0.12, 0.12, 1.6).translate(0, 8.9, 0.6), '#9aa0a6'),
         tint(new THREE.BoxGeometry(1.4, 0.5, 0.3).translate(0, 8.9, 1.3), '#2a2a2c'),
       ])!;
-      const poleMesh = new THREE.InstancedMesh(poleGeo, new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.6, roughness: 0.4 }), poles.length);
-      const lampMat = new THREE.MeshStandardMaterial({ color: 0xfff6e0, emissive: 0xfff1d0, emissiveIntensity: 0.6 });
+      const poleMesh = new THREE.InstancedMesh(poleGeo, mat({ vertexColors: true, metalness: 0.6, roughness: 0.4 }), poles.length);
+      const lampMat = mat({ color: 0xfff6e0, emissive: 0xfff1d0, emissiveIntensity: 0.6 });
       emissive.push(lampMat);
       const lamp = new THREE.InstancedMesh(new THREE.PlaneGeometry(1.2, 0.35).rotateX(Math.PI / 2 + 0.35).translate(0, 8.64, 1.3), lampMat, poles.length);
       poles.forEach((m, i) => {
@@ -495,8 +496,8 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
       }
     }
     if (faces.length) {
-      const fm = new THREE.Mesh(mergeGeometries(faces)!, new THREE.MeshStandardMaterial({ map: atlas, roughness: 0.5 }));
-      const bm = new THREE.Mesh(mergeGeometries(frames)!, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7 }));
+      const fm = new THREE.Mesh(mergeGeometries(faces)!, mat({ map: atlas, roughness: 0.5 }));
+      const bm = new THREE.Mesh(mergeGeometries(frames)!, mat({ vertexColors: true, roughness: 0.7 }));
       fm.castShadow = bm.castShadow = true;
       group.add(fm, bm);
     }
@@ -560,10 +561,10 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
       }
     }
     if (boards.length) {
-      const bm = new THREE.Mesh(mergeGeometries(boards)!, new THREE.MeshStandardMaterial({ map: atlas, roughness: 0.5 }));
+      const bm = new THREE.Mesh(mergeGeometries(boards)!, mat({ map: atlas, roughness: 0.5 }));
       bm.castShadow = true;
       group.add(bm);
-      const lm = new THREE.Mesh(mergeGeometries(legs)!, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7 }));
+      const lm = new THREE.Mesh(mergeGeometries(legs)!, mat({ vertexColors: true, roughness: 0.7 }));
       lm.castShadow = true;
       group.add(lm);
     }
@@ -611,7 +612,7 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
       for (const cx of [-L / 2 + 0.4, -L / 6, L / 6, L / 2 - 0.4]) parts.push(tint(new THREE.CylinderGeometry(0.14, 0.14, 7, 8).translate(cx, 3.5, -rows * 0.9 + 0.5), '#55575c'));
       parts.push(tint(new THREE.BoxGeometry(L + 2, 0.25, rows * 0.9 + 2.4).rotateX(-0.08).translate(0, 7.0, -rows * 0.45 + 0.4), '#f2eee5'));
       parts.push(tint(new THREE.BoxGeometry(L + 2, 0.7, 0.12).translate(0, 6.7, 1.6), '#ff4d00'));
-      const stand = new THREE.Mesh(mergeGeometries(parts)!, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 }));
+      const stand = new THREE.Mesh(mergeGeometries(parts)!, mat({ vertexColors: true, roughness: 0.8 }));
       stand.applyMatrix4(frame(standSide, -4, wallOff + 2.6));
       ground?.contactShapes([footprint(frame(standSide, -4, wallOff + 2.6), -L / 2, L / 2, -rows * 0.9 - 0.2, 0.45)], 0.9, 0.4);
       stand.castShadow = true;
@@ -634,7 +635,7 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
           seats.push(base.clone().multiply(local));
           colors.push(new THREE.Color(shirts[Math.floor(rand() * shirts.length)]));
         }
-      const crowd = new THREE.InstancedMesh(new THREE.CapsuleGeometry(0.19, 0.32, 2, 6), new THREE.MeshStandardMaterial({ roughness: 0.8 }), seats.length);
+      const crowd = new THREE.InstancedMesh(new THREE.CapsuleGeometry(0.19, 0.32, 2, 6), mat({ roughness: 0.8 }), seats.length);
       seats.forEach((m, i) => {
         crowd.setMatrixAt(i, m);
         crowd.setColorAt(i, colors[i]);
@@ -662,12 +663,12 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
       const len = 30;
       const pit = new THREE.Group();
       const body = new THREE.Mesh(new THREE.BoxGeometry(len, 4.4, 8), [
-        new THREE.MeshStandardMaterial({ color: 0xe2ddd0 }),
-        new THREE.MeshStandardMaterial({ color: 0xe2ddd0 }),
-        new THREE.MeshStandardMaterial({ color: 0x8d8a83 }),
-        new THREE.MeshStandardMaterial({ color: 0x8d8a83 }),
-        new THREE.MeshStandardMaterial({ map: doors, roughness: 0.7 }),
-        new THREE.MeshStandardMaterial({ color: 0xd8d2c4 }),
+        mat({ color: 0xe2ddd0 }),
+        mat({ color: 0xe2ddd0 }),
+        mat({ color: 0x8d8a83 }),
+        mat({ color: 0x8d8a83 }),
+        mat({ map: doors, roughness: 0.7 }),
+        mat({ color: 0xd8d2c4 }),
       ]);
       body.position.set(0, 2.2, -4);
       body.castShadow = body.receiveShadow = true;
@@ -683,10 +684,10 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
         g.textBaseline = 'middle';
         g.fillText('APEXKART · PIT', 256, 30);
       }, false);
-      const signMesh = new THREE.Mesh(new THREE.PlaneGeometry(14, 1.75), new THREE.MeshStandardMaterial({ map: sign, emissive: 0xffffff, emissiveMap: sign, emissiveIntensity: 0.25 }));
+      const signMesh = new THREE.Mesh(new THREE.PlaneGeometry(14, 1.75), mat({ map: sign, emissive: 0xffffff, emissiveMap: sign, emissiveIntensity: 0.25 }));
       signMesh.position.set(0, 5.4, 0.02);
       pit.add(signMesh);
-      const signBack = new THREE.Mesh(new THREE.BoxGeometry(14.2, 1.9, 0.2), new THREE.MeshStandardMaterial({ color: 0x141414 }));
+      const signBack = new THREE.Mesh(new THREE.BoxGeometry(14.2, 1.9, 0.2), mat({ color: 0x141414 }));
       signBack.position.set(0, 5.4, -0.11);
       pit.add(signBack);
       pit.applyMatrix4(frame(pitSide, 10, wallOff + 3));
@@ -722,7 +723,7 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
       parts.push(tint(new THREE.BoxGeometry(0.02, 0.45, 0.65).translate(0.9, 2.1, 1.25), '#ffc600').applyMatrix4(m));
     }
     if (parts.length) {
-      const m = new THREE.Mesh(mergeGeometries(parts)!, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7 }));
+      const m = new THREE.Mesh(mergeGeometries(parts)!, mat({ vertexColors: true, roughness: 0.7 }));
       m.castShadow = true;
       group.add(m);
     }

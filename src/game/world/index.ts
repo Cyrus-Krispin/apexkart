@@ -11,11 +11,12 @@ import { buildTrackside } from './trackside';
 import { buildHorizon } from './horizon';
 import { trackExtent, type Extent } from './common';
 import type { Lamp } from '../floodlights';
+import { materialFactory, type WorldMaterial } from './materials';
 
 export interface World {
   group: THREE.Group;
   groundColor: THREE.Color;
-  emissive: THREE.MeshStandardMaterial[];
+  emissive: WorldMaterial[];
   lamps: Lamp[];
   stats: { buildings: number; trees: number; env: boolean };
 }
@@ -110,22 +111,23 @@ export async function buildWorld(o: {
 
   o.onStage('Raising buildings', 0.45);
   await frame();
-  const b = buildBuildings(track, env, data.id);
+  const mat = materialFactory(o.quality);
+  const b = buildBuildings(track, env, data.id, mat);
   group.add(b.group);
 
   o.onStage('Planting trees', 0.6);
   await frame();
-  const trees = buildTrees(track, env, painter, data.id, o.quality === 'high' ? 3600 : o.quality === 'medium' ? 2400 : 1100);
+  const trees = buildTrees(track, env, painter, data.id, o.quality === 'high' ? 3600 : o.quality === 'medium' ? 2400 : 1100, mat);
   group.add(trees.group);
 
   o.onStage('Building the circuit', 0.72);
   await frame();
-  const side = buildTrackside(track, painter, data.id, o.aniso);
+  const side = buildTrackside(track, painter, data.id, o.aniso, mat);
   group.add(side.group);
 
   o.onStage('Finishing touches', 0.88);
   await frame();
-  group.add(painter.toMesh(o.aniso));
+  group.add(painter.toMesh(o.aniso, mat));
   group.add(buildHorizon(track, data.id));
   plainShadows(group);
   const groundColor = new THREE.Color(GROUND.grass);
