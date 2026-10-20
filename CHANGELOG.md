@@ -6,6 +6,20 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+### Changed
+- **The middle of the screen is clear while you race.**
+  - The track map sits top right.
+  - The lap timer has the gap to your best lap right beside it, green when you're ahead and red
+    when behind.
+  - The medal target and live timing sit under the timer on the left.
+- **Smaller messages appear at the side and fade away**, under the map: personal bests, medals,
+  "cross the line to start the clock", leaderboard news and the lap summary.
+- **Only the big moments use the top centre**: the start lights, GO, track limits, wrong way and
+  your finish in multiplayer.
+- On phones: the timer is on the left; the buttons, map and messages are on the right; big moments
+  show in a band above the kart.
+- In multiplayer, race standings sit under the timer.
+
 ## [0.20.0] - 2026-10-20
 
 ### Changed

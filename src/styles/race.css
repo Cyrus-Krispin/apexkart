@@ -124,8 +124,11 @@
 .hud button { pointer-events: auto; }
 .hud .pw-k { color: var(--muted); }
 
-/* Lap panel: top left. Lap, the running time, S1/S2/S3, last and best. */
-.h-timing { position: absolute; top: var(--top); left: var(--l); width: 290px; background: var(--hud); border-radius: var(--radius); overflow: hidden; }
+/* Left column: the lap panel (lap, the running time with the gap to your best beside it, S1/S2/S3,
+   last and best), then the medal target, then live timing. */
+.h-left { position: absolute; top: var(--top); left: var(--l); width: var(--col, 290px); display: grid; gap: 8px; align-content: start; }
+.h-timing { background: var(--hud); border-radius: var(--radius); overflow: hidden; }
+.h-time-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-right: 10px; }
 .h-timing header { display: flex; align-items: center; gap: 12px; height: 32px; padding: 0 12px; background: rgba(6, 7, 8, 0.75); }
 .h-timing .pw-code { font-size: 19px; }
 .h-lapno { display: inline-flex; align-items: baseline; gap: 6px; }
@@ -151,10 +154,9 @@
 /* Ghost gap: top centre. You're the dot; the ghost of your best lap is the middle. */
 
 /* Top right: the next medal and how far off it you are, then the live timing tower. */
-.h-right { position: absolute; top: var(--top); right: var(--r); width: 268px; display: grid; gap: 6px; }
-.h-target { display: grid; justify-items: end; gap: 2px; padding: 8px 12px 9px; background: var(--hud); border-radius: var(--radius); }
+.h-target { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px; background: var(--hud); border-radius: var(--radius); }
 .h-target > .pw-k { display: inline-flex; align-items: center; gap: 7px; color: var(--text-2); }
-.h-tdl { font-size: 30px; font-weight: 600; letter-spacing: -0.04em; line-height: 1.05; }
+.h-tdl { font-size: 18px; font-weight: 500; letter-spacing: -0.03em; line-height: 1; }
 .h-tdl.fast { color: var(--green); }
 .h-tdl.slow { color: var(--yellow); }
 
@@ -179,14 +181,13 @@
 @keyframes h-flash { 0% { box-shadow: 0 0 0 2px var(--text); } 100% { box-shadow: 0 0 0 2px transparent; } }
 
 /* Lap card: the lap you just finished, held up on a pit board under the lap panel. */
-.h-lapcard { position: absolute; z-index: 2; left: var(--l); top: calc(var(--top) + 172px); width: 260px; transform: translateX(calc(-100% - var(--l) - 20px)); transition: transform 0.45s var(--ease); }
-.h-lapcard.show { transform: none; }
-.h-lapcard .pw-board { padding: 5px; }
-.h-lapcard .pw-board-in { padding: 2px 10px; }
-.h-lapcard .pw-board-row, .hp-main .pw-board-row { text-transform: uppercase; }
-.h-lapcard .pw-board-row { font-size: 24px; padding: 4px 0 3px; }
-.h-lapcard .pw-board-row .sm { font-size: 22px; }
-.h-lapcard .pw-board-row small, .hp-main .pw-board-row small { margin-left: 4px; font-family: var(--mono); font-weight: 400; font-style: normal; font-size: 0.55em; color: var(--muted); letter-spacing: 0; }
+.h-note.is-lap { width: 100%; padding: 0; background: none; box-shadow: none; text-transform: none; }
+.h-note.is-lap .pw-board { padding: 5px; }
+.h-note.is-lap .pw-board-in { padding: 2px 10px; }
+.h-note.is-lap .pw-board-row, .hp-main .pw-board-row { text-transform: uppercase; }
+.h-note.is-lap .pw-board-row { font-size: 22px; padding: 4px 0 3px; }
+.h-note.is-lap .pw-board-row .sm { font-size: 20px; }
+.h-note.is-lap .pw-board-row small, .hp-main .pw-board-row small { margin-left: 4px; font-family: var(--mono); font-weight: 400; font-style: normal; font-size: 0.55em; color: var(--muted); letter-spacing: 0; }
 .pw-board-row .g { color: var(--green); }
 .pw-board-row .x { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--yellow); }
 .lc-vs { font-family: var(--ui); font-size: 14px; letter-spacing: 0.1em; color: var(--muted); }
@@ -197,10 +198,10 @@
 .lc-secs .green { background: var(--green); color: #05170b; }
 .lc-secs .yellow { background: var(--yellow); color: var(--carbon); }
 
-.h-map { position: absolute; left: var(--l); bottom: var(--b); width: 180px; height: 180px; background: var(--hud); border-radius: var(--radius); }
+.h-map { position: absolute; top: var(--top); right: var(--r); width: var(--map); height: var(--map); background: var(--hud); border-radius: var(--radius); box-shadow: inset 0 0 0 1px var(--line); }
 .h-map canvas { display: block; width: 100%; height: 100%; }
-/* The one moving number: the gap to your best lap, on top of the map. Green ahead, red behind. */
-.h-dl { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); padding: 3px 10px 4px; border-radius: 4px; background: rgba(6, 7, 8, 0.88); font-size: 22px; font-weight: 600; letter-spacing: -0.03em; line-height: 1; white-space: nowrap; box-shadow: 0 0 0 1px var(--line-2); }
+/* The one moving number: the gap to your best lap, beside the lap time. Green ahead, red behind. */
+.h-dl { flex: none; padding: 3px 8px 4px; border-radius: 4px; background: rgba(6, 7, 8, 0.6); font-size: 21px; font-weight: 600; letter-spacing: -0.03em; line-height: 1; white-space: nowrap; }
 .h-dl.fast { color: var(--green); }
 .h-dl.slow { color: #ff5a4f; }
 
@@ -226,7 +227,7 @@
 .h-tools kbd { position: absolute; bottom: -9px; left: 50%; transform: translateX(-50%); height: 16px; min-width: 16px; padding: 0 4px; font-size: 9px; background: var(--carbon); }
 
 /* Start lights: five pairs of red, then all out and away */
-.h-lights { position: absolute; top: 15%; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; padding: 10px 14px; background: var(--carbon-2); border-radius: 6px; box-shadow: 0 12px 34px rgba(0, 0, 0, 0.55), inset 0 2px 0 #1d2026; }
+.h-lights { position: absolute; top: var(--top); left: 50%; transform: translateX(-50%); display: flex; gap: 10px; padding: 10px 14px; background: var(--carbon-2); border-radius: 6px; box-shadow: 0 12px 34px rgba(0, 0, 0, 0.55), inset 0 2px 0 #1d2026; }
 .h-lamp { display: grid; gap: 6px; padding: 6px; background: #15171c; border-radius: 6px; }
 .h-lamp i { width: 32px; height: 32px; border-radius: 50%; background: #2a0b0b; box-shadow: inset 0 0 6px #000; }
 .h-lamp.on i { background: radial-gradient(circle at 40% 35%, #ff9a90, #ff2a1f 55%, #a00800); box-shadow: 0 0 20px #ff2a1f, 0 0 4px #ff2a1f; }
@@ -234,7 +235,7 @@
 @keyframes h-away { to { opacity: 0; transform: translate(-50%, -14px); } }
 
 /* Broadcast banners: yellow and black for flags and notices, green for Go, green PB, medal colours */
-.h-banner { position: absolute; top: 30%; left: 0; right: 0; display: flex; justify-content: center; padding: 0 12px; pointer-events: none; clip-path: inset(0 100% 0 0); transition: clip-path 0.35s var(--ease); }
+.h-banner { position: absolute; z-index: 3; top: calc(var(--top) + 4px); left: 0; right: 0; display: flex; justify-content: center; padding: 0 12px; pointer-events: none; clip-path: inset(0 100% 0 0); transition: clip-path 0.35s var(--ease); }
 .h-banner.show { clip-path: inset(0 0 0 0); }
 .h-banner span {
   display: flex; align-items: center; gap: 14px; max-width: 100%; min-height: 54px; padding: 6px 26px; border-radius: var(--radius);
@@ -255,11 +256,16 @@
 .ghost-tag i { width: 4px; height: 14px; border-radius: 1px; }
 
 /* Toasts: race control messages under the ghost gap */
-.h-toasts { position: absolute; top: calc(var(--top) + 52px); left: 50%; transform: translateX(-50%); display: grid; gap: 6px; justify-items: center; width: max-content; max-width: calc(100% - 24px); }
-.h-toast { padding: 7px 14px 7px 12px; border-radius: 3px; background: var(--hud); box-shadow: inset 3px 0 0 var(--text-2); font-family: var(--ui); font-weight: 700; font-size: 15px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text); text-align: center; animation: h-rise 0.3s var(--ease); transition: opacity 0.5s, transform 0.5s; }
-.h-toast.is-warn { box-shadow: inset 3px 0 0 var(--yellow); color: var(--yellow); }
-.h-toast.is-gold { box-shadow: inset 3px 0 0 var(--purple); color: var(--purple-text); }
-.h-toast.out { opacity: 0; transform: translateY(-6px); }
+/* Notifications: everything that isn't a big moment (personal best, medals, "cross the line",
+   leaderboard news, the lap summary) stacks at the side under the map, slides in and fades. */
+.h-notes { position: absolute; z-index: 2; top: calc(var(--top) + var(--map) + 10px); right: var(--r); width: var(--notes, max(var(--map), 270px)); display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.h-note { max-width: 100%; padding: 8px 12px 8px 13px; border-radius: var(--radius); background: var(--hud); box-shadow: inset 3px 0 0 var(--note, var(--text-2)); font-family: var(--ui); font-weight: 700; font-size: 15px; letter-spacing: 0.04em; line-height: 1.25; text-transform: uppercase; color: var(--text); animation: h-note-in 0.35s var(--ease); transition: opacity 0.4s, transform 0.4s var(--ease); }
+.h-note.out { opacity: 0; transform: translateX(16px); }
+.h-note.is-pb { --note: var(--green); color: var(--green); }
+.h-note.is-medal { --note: var(--m, var(--gold)); }
+.h-note.is-gold { --note: var(--purple); color: var(--purple-text); }
+.h-note.is-warn { --note: var(--yellow); color: var(--yellow); }
+@keyframes h-note-in { from { opacity: 0; transform: translateX(24px); } }
 @keyframes h-rise { from { opacity: 0; transform: translateY(6px); } }
 .h-loading { position: absolute; bottom: calc(var(--b) + 110px); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 5px 12px; border-radius: 3px; background: var(--hud); font-family: var(--ui); font-weight: 700; font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-2); white-space: nowrap; }
 .h-loading::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--yellow); animation: live 1.2s infinite; }
@@ -329,14 +335,14 @@
   .hud[data-controls='simple'] .ht-l [data-touch] { width: 88px; }
   .ht-brake { width: 120px; height: 92px; font-size: 17px; }
 
-  .h-tools { bottom: calc(var(--b) + 160px); }
+  .h-tools { top: var(--top); bottom: auto; }
   .h-tools kbd, .hp-hint { display: none; }
-  .h-map { bottom: calc(var(--b) + 160px); width: 150px; height: 150px; }
+  .h-map { top: calc(var(--top) + 54px); }
+  .h-notes { top: calc(var(--top) + 54px + var(--map) + 8px); }
   .h-speed { bottom: calc(var(--b) + 2px); }
 }
 
 @media (max-width: 900px) {
-  .h-lapcard { display: none; }
   .h-banner span { font-size: 24px; min-height: 46px; }
   .h-banner.is-go span { font-size: 54px; padding: 2px 44px 4px; }
   .h-banner.is-info span, .h-banner.is-warn span { font-size: 19px; }
@@ -364,27 +370,22 @@
 
 /* Medium widths: no room between the side panels, so the ghost gap goes under the lap panel */
 @media (min-width: 641px) and (max-width: 1079px) {
-  .h-lapcard { top: calc(var(--top) + 208px); }
-  .h-toasts { top: 44%; }
+  .hud { --col: 250px; --notes: 240px; }
 }
-/* Desktop: the minimap sits top centre, so the layout reads at a glance. The ghost gap, toasts,
-   start lights and banners stack under it, clear of the kart. */
+/* Desktop: the lap panel and live timing down the left, the map top right with notifications
+   under it, and the top centre kept for the big moments (lights, GO, warnings). The middle of the
+   screen stays clear for driving. */
 @media (min-width: 900px) and (hover: hover) {
-  .hud { --map: clamp(200px, 17vw, 260px); }
-  .h-map { top: var(--top); bottom: auto; left: 50%; transform: translateX(-50%); width: var(--map); height: var(--map); box-shadow: inset 0 0 0 1px var(--line); }
-  .h-lights { top: calc(var(--top) + var(--map) + 56px); }
-  .h-banner { top: calc(var(--top) + var(--map) + 62px); } /* GO takes the lights' place */
-  .h-toasts { top: auto; bottom: calc(var(--b) + 132px); } /* race control, along the bottom above the speed */
+  .hud { --map: clamp(200px, 16vw, 250px); }
 }
-@media (min-width: 900px) and (max-width: 1079px) and (hover: hover) {
-  .h-lights { top: calc(var(--top) + var(--map) + 10px); }
-  .h-banner { top: calc(var(--top) + var(--map) + 16px); }
-}
+/* Multiplayer: the race standings go under the lap panel (the map has the top right). */
+.hud .mp-standings { top: calc(var(--top) + 158px); right: auto; left: var(--l); width: var(--col, 290px); }
 
 /* Phones: narrow upright, or short when held sideways */
 @media (max-width: 640px), (pointer: coarse) and (max-height: 520px) {
   .race { --gut: 10px; }
-  .h-timing { width: min(186px, calc(50vw - 18px)); }
+  .hud { --col: min(186px, calc(50vw - 18px)); --map: 112px; --notes: min(176px, calc(50vw - 18px)); }
+  .hud .mp-standings { top: calc(var(--top) + 98px); }
   .h-timing header { height: 26px; gap: 8px; padding: 0 8px; }
   .h-timing .pw-code { font-size: 16px; }
   .h-lapno b { font-size: 13px; }
@@ -401,22 +402,23 @@
   .h-tools { top: var(--top); right: var(--r); bottom: auto; gap: 4px; }
   .h-tools button { width: 38px; height: 38px; }
   .h-tools kbd { display: none; }
-  .h-attrib { top: calc(var(--top) + 44px); bottom: auto; left: auto; right: var(--r); transform: none; width: 166px; font-size: 7.5px; text-align: right; white-space: normal; }
-  .h-right { top: calc(var(--top) + 76px); width: 150px; }
+  .h-attrib { z-index: 1; top: calc(var(--top) + 54px + var(--map) - 13px); bottom: auto; left: auto; right: calc(var(--r) + 6px); transform: none; width: calc(var(--map) - 12px); font-size: 6.5px; text-align: right; white-space: normal; }
   .h-tower { display: none; }
   .h-target { padding: 6px 9px 7px; }
   .h-target > .pw-k { font-size: 10.5px; gap: 5px; letter-spacing: 0.1em; }
   .h-tdl { font-size: 24px; }
 
-  .h-map { left: var(--l); bottom: auto; width: 96px; height: 96px; }
-  .h-lights { top: 28%; gap: 6px; padding: 7px 9px; }
+  .h-lights { gap: 6px; padding: 7px 9px; }
   .h-lamp { gap: 4px; padding: 4px; }
   .h-lamp i { width: 20px; height: 20px; }
   .h-speed-box { padding: 4px 12px 6px; }
   .h-speed-num b { font-size: 30px; }
   .h-segs i { width: 4px; height: 7px; }
   .h-hint { font-size: 13px; }
-  .h-toast { font-size: 13.5px; padding: 6px 12px 6px 10px; }
+  .h-note { font-size: 12.5px; padding: 6px 9px 6px 10px; }
+  .h-note.is-lap .pw-board-row { font-size: 17px; }
+  .h-note.is-lap .pw-board-row .sm { font-size: 16px; }
+  .h-dl { font-size: 15px; padding: 2px 6px 3px; }
   .h-banner span { font-size: 22px; min-height: 42px; padding: 5px 18px; }
   .h-banner.is-info span, .h-banner.is-warn span { font-size: 17px; }
   .h-banner.is-warn span { padding: 5px 0; }
@@ -432,10 +434,8 @@
 /* Upright phones: timing down the left, tools and the medal target on the right, controls along
    the bottom with the speed just above them */
 @media (max-width: 640px) {
-  .h-map { top: calc(var(--top) + 176px); }
-  .h-lights { top: 33%; }
-  .h-banner { top: 33%; }
-  .h-toasts { top: 45%; }
+  /* Big moments in a band just under the top display, above the kart */
+  .h-lights, .h-banner { top: calc(var(--top) + 150px); }
   .h-loading { bottom: calc(var(--b) + 250px); }
   .hp-cols { grid-template-columns: 1fr; gap: 14px; }
 }
@@ -453,12 +453,11 @@
 /* A phone held sideways: the speed sits low in the middle, on the road between the thumbs, and
    the briefing goes into two columns with START under the right thumb */
 @media (pointer: coarse) and (max-height: 520px) {
-  .h-map { top: calc(var(--top) + 140px); width: 80px; height: 80px; }
-  .h-toasts { top: calc(var(--top) + 40px); }
+  .hud { --map: 92px; }
   .h-speed { bottom: calc(env(safe-area-inset-bottom, 0px) + 10px); }
   .h-loading { bottom: calc(var(--b) + 90px); }
-  .h-lights { top: 20%; }
-  .h-banner { top: 32%; }
+  .h-lights { top: var(--top); } /* room between the side columns */
+  .h-banner { top: calc(var(--top) + 4px); }
   .hp-head h2 { font-size: 30px; }
   .hp-main .pw-board-row { font-size: 21px; }
   .hp-main .pw-board-row .sm { font-size: 18px; }
@@ -477,8 +476,4 @@
   .io-foot { position: static; margin: 0; padding: 8px max(var(--px), env(safe-area-inset-right, 0px)) max(10px, env(safe-area-inset-bottom, 0px)) 0; background: none; border: 0; gap: 8px; }
   .io-go { height: 54px; font-size: 22px; }
 }
-/* Multiplayer: the race overlay's standings take the top right; the tool buttons go below them */
-@media (pointer: coarse) and (max-height: 520px) and (min-width: 641px) {
-  .hud:has(> .mp-overlay) .h-tools { top: calc(var(--top) + 54px); }
-  .hud:has(> .mp-overlay) .h-attrib { top: calc(var(--top) + 98px); }
-}
+
