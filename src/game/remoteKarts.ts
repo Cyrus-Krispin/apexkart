@@ -17,7 +17,7 @@
 // it can't be trusted, or it isn't racing: see `ghostly()`. Every rule uses local facts only
 // (pose age, finish events, jumps, speed), so no protocol change was needed.
 import * as THREE from 'three';
-import { buildKart, type KartPhysics, type KartVisual } from './kart';
+import { buildKart, poseDriver, type KartPhysics, type KartVisual } from './kart';
 import type { PoseTuple } from '../shared/room';
 
 const MAX_EXTRAPOLATE = 0.35; // s; beyond this we just hold the last known motion
@@ -358,6 +358,7 @@ export class RemoteKarts {
         k.wheelSpin += (fwd / 0.135) * dt;
         for (const w of v.wheels) w.rotation.x = k.wheelSpin;
         for (const f of v.frontPivots) f.rotation.y = -s.steer * 1.2;
+        poseDriver(v, s.steer, s.yaw * fwd, dt);
         v.body.rotation.z += (THREE.MathUtils.clamp(s.yaw * fwd * 0.004, -0.07, 0.07) - v.body.rotation.z) * blend;
       }
       if (!v.root.visible) v.root.visible = true;
@@ -540,6 +541,8 @@ function cloneKart(t: KartVisual): KartVisual {
     frontPivots: t.frontPivots.map((p) => map.get(p) as THREE.Group),
     wheels: t.wheels.map((w) => map.get(w) as THREE.Mesh),
     materials: [],
+    steering: t.steering && map.get(t.steering),
+    helmet: t.helmet && map.get(t.helmet),
   };
 }
 

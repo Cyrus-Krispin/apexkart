@@ -6,6 +6,16 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+### Changed
+- **Ghosts are a clean see-through outline** in their colour with a soft glowing edge, instead of a
+  jumble of parts showing through each other. They fade out near the camera and no longer turn
+  into a glowing blob at night.
+- **Karts have more detail**: the steering wheel turns, the driver's helmet leans into corners,
+  there's a number plate on the back, the tyres have tread you can see spinning, and a small red
+  rear light glows at night.
+- **Karts draw much faster**: each kart is 7 pieces instead of 39 and each ghost 2 instead of 38,
+  which helps most in multiplayer and on phones.
+
 ## [0.28.0] - 2026-10-21
 
 ### Changed
