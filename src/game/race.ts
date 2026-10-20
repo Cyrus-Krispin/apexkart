@@ -18,7 +18,7 @@ import { rotationLabel } from '../ui/trackArt';
 import { analyzeShape } from '../track/shape';
 import { decodeGhost, encodeGhost, sampleGhost, GHOST_DT, type GhostData, type GhostFrame } from '../shared/ghost';
 import type { TrackData } from '../track/osm';
-import { api, formatMs, type BoardResponse, type Dir, type Driver } from '../net/api';
+import { api, formatMs, type BoardEntry, type BoardResponse, type Dir, type Driver } from '../net/api';
 import { gridPose, type RaceContext, type RaceMode } from './raceMode';
 import { speedProfile } from './speedProfile';
 
@@ -52,6 +52,29 @@ interface Ghost {
   dt: number;
   visual: KartVisual;
   tag: HTMLDivElement;
+  /** Its lap time (ms) every `step` metres from the line (for the live delta), and the lap time. */
+  splits: number[];
+  step: number;
+  ms: number;
+}
+
+/** A lap to measure the live delta against: its time every `step` metres from the line. */
+type ChaseRef = { splits: number[]; step: number; ms: number };
+/** Ghost laps are timed every 2 m for the delta (their frames are 0.6-1.4 m apart). */
+const CHASE_STEP = 2;
+
+/** Time trials: whose lap the live delta is against (the pause menu's Chase). */
+type Chase = 'pb' | 'medal' | 'above' | 'rival';
+const CHASE_KEY = 'ak:chase';
+
+/** The device's choice. A challenge's rival is per race, so it's never the saved one. */
+function chasePref(): Chase {
+  try {
+    const v = localStorage.getItem(CHASE_KEY);
+    return v === 'medal' || v === 'above' ? v : 'pb';
+  } catch {
+    return 'pb';
+  }
 }
 
 const STEP = 1 / 120;
@@ -143,6 +166,10 @@ export class Race {
   private cam = { ox: 0, oy: 0, oz: 0, vx: 0, vy: 0, vz: 0, fov: 0, fovV: 0, shake: 0, side: 0, fovBase: 62 };
   private showGhosts = localStorage.getItem('ak:ghosts') !== '0';
   private ghosts: Ghost[] = [];
+  /** Time trials: the lap to chase (FEEL-17), the ghost key it resolves to now, and its name. */
+  private chase: Chase = 'pb';
+  private chaseKey = 'pb';
+  private chaseLabel = 'Your best';
   private board: BoardResponse | null = null;
   private boardTimer = 0;
   private hintShown = false;
@@ -160,6 +187,7 @@ export class Race {
     this.pbKey = `ak:pb:${opts.track.id}:${opts.dir}`;
     localStorage.removeItem('ak:style'); // the satellite world is gone; every world is the stylised one
     if (opts.mode?.ghosts === false) this.showGhosts = false;
+    this.chase = opts.mode ? 'pb' : opts.rival ? 'rival' : chasePref(); // a challenge starts on its rival
     this.pb = this.loadPB();
     this.bestSectors = this.pb?.sectors.slice() ?? [];
 
@@ -637,7 +665,7 @@ export class Race {
       const r = await api.ghost(this.opts.track.id, this.opts.dir, pid);
       if (!r.ghost || this.disposed) return;
       this.rival = { name: r.name, ms: r.ms, beaten: false };
-      this.setGhost('rival', `${r.name} · challenge`, r.color, r.ghost);
+      this.setGhost('rival', `${r.name} · challenge`, r.color, r.ghost, r.ms);
     } catch {
       /* race on without it */
     }
@@ -655,6 +683,7 @@ export class Race {
     if (a === 'pause') this.togglePause();
     if (a === 'mute') this.audio.toggleMute();
     if (a === 'ghosts') this.toggleGhosts();
+    if (a === 'chase') this.cycleChase();
     if (a === 'cam') this.camMode = (this.camMode + 1) % CAMS.length;
     if (a === 'quality') {
       const order: QualitySetting[] = ['auto', 'high', 'medium', 'low'];
@@ -726,7 +755,7 @@ export class Race {
     const q = this.qualitySetting === 'auto' ? `Auto · ${this.pipeline.quality}` : this.qualitySetting;
     const night = this.atmos?.time === 'night';
     const time = this.timeSetting === 'live' ? `Live · ${night ? 'Night' : 'Day'}` : night ? 'Night' : 'Day';
-    this.hud.toggles({ controls: SCHEME_LABEL[this.input.scheme], muted: this.audio.muted, ghosts: this.showGhosts, cam: CAMS[this.camMode].label, quality: q, night, time });
+    this.hud.toggles({ controls: SCHEME_LABEL[this.input.scheme], muted: this.audio.muted, ghosts: this.showGhosts, cam: CAMS[this.camMode].label, quality: q, night, time, chase: this.opts.mode ? null : this.chaseLabel });
   }
 
   private resetToGrid() {
@@ -1163,7 +1192,7 @@ export class Race {
       this.savePB();
       this.hud.best(ms);
       this.hud.banner(prevPb === null ? 'First timed lap' : 'Personal best', 'pb', 2.2);
-      this.setGhost('pb', 'Your best', this.opts.driver.color, this.pb.ghost);
+      this.setGhost('pb', 'Your best', this.opts.driver.color, this.pb.ghost, ms);
       this.nextSyncAt = 0;
       this.submit();
     }
@@ -1288,9 +1317,12 @@ export class Race {
   private async syncBoardGhosts() {
     const me = this.opts.driver.pid;
     const top = (this.board?.entries ?? []).filter((e) => e.pid !== me && e.pid !== this.opts.rival).slice(0, 3);
+    // The lap you chase comes too, wherever it is on the board.
+    const chase = this.updateChase().entry;
+    if (chase && !top.includes(chase)) top.push(chase);
     const wanted = new Set(top.map((e) => `${e.pid}:${e.ms}`));
     for (const g of this.ghosts.filter((g) => g.key !== 'pb' && g.key !== 'rival' && !wanted.has(g.key))) this.removeGhost(g.key);
-    if (this.pb && !this.ghosts.some((g) => g.key === 'pb')) this.setGhost('pb', 'Your best', this.opts.driver.color, this.pb.ghost);
+    if (this.pb && !this.ghosts.some((g) => g.key === 'pb')) this.setGhost('pb', 'Your best', this.opts.driver.color, this.pb.ghost, this.pb.ms);
     for (const e of top) {
       const key = `${e.pid}:${e.ms}`;
       if (this.ghosts.some((g) => g.key === key)) continue;
@@ -1298,7 +1330,7 @@ export class Race {
       try {
         const r = await api.ghost(this.opts.track.id, this.opts.dir, e.pid);
         this.ghosts = this.ghosts.filter((g) => g.key !== key);
-        if (r.ghost && !this.disposed) this.setGhost(key, `P${e.rank} ${e.name}`, e.color, r.ghost);
+        if (r.ghost && !this.disposed) this.setGhost(key, `P${e.rank} ${e.name}`, e.color, r.ghost, e.ms);
       } catch {
         this.ghosts = this.ghosts.filter((g) => g.key !== key);
       }
@@ -1318,7 +1350,7 @@ export class Race {
     return { root, body: root, frontPivots: [], wheels: [], materials: [] };
   }
 
-  private setGhost(key: string, label: string, color: string, data: GhostData) {
+  private setGhost(key: string, label: string, color: string, data: GhostData, ms?: number) {
     this.removeGhost(key);
     const visual = this.ghostVisual(color);
     this.scene.add(visual.root);
@@ -1328,7 +1360,10 @@ export class Race {
     dot.style.background = color;
     tag.append(dot, label);
     this.hud.tags.appendChild(tag);
-    this.ghosts.push({ key, label, color, frames: decodeGhost(data), dt: data.dt, visual, tag });
+    const frames = decodeGhost(data);
+    const lapMs = ms ?? Math.round((frames.length - 1) * data.dt * 1000);
+    this.ghosts.push({ key, label, color, frames, dt: data.dt, visual, tag, splits: this.ghostSplits(frames, data.dt), step: CHASE_STEP, ms: lapMs });
+    this.updateChase();
   }
 
   private removeGhost(key: string) {
@@ -1337,6 +1372,125 @@ export class Race {
     if (g.visual) this.scene.remove(g.visual.root);
     g.tag?.remove();
     this.ghosts = this.ghosts.filter((x) => x !== g);
+  }
+
+  // ------------------------------------------------------------------ chase a target (FEEL-17)
+
+  /**
+   * A ghost lap's time (ms) every CHASE_STEP metres from the line: its frames walked along the lap
+   * with continuous progress (as judgeLap does), each split interpolated between the two frames
+   * either side of it. About a millisecond for a minute's lap.
+   */
+  private ghostSplits(frames: GhostFrame[], dt: number): number[] {
+    const t = this.track;
+    const L = t.length;
+    const out: number[] = [];
+    if (frames.length < 2) return out;
+    let near = t.closest(frames[0].x, frames[0].z);
+    let prog = near.s > L / 2 ? near.s - L : near.s; // metres from the line, continuous
+    let prevS = near.s;
+    if (prog >= 0) out.push(0); // the first frame is (just) past the line
+    for (let k = 1; k < frames.length; k++) {
+      near = t.follow(frames[k].x, frames[k].z, near.i);
+      let ds = near.s - prevS;
+      if (ds > L / 2) ds -= L;
+      else if (ds < -L / 2) ds += L;
+      prevS = near.s;
+      const from = prog;
+      prog += ds;
+      for (let b = out.length * CHASE_STEP; b <= prog && b < L - 5; b = out.length * CHASE_STEP) out.push((k - 1 + (b - from) / Math.max(1e-6, prog - from)) * dt * 1000);
+    }
+    return out;
+  }
+
+  /**
+   * What the chase choice points at now: the ghost's key, the board entry to fetch for it, and how
+   * it reads in the pause menu. Without one (no board yet, or nobody above you) it's your best.
+   */
+  private chaseTarget(): { key: string; label: string; entry?: BoardEntry } {
+    // Falling back to your best says why.
+    const best = (why?: string) => ({ key: 'pb', label: why ? (this.pb ? `${why} · your best` : why) : this.pb ? 'Your best' : 'Your best · no lap yet' });
+    if (this.opts.mode || this.chase === 'pb') return best();
+    if (this.chase === 'rival') return this.rival ? { key: 'rival', label: `Rival · ${this.rival.name}` } : best();
+    const me = this.opts.driver.pid;
+    const all = this.board?.entries ?? [];
+    const others = all.filter((e) => e.pid !== me);
+    if (!others.length) return best('No times yet');
+    // A challenge's rival on the board is the rival's ghost already.
+    const ghost = (e: BoardEntry, label: string) => (e.pid === this.opts.rival && this.rival ? { key: 'rival', label } : { key: `${e.pid}:${e.ms}`, label, entry: e });
+    if (this.chase === 'medal') {
+      // The board lap closest to the next medal's time (record pace once they're all won).
+      const have = earnedMedal(this.opts.track.id, this.opts.dir);
+      const next = MEDALS[(have ? MEDALS.indexOf(have) : -1) + 1] ?? null;
+      const goal = targets(all[0]?.ms, this.opts.track.lengthM)[next ?? 'platinum'];
+      const e = others.reduce((a, b) => (Math.abs(b.ms - goal) < Math.abs(a.ms - goal) ? b : a));
+      return ghost(e, `${next ? MEDAL_NAME[next] : 'Record'} · P${e.rank} ${e.name}`);
+    }
+    // The driver one place above you; off the board, the slowest lap faster than your best.
+    const mine = all.find((e) => e.pid === me);
+    const myMs = this.pb?.ms ?? Infinity;
+    const above = others.filter((e) => (mine ? e.rank < mine.rank : e.ms < myMs)).pop();
+    return above ? ghost(above, `P${above.rank} ${above.name}`) : best('You lead');
+  }
+
+  /** Re-resolve the chase target (the board, your best or a ghost changed): key, label, the tag ring. */
+  private updateChase() {
+    const t = this.chaseTarget();
+    const changed = t.key !== this.chaseKey || t.label !== this.chaseLabel;
+    this.chaseKey = t.key;
+    this.chaseLabel = t.label;
+    for (const g of this.ghosts) g.tag?.classList.toggle('chase', !this.opts.mode && g.key !== 'pb' && g.key === t.key);
+    if (changed) {
+      this.hud.deltaFor(t.key === 'pb' ? 'your best lap' : t.label);
+      this.syncToggles();
+    }
+    return t;
+  }
+
+  /** The pause menu's Chase: Your best, Next medal, the place above you, and a challenge's rival. */
+  private cycleChase() {
+    if (this.opts.mode) return;
+    const all: Chase[] = this.rival ? ['pb', 'medal', 'above', 'rival'] : ['pb', 'medal', 'above'];
+    this.chase = all[(Math.max(0, all.indexOf(this.chase)) + 1) % all.length]; // a rival that never came reads as Your best
+    if (this.chase !== 'rival') {
+      try {
+        localStorage.setItem(CHASE_KEY, this.chase);
+      } catch {
+        /* this race only */
+      }
+    }
+    this.syncBoardGhosts(); // fetches its ghost if it isn't here yet (the row shows the new target)
+  }
+
+  /** The lap being chased, once its ghost is here. Your best without its ghost (the board offline, a
+   *  multiplayer race) uses the 10 m splits saved with it. */
+  private chaseRef(): ChaseRef | null {
+    for (const g of this.ghosts) if (g.key === this.chaseKey && g.splits) return g;
+    if (this.chaseKey !== 'pb' || !this.pb) return null;
+    if (this.pbRef.pb !== this.pb) this.pbRef = { pb: this.pb, ref: { splits: this.pb.splits, step: SPLIT, ms: this.pb.ms } };
+    return this.pbRef.ref;
+  }
+  private pbRef: { pb: LocalPB | null; ref: ChaseRef | null } = { pb: null, ref: null };
+
+  /**
+   * The live gap to the chased lap: now against its time at this exact point, interpolated between
+   * its splits. (Until v0.25 it compared against your best's split at the start of the current
+   * 10 m, which read up to ~0.8 s slow and snapped back every 10 m.) Physics time and position, so
+   * the two match. Nothing for the first 20 m.
+   */
+  private chaseDelta(): number | null {
+    const ref = this.chaseRef();
+    if (!ref || this.lapStart === null) return null;
+    const s = this.phys.s;
+    const st = ref.step;
+    const si = Math.floor(s / st);
+    const a = ref.splits[si];
+    if (s < 20 || a === undefined) return null;
+    const next = ref.splits[si + 1];
+    const b = next ?? ref.ms; // the last few metres run to the line
+    const sb = next !== undefined ? (si + 1) * st : this.track.length;
+    const at = a + ((b - a) * (s - si * st)) / Math.max(1e-6, sb - si * st);
+    return ((this.simT - this.lapStart) * 1000 - at) / 1000;
   }
 
   // ------------------------------------------------------------------ render
@@ -1533,9 +1687,7 @@ export class Race {
     const L = this.track.length;
     if (lapT >= 0) {
       this.hud.lapTime(lapT * 1000, this.invalid);
-      const si = Math.floor(p.s / SPLIT);
-      if (this.pb?.splits[si] !== undefined && si < this.splits.length && si > 1) this.hud.delta((lapT * 1000 - this.pb.splits[si]) / 1000);
-      else this.hud.delta(null);
+      this.hud.delta(this.chaseDelta());
       const cur = this.sectorTimes.length;
       const prog = THREE.MathUtils.clamp((p.s - (cur * L) / 3) / (L / 3), 0, 1);
       this.hud.sectors(this.sectorTimes, this.sectorColors, cur, prog);

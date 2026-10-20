@@ -532,3 +532,15 @@
 @media (max-width: 640px), (pointer: coarse) and (max-height: 520px) {
   .h-relap { margin-right: -8px; padding: 0 10px 0 10px; }
 }
+
+/* ---------- Lane G (time trial): Chase in the pause menu (whose lap the gap is to), and the ring on
+   that ghost's tag. The value can be a long name: it gives way to the label, with an ellipsis. */
+.hp-toggles [data-el='chaseToggle'] { grid-template-columns: 20px auto minmax(0, 1fr) 10px; }
+.hp-toggles [data-el='chaseToggle'] b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+.ghost-tag.chase { box-shadow: inset 0 0 0 1.5px var(--yellow); }
+/* Phones: the lap time and the gap beside it fit the lap panel (the gap ran ~18px past its edge). */
+@media (max-width: 640px), (pointer: coarse) and (max-height: 520px) {
+  .h-time-row { gap: 5px; padding-right: 6px; }
+  .h-time { font-size: 23px; }
+  .h-dl { font-size: 14px; padding: 2px 5px 3px; }
+}

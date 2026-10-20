@@ -31,6 +31,7 @@ const ICON = {
   sound: '<svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path d="M16 8.5a5 5 0 010 7M18.5 6a8.5 8.5 0 010 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   left: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   right: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  flag: '<svg viewBox="0 0 24 24" width="18" height="18"><path d="M6 21V4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M6 4.5h11.5l-2.6 4 2.6 4H6" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>',
   reset: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.5 9.5A7 7 0 1 1 5 14" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/><path d="M4.5 4.5v5h5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 };
 
@@ -162,6 +163,7 @@ export class Hud {
                 <button data-act="controls" data-el="controlsToggle"></button>
                 <button data-act="mute" data-el="muteToggle"></button>
                 <button data-act="ghosts" data-el="ghostToggle"></button>
+                <button data-act="chase" data-el="chaseToggle" hidden></button>
                 <button data-act="cam" data-el="camToggle"></button>
                 <button data-act="quality" data-el="qualityToggle"></button>
                 <button data-act="time" data-el="timeToggle"></button>
@@ -206,11 +208,16 @@ export class Hud {
     this.$.time.classList.toggle('invalid', invalid);
   }
 
-  /** The gap to your best lap: one number beside the lap time, green when you're ahead, red behind. */
+  /** Whose lap the gap beside the lap time is to (its tooltip). */
+  deltaFor(label: string) {
+    this.$.delta.title = `Gap to ${label}`;
+  }
+
+  /** The gap to the lap you chase (your best unless you pick another): one number beside the lap time, green when you're ahead, red behind. */
   delta(seconds: number | null) {
     this.$.delta.hidden = seconds === null;
     if (seconds === null) return;
-    this.text('delta', signed(seconds, 2));
+    this.text('delta', signed(seconds, Math.abs(seconds) >= 9.995 ? 1 : 2)); // never wider than +9.99
     this.cls('delta', `h-dl mono ${seconds < 0 ? 'fast' : 'slow'}`);
   }
 
@@ -429,12 +436,18 @@ export class Hud {
     }
   }
 
-  toggles(o: { controls: string; muted: boolean; ghosts: boolean; cam: string; quality: string; night: boolean; time: string }) {
+  /** chase: whose lap the gap is to (time trials; null hides the row). */
+  toggles(o: { controls: string; muted: boolean; ghosts: boolean; cam: string; quality: string; night: boolean; time: string; chase: string | null }) {
     const row = (icon: string, label: string, value: string, off = false) =>
       `${icon}<span>${label}</span><b class="${off ? 'off' : ''}">${escapeHtml(value)}</b><i aria-hidden="true">›</i>`;
     this.$.controlsToggle.innerHTML = row(ICON.wheel, 'Controls', o.controls);
     this.$.muteToggle.innerHTML = row(ICON.sound, 'Sound', o.muted ? 'Off' : 'On', o.muted);
     this.$.ghostToggle.innerHTML = row(ICON.ghost, 'Ghosts', o.ghosts ? 'On' : 'Off', !o.ghosts);
+    this.$.chaseToggle.hidden = o.chase === null;
+    if (o.chase !== null) {
+      this.$.chaseToggle.innerHTML = row(ICON.flag, 'Chase', o.chase);
+      this.$.chaseToggle.title = `The gap beside the lap time is to: ${o.chase}`;
+    }
     this.$.camToggle.innerHTML = row(ICON.cam, 'Camera', o.cam);
     this.$.qualityToggle.innerHTML = row(ICON.gauge, 'Graphics', o.quality);
     this.$.timeToggle.innerHTML = row(o.night ? ICON.moon : ICON.sun, 'Time of day', o.time);
