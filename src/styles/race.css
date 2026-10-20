@@ -212,12 +212,6 @@
 .hp-toggles .hp-wide { grid-column: 1 / -1; }
 .hp-hint { margin-top: 18px; text-align: center; }
 
-.h-turn { position: absolute; inset: 0; z-index: 1; display: grid; place-content: center; justify-items: center; gap: 12px; padding: 24px; text-align: center; background: var(--night); pointer-events: auto; }
-.h-turn svg { color: var(--signal); animation: turnphone 2s var(--ease) infinite; }
-.h-turn h2 { margin: 6px 0 0; font-size: 28px; color: var(--night-text); }
-.h-turn p { margin: 0; max-width: 300px; font-size: 14px; color: var(--night-muted); }
-.h-turn .btn { margin-top: 10px; }
-@keyframes turnphone { 0%, 25% { transform: rotate(0); } 60%, 100% { transform: rotate(-90deg); } }
 
 .h-touch { display: none; }
 @media (hover: none) and (pointer: coarse) {
@@ -236,13 +230,9 @@
   /* Simple: bigger steer buttons, one brake under the right thumb */
   .hud[data-controls='simple'] .ht-l [data-touch] { width: 84px; height: 84px; }
   .ht-brake { width: 116px; height: 84px; }
-  /* Tilt: a big brake pad under the right thumb, and Recentre */
-  .ht-pad { width: min(36vw, 250px); height: min(56vh, 220px); font-size: 15px; }
-  .ht-recentre { height: 34px; padding: 0 12px; background: rgba(17, 17, 16, 0.55); border: 1px solid rgba(242, 238, 229, 0.28); color: var(--night-text); font-family: var(--mono); font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
   .h-tools { bottom: 250px; }
   .h-tools kbd { display: none; }
   .h-speed { bottom: 132px; }
-  .hud[data-controls='tilt'] .h-speed { bottom: 22px; }
 }
 @media (max-width: 900px) {
   .intro-ov { grid-template-columns: 1fr; background: rgba(17, 17, 16, 0.94); }
@@ -257,7 +247,7 @@
   .h-banner.go span { font-size: 42px; padding: 4px 40px; }
   .h-banner.info span { font-size: 16px; }
 }
-/* Phones: narrow in portrait, short when held sideways (every race on a phone) */
+/* Phones: narrow in portrait, short when held sideways */
 @media (max-width: 640px), (pointer: coarse) and (max-height: 520px) {
   .h-timing { transform: scale(0.66); transform-origin: top left; top: 10px; left: 10px; }
   .h-tower { display: none; }
@@ -279,7 +269,7 @@
 }
 /* A phone held sideways: the speed sits low in the middle, on the road between the thumbs, clear of the kart */
 @media (pointer: coarse) and (max-height: 520px) {
-  .h-speed, .hud[data-controls='tilt'] .h-speed { bottom: 10px; }
+  .h-speed { bottom: 10px; }
   /* Briefing in two columns: the circuit and controls on the left, start on the right */
   .intro-ov { grid-template-columns: minmax(0, 1fr) minmax(250px, 38%); grid-template-rows: minmax(0, 1fr); background: rgba(17, 17, 16, 0.94); }
   .io-panel { padding: 12px 18px; }

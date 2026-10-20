@@ -6,6 +6,13 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+### Changed
+- Phones can race either way up again. Starting a race no longer goes full screen or asks you to
+  turn the phone sideways. Held sideways, the briefing and the race still lay out to fit.
+
+### Removed
+- **Tilt steering.** If you had picked it, you're back on Simple.
+
 ## [0.14.0] - 2026-10-20
 
 ### Added

@@ -27,7 +27,6 @@ export interface IntroOptions {
 function controlsHelp(s: ControlScheme): string {
   const keys = (pairs: [string, string][]) =>
     `<span class="io-keys">${pairs.map(([k, what]) => `<span>${k.split(' ').map((x) => `<kbd>${x}</kbd>`).join('')} ${what}</span>`).join('')}</span>`;
-  if (s === 'tilt') return 'Hold the phone sideways and tilt it like a steering wheel. Hold the right side of the screen to brake. The kart accelerates by itself.';
   if (touchDevice())
     return s === 'simple'
       ? 'The kart accelerates by itself. Steer with ◀ ▶ and brake on the right. Hold Brake when stopped to reverse.'
@@ -149,8 +148,7 @@ export class RaceIntro {
       e.stopPropagation();
       o.onBack();
     });
-    // On click, not pointerdown: a touch only counts as a user gesture once it lifts, and the start
-    // may need one (Tilt asks for motion access and full screen).
+    // On click, not pointerdown, so a touch that starts a scroll doesn't start the race.
     this.el.addEventListener('click', (e) => {
       const t = e.target as HTMLElement;
       if (t.closest('input, label, .io-back, .io-time, .io-ctl')) return;
@@ -161,10 +159,10 @@ export class RaceIntro {
     setTimeout(() => this.ready(), 5000);
   }
 
-  /** Show a scheme as picked, with its controls (or a note, e.g. why Tilt didn't start). */
-  setControls(s: ControlScheme, note?: string) {
+  /** Show a scheme as picked, with its controls. */
+  setControls(s: ControlScheme) {
     this.markControls(s);
-    this.help.innerHTML = note ? `<b>${escapeHtml(note)}</b> ${controlsHelp(s)}` : controlsHelp(s);
+    this.help.innerHTML = controlsHelp(s);
   }
 
   stage(label: string, frac: number) {

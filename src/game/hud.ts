@@ -37,14 +37,10 @@ const TOUCH: Record<ControlScheme, string> = {
   simple: `
     <div class="ht-l"><div data-touch="left" role="button" aria-label="Steer left">◀</div><div data-touch="right" role="button" aria-label="Steer right">▶</div></div>
     <div class="ht-r"><div data-touch="brake" role="button" class="ht-brake">Brake</div></div>`,
-  tilt: `
-    <div class="ht-l"><button data-act="recentre" class="ht-recentre" title="Straight ahead is how you hold the phone now">Recentre</button></div>
-    <div class="ht-r"><div data-touch="brake" role="button" class="ht-pad">Brake</div></div>`,
 };
 
 /** The short reminder at the start of a run. */
 function hintHtml(s: ControlScheme): string {
-  if (s === 'tilt') return 'Tilt to steer · Hold the right side to brake';
   if (touchDevice()) return s === 'simple' ? 'Steer ◀ ▶ · Brake on the right' : 'Steer ◀ ▶ · Gas and brake on the right';
   return s === 'simple'
     ? 'Steer <kbd>A</kbd><kbd>D</kbd> · Brake <kbd>Space</kbd>'
@@ -140,13 +136,6 @@ export class Hud {
           </div>
           <p class="hp-hint label">Press Esc to resume</p>
         </div>
-      </div>
-
-      <div class="h-turn" data-el="turn" hidden>
-        <svg viewBox="0 0 48 48" width="60" height="60"><rect x="15" y="5" width="18" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M21 38h6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
-        <h2 class="display">Turn your phone sideways</h2>
-        <p>Races run in landscape, and this one waits for you. If the screen doesn't turn, switch off rotation lock.</p>
-        <button class="btn ghost-btn" data-act="exit">Back to circuits</button>
       </div>`;
     container.appendChild(this.root);
     this.root.querySelectorAll<HTMLElement>('[data-el]').forEach((e) => (this.$[e.dataset.el!] = e));
@@ -319,12 +308,6 @@ export class Hud {
     this.root.dataset.controls = s;
     this.touch.innerHTML = TOUCH[s];
     this.$.hint.innerHTML = hintHtml(s);
-  }
-
-  /** Tilt in portrait: cover the race until the phone is sideways. */
-  turnPhone(show: boolean) {
-    if (this.$.turn.hidden !== show) return;
-    this.$.turn.hidden = !show;
   }
 
   loading(show: boolean) {
