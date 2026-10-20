@@ -5,6 +5,7 @@ import { buildKart, KartPhysics, type KartVisual } from './kart';
 import { availableSchemes, controlsPref, Input, saveControlsPref, SCHEME_LABEL, type ControlScheme } from './input';
 import { KartAudio } from './audio';
 import { KartFx } from './fx';
+import { Haptics } from './haptics';
 import { Atmosphere, resolveTime, type TimePref } from './atmosphere';
 import { awardMedal, earnedMedal, MEDAL_NAME, MEDALS, medalFor, targets } from './medals';
 import { recordDailyLap } from '../shared/daily';
@@ -83,6 +84,8 @@ export class Race {
   private phys: KartPhysics;
   private input: Input;
   private audio = new KartAudio();
+  private haptics = new Haptics(() => this.audio.muted);
+  private pbSeen: number | null | undefined; // a new personal best buzzes once
   private ground!: THREE.Mesh;
   private root: HTMLElement;
   private hud: Hud;
@@ -537,6 +540,7 @@ export class Race {
         this.trackScene.lights.forEach((m, k) => (m.emissiveIntensity = k < lit ? 4 : 0));
         this.hud.lights(lit);
         this.audio.beep(false);
+        this.haptics.light(false);
       }
       if (this.gridT >= this.goAt) {
         this.state = 'racing';
@@ -544,6 +548,7 @@ export class Race {
         this.trackScene.lights.forEach((m) => (m.emissiveIntensity = 0));
         this.hud.lights(null);
         this.audio.beep(true);
+        this.haptics.light(true);
         this.hud.banner('Go', 'go', 1.1);
         this.hud.hint(true, 4000);
       }
@@ -894,7 +899,14 @@ export class Race {
     const live = this.state === 'grid' || this.state === 'racing';
     const fb = this.fx.frame(live ? dt : 0, this.camera, this.pipeline.renderer, this.pipeline.quality, this.atmos.time === 'night');
     if (live) {
-      if (fb.impact) this.audio.impact(fb.impact);
+      if (fb.impact) {
+        this.audio.impact(fb.impact);
+        this.haptics.impact(fb.impact);
+      }
+      this.haptics.kerb(fb.kerb, p.speed);
+      const pb = this.pb?.ms ?? null;
+      if (pb !== this.pbSeen && this.pbSeen !== undefined && pb !== null) this.haptics.personalBest();
+      this.pbSeen = pb;
       const cockpit = CAMS[this.camMode].id === 'hood';
       this.audio.update({ speed: p.speed, vmax: p.vmax, throttle: this.throttle, squeal: fb.squeal, kerb: fb.kerb, grass: fb.grass, scrape: fb.scrape, cockpit });
     }
