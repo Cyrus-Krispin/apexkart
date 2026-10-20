@@ -380,8 +380,11 @@ export function kartLights(v: KartVisual, night: boolean, bloom: boolean) {
 /** Distance from the camera (m) where a ghost starts to show, and where it's fully there. */
 const GHOST_NEAR = 1.5;
 const GHOST_FAR = 4;
-/** Ghost pair draw slot: after other transparent things, each ghost's two passes back to front. */
-const GHOST_ORDER = 2;
+/**
+ * Ghost pair draw slot: after every other transparent thing (skids 1, particles 3), so a ghost's depth
+ * pass never hides smoke or dust behind it; each ghost's two passes then go back to front.
+ */
+const GHOST_ORDER = 4;
 
 function ghostFade(shader: THREE.WebGLProgramParametersWithUniforms) {
   shader.fragmentShader = shader.fragmentShader.replace(
