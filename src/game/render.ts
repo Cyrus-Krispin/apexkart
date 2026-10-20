@@ -99,6 +99,33 @@ export class RenderPipeline {
     else this.renderer.render(this.scene, this.camera);
   }
 
+  /**
+   * Compile the materials under `obj` for the target the scene really renders into: the composer's
+   * on Medium/High, the screen on Low. Tone mapping and output colour space are baked into each
+   * program from the target bound at compile time, so compiling against the wrong one builds
+   * variants nothing draws with, and the real ones then compile mid-race on first sight.
+   * `into` is the scene `obj` will be drawn in (its lights, fog and environment).
+   */
+  async compile(obj: THREE.Object3D, into: THREE.Scene = this.scene, q: Quality = this.quality) {
+    const r = this.renderer;
+    const prev = r.getRenderTarget();
+    r.setRenderTarget(q === 'low' ? null : (this.composer?.renderTarget1 ?? this.probeTarget()));
+    let done: Promise<unknown>;
+    try {
+      // The programs are created synchronously in here; the promise only waits for the driver.
+      done = r.compileAsync(obj, this.camera, obj === into ? null : into);
+    } finally {
+      r.setRenderTarget(prev);
+    }
+    await done;
+  }
+
+  /** A stand-in render target with the composer's settings, for compiling Medium/High variants from Low. */
+  private probe: THREE.WebGLRenderTarget | null = null;
+  private probeTarget() {
+    return (this.probe ??= new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType }));
+  }
+
   /** Bake an environment map from the sky so metal and paint pick up the sky colour. */
   bakeEnvironment(sky: THREE.Object3D, intensity = 0.55) {
     const pmrem = new THREE.PMREMGenerator(this.renderer);
@@ -113,6 +140,7 @@ export class RenderPipeline {
 
   dispose() {
     this.composer?.dispose();
+    this.probe?.dispose();
     this.renderer.dispose();
   }
 }

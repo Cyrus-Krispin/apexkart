@@ -257,7 +257,7 @@ export class Race {
     warm.position.set(this.phys.x, -50, this.phys.z);
     this.scene.add(warm);
     try {
-      await this.pipeline.renderer.compileAsync(this.scene, this.camera);
+      await this.pipeline.compile(this.scene);
     } catch {
       /* best effort */
     }
