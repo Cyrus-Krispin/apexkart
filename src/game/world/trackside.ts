@@ -176,17 +176,30 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
 
   // ---------------------------------------------------------------- kerbs (raised)
   {
-    // Left half: the kerb's red and white stripes. Right half: the concrete apron, with a darker
-    // lip at its outer edge so it meets the grass with a crisp line.
-    const kerbTex = canvasTex(64, 64, (g) => {
+    // Left half: the kerb's red and white stripes, with rubber grime along the edge the tyres hit.
+    // Right half: the concrete apron, with a darker lip at its outer edge so it meets the grass
+    // with a crisp line.
+    const kerbTex = canvasTex(128, 128, (g) => {
       g.fillStyle = '#d8262c';
-      g.fillRect(0, 0, 32, 32);
+      g.fillRect(0, 0, 64, 64);
       g.fillStyle = '#f3f1ea';
-      g.fillRect(0, 32, 32, 32);
+      g.fillRect(0, 64, 64, 64);
+      // Grime: darkest at the track-side lip, gone ~0.35 m in, with a few streaks along the kerb.
+      const grd = g.createLinearGradient(0, 0, 18, 0);
+      grd.addColorStop(0, 'rgba(22,22,24,0.62)');
+      grd.addColorStop(0.45, 'rgba(22,22,24,0.26)');
+      grd.addColorStop(1, 'rgba(22,22,24,0)');
+      g.fillStyle = grd;
+      g.fillRect(0, 0, 18, 128);
+      const r = rng(77);
+      for (let k = 0; k < 26; k++) {
+        g.fillStyle = `rgba(22,22,24,${0.08 + r() * 0.14})`;
+        g.fillRect(2 + r() * 20, r() * 128, 1 + r() * 2, 10 + r() * 40);
+      }
       g.fillStyle = GROUND.apron;
-      g.fillRect(32, 0, 28, 64);
+      g.fillRect(64, 0, 56, 128);
       g.fillStyle = '#8c8678';
-      g.fillRect(60, 0, 4, 64);
+      g.fillRect(120, 0, 8, 128);
     });
     kerbTex.wrapT = THREE.RepeatWrapping;
     kerbTex.wrapS = THREE.ClampToEdgeWrapping;
@@ -205,7 +218,7 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
         // Where another section runs alongside, stop halfway so two aprons never overlap.
         const hit = tq.nearestOther(t.px[q] + nx * side * (hw + w), t.pz[q] + nz * side * (hw + w), q, hw + APRON_WIDTH + 0.05, 30);
         if (hit) w = Math.max(0.2, Math.min(w, (hw + w + hit.dist) / 2 - hw));
-        const v = (k * t.length) / t.n / 1.6;
+        const v = (k * t.length) / t.n / 2; // a red and a white stripe, 1 m each
         const row = [
           [-0.1, 36 / 64],
           [w - 0.12, 57 / 64],
@@ -217,7 +230,7 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
             const B = prev[p + 1];
             const C = row[p + 1];
             const D = row[p];
-            const tri = side > 0 ? [A, D, C, A, C, B] : [A, B, C, A, C, D];
+            const tri = side > 0 ? [A, B, C, A, C, D] : [A, D, C, A, C, B];
             for (const v3 of tri) {
               pos.push(v3[0], v3[1], v3[2]);
               uv.push(v3[3], v3[4]);
@@ -236,7 +249,7 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
       for (let k = run.i0; k <= run.i1; k++) {
         const q = k % t.n;
         const [nx, nz] = t.normal(q);
-        const v = (k * t.length) / t.n / 1.6;
+        const v = (k * t.length) / t.n / 2; // a red and a white stripe, 1 m each
         const w = kerbWidthAt(t, q, side) / KERB_WIDTH;
         // Ramp the ends down so a strip starts and stops flush with the ground (no open ends).
         const ramp = Math.min(1, (k - run.i0 + 0.35) / 2.2, (run.i1 - k + 0.35) / 2.2);
@@ -250,8 +263,8 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
             const B = prev[p + 1];
             const C = row[p + 1];
             const D = row[p];
-            // Winding so the top faces up on either side of the track.
-            const tri = side > 0 ? [A, D, C, A, C, B] : [A, B, C, A, C, D];
+            // Wound so the top faces up (counter-clockwise from above) on either side of the track.
+            const tri = side > 0 ? [A, B, C, A, C, D] : [A, D, C, A, C, B];
             for (const v3 of tri) {
               pos.push(v3[0], v3[1], v3[2]);
               uv.push(v3[3], v3[4]);
@@ -266,8 +279,9 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
       g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
       g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
       g.computeVertexNormals();
-      const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: kerbTex, roughness: 0.55, side: THREE.DoubleSide }));
-      m.receiveShadow = true; // 10 cm kerbs and a flat apron: their shadow pass isn't worth it
+      // Every face is wound to face up (see above): front faces only, half the raster work.
+      const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: kerbTex, roughness: 0.55 }));
+      m.receiveShadow = true; // 10 cm kerbs and a flat apron: they cast no shadow (not worth the pass)
       group.add(m);
     }
   }
