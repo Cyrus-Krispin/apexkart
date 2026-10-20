@@ -1,6 +1,7 @@
 // Race HUD: broadcast-style timing in the "Paddock Paper" night palette.
 import { escapeHtml, formatMs, type BoardResponse } from '../net/api';
 import { MEDAL_NAME, type Medal } from './medals';
+import { touchDevice, type ControlScheme } from './input';
 
 export type SectorColor = '' | 'purple' | 'green' | 'yellow';
 export type BannerKind = 'go' | 'pb' | 'warn' | 'info' | 'medal';
@@ -24,8 +25,31 @@ const ICON = {
   ghost: '<svg viewBox="0 0 24 24" width="17" height="17"><path d="M5 20V10a7 7 0 0114 0v10l-2.5-2-2.3 2-2.2-2-2.2 2-2.3-2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="9.5" cy="10.5" r="1.3" fill="currentColor"/><circle cx="14.5" cy="10.5" r="1.3" fill="currentColor"/></svg>',
   moon: '<svg viewBox="0 0 24 24" width="17" height="17"><path d="M19 14.5A7.5 7.5 0 019.5 5a7.5 7.5 0 109.5 9.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>',
   sun: '<svg viewBox="0 0 24 24" width="17" height="17"><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  wheel: '<svg viewBox="0 0 24 24" width="17" height="17"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="2" fill="currentColor"/><path d="M4.5 10.5h5M14.5 10.5h5M12 14v6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   sound: '<svg viewBox="0 0 24 24" width="17" height="17"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path d="M16 8.5a5 5 0 010 7M18.5 6a8.5 8.5 0 010 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
 };
+
+/** On-screen controls for each scheme (touch screens only; see the touch rules in race.css). */
+const TOUCH: Record<ControlScheme, string> = {
+  classic: `
+    <div class="ht-l"><div data-touch="left" role="button" aria-label="Steer left">◀</div><div data-touch="right" role="button" aria-label="Steer right">▶</div></div>
+    <div class="ht-r ht-pedals"><div data-touch="drift" role="button" class="sm">Drift</div><div data-touch="brake" role="button">Brake</div><div data-touch="gas" role="button" class="gas">Gas</div></div>`,
+  simple: `
+    <div class="ht-l"><div data-touch="left" role="button" aria-label="Steer left">◀</div><div data-touch="right" role="button" aria-label="Steer right">▶</div></div>
+    <div class="ht-r"><div data-touch="brake" role="button" class="ht-brake">Brake</div></div>`,
+  tilt: `
+    <div class="ht-l"><button data-act="recentre" class="ht-recentre" title="Straight ahead is how you hold the phone now">Recentre</button></div>
+    <div class="ht-r"><div data-touch="brake" role="button" class="ht-pad">Brake</div></div>`,
+};
+
+/** The short reminder at the start of a run. */
+function hintHtml(s: ControlScheme): string {
+  if (s === 'tilt') return 'Tilt to steer · Hold the right side to brake';
+  if (touchDevice()) return s === 'simple' ? 'Steer ◀ ▶ · Brake on the right' : 'Steer ◀ ▶ · Gas and brake on the right';
+  return s === 'simple'
+    ? 'Steer <kbd>A</kbd><kbd>D</kbd> · Brake <kbd>Space</kbd>'
+    : 'Throttle <kbd>W</kbd> · Steer <kbd>A</kbd><kbd>D</kbd> · Brake <kbd>S</kbd> · Drift <kbd>Space</kbd>';
+}
 
 export class Hud {
   readonly root: HTMLDivElement;
@@ -38,7 +62,7 @@ export class Hud {
   private bannerTimer = 0;
   private bannerText = '';
   private lapCardTimer = 0;
-  private coachTimer = 0;
+  private hintTimer = 0;
   private boardSig = '';
 
   constructor(
@@ -74,6 +98,7 @@ export class Hud {
       <canvas class="h-map" data-el="minimap"></canvas>
 
       <section class="h-speed">
+        <div class="h-hint" data-el="hint"></div>
         <div class="h-segs" data-el="segs">${'<i></i>'.repeat(SPEED_SEGMENTS)}</div>
         <div class="h-speed-num"><b class="mono" data-el="speed">0</b><span class="label">km/h</span></div>
       </section>
@@ -87,18 +112,12 @@ export class Hud {
 
       <div class="h-lights" data-el="lights" hidden>${'<div class="h-lamp"><i></i><i></i></div>'.repeat(5)}</div>
       <div class="h-banner" data-el="banner"><span data-el="bannerText"></span></div>
-      <div class="h-coach" data-el="coach">
-        <span><kbd>W</kbd><kbd>↑</kbd> throttle</span><span><kbd>A</kbd><kbd>D</kbd> steer</span><span><kbd class="wide">Space</kbd> drift</span><span><kbd>R</kbd> reset</span>
-      </div>
       <div class="h-tags" data-el="tags"></div>
       <div class="h-toasts" data-el="toasts"></div>
       <div class="h-loading label" data-el="loading" hidden>Loading satellite imagery…</div>
       <div class="h-attrib">Imagery © Esri, Maxar, Earthstar Geographics · Track © OpenStreetMap contributors</div>
 
-      <div class="h-touch" data-el="touch">
-        <div class="ht-l"><button data-touch="left" aria-label="Steer left">◀</button><button data-touch="right" aria-label="Steer right">▶</button></div>
-        <div class="ht-r"><button data-touch="drift" class="sm">Drift</button><button data-touch="brake">Brake</button><button data-touch="gas" class="gas">Gas</button></div>
-      </div>
+      <div class="h-touch" data-el="touch"></div>
 
       <div class="h-pause" data-el="pause" hidden>
         <div class="hp-inner">
@@ -111,6 +130,7 @@ export class Hud {
             <button class="btn ghost-btn" data-act="exit">Back to circuits</button>
           </div>
           <div class="hp-toggles">
+            <button data-act="controls" data-el="controlsToggle" class="hp-wide"></button>
             <button data-act="mute" data-el="muteToggle"></button>
             <button data-act="ghosts" data-el="ghostToggle"></button>
             <button data-act="cam" data-el="camToggle"></button>
@@ -120,6 +140,13 @@ export class Hud {
           </div>
           <p class="hp-hint label">Press Esc to resume</p>
         </div>
+      </div>
+
+      <div class="h-turn" data-el="turn" hidden>
+        <svg viewBox="0 0 48 48" width="60" height="60"><rect x="15" y="5" width="18" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M21 38h6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
+        <h2 class="display">Turn your phone sideways</h2>
+        <p>Races run in landscape, and this one waits for you. If the screen doesn't turn, switch off rotation lock.</p>
+        <button class="btn ghost-btn" data-act="exit">Back to circuits</button>
       </div>`;
     container.appendChild(this.root);
     this.root.querySelectorAll<HTMLElement>('[data-el]').forEach((e) => (this.$[e.dataset.el!] = e));
@@ -280,10 +307,24 @@ export class Hud {
     [...el.children].forEach((lamp, k) => lamp.classList.toggle('on', k < lit));
   }
 
-  coach(show: boolean, autoHideMs = 0) {
-    clearTimeout(this.coachTimer);
-    this.$.coach.classList.toggle('show', show);
-    if (show && autoHideMs) this.coachTimer = window.setTimeout(() => this.$.coach.classList.remove('show'), autoHideMs);
+  /** The controls reminder above the speedometer; it fades out after autoHideMs. */
+  hint(show: boolean, autoHideMs = 0) {
+    clearTimeout(this.hintTimer);
+    this.$.hint.classList.toggle('show', show);
+    if (show && autoHideMs) this.hintTimer = window.setTimeout(() => this.$.hint.classList.remove('show'), autoHideMs);
+  }
+
+  /** Lay out the on-screen controls and the hint for a control scheme. */
+  setControls(s: ControlScheme) {
+    this.root.dataset.controls = s;
+    this.touch.innerHTML = TOUCH[s];
+    this.$.hint.innerHTML = hintHtml(s);
+  }
+
+  /** Tilt in portrait: cover the race until the phone is sideways. */
+  turnPhone(show: boolean) {
+    if (this.$.turn.hidden !== show) return;
+    this.$.turn.hidden = !show;
   }
 
   loading(show: boolean) {
@@ -313,7 +354,8 @@ export class Hud {
     }
   }
 
-  toggles(o: { muted: boolean; ghosts: boolean; cam: string; quality: string; style: string; night: boolean; time: string }) {
+  toggles(o: { controls: string; muted: boolean; ghosts: boolean; cam: string; quality: string; style: string; night: boolean; time: string }) {
+    this.$.controlsToggle.innerHTML = `${ICON.wheel}<span>Controls</span><b>${o.controls}</b>`;
     this.$.qualityToggle.innerHTML = `${ICON.gauge}<span>Graphics</span><b>${o.quality}</b>`;
     this.$.styleToggle.innerHTML = `${ICON.globe}<span>World</span><b>${o.style}</b>`;
     this.$.timeToggle.innerHTML = `${o.night ? ICON.moon : ICON.sun}<span>Time of day</span><b>${o.time}</b>`;
@@ -331,7 +373,7 @@ export class Hud {
   dispose() {
     clearTimeout(this.bannerTimer);
     clearTimeout(this.lapCardTimer);
-    clearTimeout(this.coachTimer);
+    clearTimeout(this.hintTimer);
     this.root.remove();
   }
 }

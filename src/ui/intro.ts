@@ -1,6 +1,7 @@
 import { escapeHtml, formatMs, saveDriver, type Dir, type Driver } from '../net/api';
 import type { TrackData } from '../track/osm';
 import type { TimeOfDay, TimePref } from '../game/atmosphere';
+import { SCHEME_LABEL, touchDevice, type ControlScheme } from '../game/input';
 import type { TrackShape } from '../track/shape';
 import { cleanDriverName } from './profile';
 import { rotationLabel, trackArt } from './trackArt';
@@ -14,9 +15,26 @@ export interface IntroOptions {
   pb: number | null;
   time: TimePref;
   liveNow: TimeOfDay; // what "Live" means at this circuit right now
+  controls: ControlScheme;
+  schemes: ControlScheme[]; // the ones this device offers
   onTime: (t: TimePref) => void;
+  onControls: (s: ControlScheme) => void;
   onStart: () => void;
   onBack: () => void;
+}
+
+/** The controls for a scheme, short enough for one or two lines of the briefing. */
+function controlsHelp(s: ControlScheme): string {
+  const keys = (pairs: [string, string][]) =>
+    `<span class="io-keys">${pairs.map(([k, what]) => `<span>${k.split(' ').map((x) => `<kbd>${x}</kbd>`).join('')} ${what}</span>`).join('')}</span>`;
+  if (s === 'tilt') return 'Hold the phone sideways and tilt it like a steering wheel. Hold the right side of the screen to brake. The kart accelerates by itself.';
+  if (touchDevice())
+    return s === 'simple'
+      ? 'The kart accelerates by itself. Steer with ◀ ▶ and brake on the right. Hold Brake when stopped to reverse.'
+      : 'Steer with ◀ ▶. Gas and Brake on the right, Drift above Brake.';
+  return s === 'simple'
+    ? `${keys([['A D', 'Steer'], ['Space', 'Brake, reverse'], ['R', 'Back on track'], ['Esc', 'Pause']])}The kart accelerates by itself. Gamepad: stick steers, LT brakes.`
+    : `${keys([['W', 'Throttle'], ['S', 'Brake'], ['A D', 'Steer'], ['Space', 'Drift'], ['R', 'Back on track'], ['Esc', 'Pause']])}Gamepad: RT throttle, LT brake, stick steers, X drift.`;
 }
 
 /** Pre-race overlay: circuit, controls and loading, then "press any key". */
@@ -27,9 +45,11 @@ export class RaceIntro {
   private bar: HTMLElement;
   private count: HTMLElement;
   private go: HTMLElement;
+  private help: HTMLElement;
+  private markControls: (s: ControlScheme) => void;
   private onKey = (e: KeyboardEvent) => {
     if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
-    if ((e.target as HTMLElement)?.closest?.('.io-time') && (e.key === 'Enter' || e.key === ' ')) return; // let the button click
+    if ((e.target as HTMLElement)?.closest?.('.io-seg') && (e.key === 'Enter' || e.key === ' ')) return; // let the button click
     if (e.key === 'Escape') return this.o.onBack();
     if (['Tab', 'Shift', 'Meta', 'Control', 'Alt'].includes(e.key)) return;
     this.start();
@@ -52,22 +72,15 @@ export class RaceIntro {
           <li><b class="mono">02</b>Put all four wheels off the track and the lap won't count.</li>
           <li><b class="mono">03</b>Your best lap goes on the live board, and its ghost races everyone.</li>
         </ul>
+        <div class="io-ctl">
+          <div class="io-ctl-head">
+            <span class="label">Controls</span>
+            <div class="io-seg" role="radiogroup" aria-label="Controls">${o.schemes.map((s) => `<button type="button" role="radio" data-controls="${s}">${SCHEME_LABEL[s]}</button>`).join('')}</div>
+          </div>
+          <p class="io-help" data-el="help"></p>
+        </div>
         <label class="io-driver"><span class="label">Racing as</span><input maxlength="16" value="${escapeHtml(o.driver.name)}" spellcheck="false" autocomplete="off" aria-label="Driver name" /><span class="io-pb label">${o.pb ? `Best ${formatMs(o.pb)}` : 'No lap yet'}</span></label>
       </section>
-      <aside class="io-controls">
-        <p class="label">Controls</p>
-        <dl>
-          <div><dt><kbd>W</kbd><kbd>↑</kbd></dt><dd>Throttle</dd></div>
-          <div><dt><kbd>S</kbd><kbd>↓</kbd></dt><dd>Brake / reverse</dd></div>
-          <div><dt><kbd>A</kbd><kbd>D</kbd><kbd>←</kbd><kbd>→</kbd></dt><dd>Steer</dd></div>
-          <div><dt><kbd class="wide">Space</kbd></dt><dd>Drift</dd></div>
-          <div><dt><kbd>R</kbd></dt><dd>Back on track</dd></div>
-          <div><dt><kbd>C</kbd></dt><dd>Camera</dd></div>
-          <div><dt><kbd>G</kbd></dt><dd>Ghosts</dd></div>
-          <div><dt><kbd>Esc</kbd></dt><dd>Pause</dd></div>
-        </dl>
-        <p class="io-pad">Gamepad works too: right trigger, left trigger, stick. On a phone you get on-screen pedals.</p>
-      </aside>
       <footer class="io-foot">
         <div class="io-load"><span class="label">Building the world</span><div class="io-bar"><i data-el="bar"></i></div><span class="mono" data-el="count">…</span></div>
         <div class="io-foot-r">
@@ -86,6 +99,7 @@ export class RaceIntro {
     this.bar = this.el.querySelector('[data-el=bar]')!;
     this.count = this.el.querySelector('[data-el=count]')!;
     this.go = this.el.querySelector('[data-el=go]')!;
+    this.help = this.el.querySelector('[data-el=help]')!;
 
     const input = this.el.querySelector('input')!;
     input.addEventListener('input', () => {
@@ -116,18 +130,41 @@ export class RaceIntro {
         o.onTime(t);
       }),
     );
+    const ctl = [...this.el.querySelectorAll<HTMLButtonElement>('[data-controls]')];
+    this.markControls = (s) =>
+      ctl.forEach((b) => {
+        const on = b.dataset.controls === s;
+        b.classList.toggle('on', on);
+        b.setAttribute('aria-checked', String(on));
+      });
+    this.setControls(o.controls);
+    ctl.forEach((b) =>
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (e.detail > 0) b.blur();
+        if (!b.classList.contains('on')) o.onControls(b.dataset.controls as ControlScheme); // the race calls setControls back
+      }),
+    );
     this.el.querySelector('[data-act=back]')!.addEventListener('click', (e) => {
       e.stopPropagation();
       o.onBack();
     });
-    this.el.addEventListener('pointerdown', (e) => {
+    // On click, not pointerdown: a touch only counts as a user gesture once it lifts, and the start
+    // may need one (Tilt asks for motion access and full screen).
+    this.el.addEventListener('click', (e) => {
       const t = e.target as HTMLElement;
-      if (t.closest('input, label, .io-back, .io-time')) return;
+      if (t.closest('input, label, .io-back, .io-time, .io-ctl')) return;
       this.start();
     });
     addEventListener('keydown', this.onKey);
     // Don't hold people hostage to slow tiles: allow starting after a few seconds regardless.
     setTimeout(() => this.ready(), 5000);
+  }
+
+  /** Show a scheme as picked, with its controls (or a note, e.g. why Tilt didn't start). */
+  setControls(s: ControlScheme, note?: string) {
+    this.markControls(s);
+    this.help.innerHTML = note ? `<b>${escapeHtml(note)}</b> ${controlsHelp(s)}` : controlsHelp(s);
   }
 
   stage(label: string, frac: number) {
