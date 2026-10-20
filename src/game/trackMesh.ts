@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { TrackModel } from './track';
 import { addDetail } from './world/ground';
+import { trackQuery } from './trackQuery';
 
 function canvasTex(w: number, h: number, draw: (c: CanvasRenderingContext2D) => void, aniso: number) {
   const c = document.createElement('canvas');
@@ -125,7 +126,13 @@ export function buildTrackScene(track: TrackModel, aniso: number): TrackScene {
   gantry.add(sf);
 
   const postMat = new THREE.MeshStandardMaterial({ color: 0x2b2d42, metalness: 0.5, roughness: 0.4 });
+  // A post that would stand on another section of the lap (where the layout runs close by or
+  // crosses over) is left out: the gantry becomes a cantilever from the other side.
+  const tq = trackQuery(track);
+  const [snx, snz] = track.normal(0); // gantry-local +x is the left of travel, i.e. -normal
+  const blocked = [-1, 1].map((s) => !!tq.nearestOther(track.px[0] - snx * s * (hw + 0.8), track.pz[0] - snz * s * (hw + 0.8), 0, hw + 0.5, 30));
   for (const s of [-1, 1]) {
+    if (blocked[s < 0 ? 0 : 1] && !(blocked[0] && blocked[1])) continue;
     const post = new THREE.Mesh(new THREE.BoxGeometry(0.35, 5.2, 0.35), postMat);
     post.position.set(s * (hw + 0.8), 2.6, 0);
     post.castShadow = true;

@@ -1,7 +1,9 @@
 // Where a kart circuit has kerbs, as data (no three.js), so the renderer and the physics
 // agree on it: an inside kerb from turn-in to just past the apex, an outside kerb on the exit
-// (and around the apex of hairpins), nothing on kinks. Everything is derived from the lap in its race direction, so reverse gets its own kerbs.
+// (and around the apex of hairpins), nothing on kinks, nothing lying on another section of the
+// lap. Everything is derived from the lap in its race direction, so reverse gets its own kerbs.
 import type { TrackModel } from './track';
+import { trackQuery } from './trackQuery';
 
 export type KerbKind = 'apex' | 'exit' | 'outside';
 
@@ -140,7 +142,7 @@ export function kerbWidthAt(t: TrackModel, q: number, side: number): number {
   return Math.max(0.6, Math.min(KERB_WIDTH, room * 0.8));
 }
 
-/** Every kerb strip on the lap. */
+/** Every kerb strip on the lap, clipped where it would lie on another section's road. */
 export function kerbRuns(t: TrackModel): KerbRun[] {
   const cached = runCache.get(t);
   if (cached) return cached;
@@ -232,8 +234,64 @@ export function kerbRuns(t: TrackModel): KerbRun[] {
     merged.push(...res);
   }
 
-  const runs: KerbRun[] = [];
-  for (const r of merged) if ((r.b - r.a + 1) * ds >= MIN_LEN) runs.push({ side: r.side, i0: r.a, i1: r.b, kind: r.kind, corner: r.corner });
+  // Clip: no kerb on another section's road.
+  const tq = trackQuery(t);
+  const ok = (q: number, side: number) => {
+    const w = kerbWidthAt(t, q, side);
+    const [nx, nz] = t.normal(q);
+    for (const o of [hw - 0.05, hw + w * 0.5, hw + w]) {
+      const x = t.px[q] + nx * side * o;
+      const z = t.pz[q] + nz * side * o;
+      if (tq.nearestOther(x, z, q, hw + 0.2, 20)) return false;
+    }
+    return true;
+  };
+  let runs: KerbRun[] = [];
+  const split = (r: Raw, keep: (k: number) => boolean) => {
+    let s = -1;
+    for (let k = r.a; k <= r.b + 1; k++) {
+      const good = k <= r.b && keep(k);
+      if (good && s < 0) s = k;
+      if (!good && s >= 0) {
+        if ((k - s) * ds >= MIN_LEN) runs.push({ side: r.side, i0: wrap(s, n), i1: wrap(s, n) + (k - 1 - s), kind: r.kind, corner: r.corner });
+        s = -1;
+      }
+    }
+  };
+  for (const r of merged) split(r, (k) => ok(wrap(k, n), r.side));
+
+  // Where two sections run side by side, two kerbs can meet: keep the one met first in the lap.
+  const pts: { x: number; z: number; q: number; run: number }[] = [];
+  runs.forEach((r, ri) => {
+    for (let k = r.i0; k <= r.i1; k++) {
+      const q = wrap(k, n);
+      const [nx, nz] = t.normal(q);
+      const o = hw + kerbWidthAt(t, q, r.side) * 0.5;
+      pts.push({ x: t.px[q] + nx * r.side * o, z: t.pz[q] + nz * r.side * o, q, run: ri });
+    }
+  });
+  const drop = new Set<string>();
+  const grid = new Map<string, number[]>();
+  pts.forEach((p, pi) => {
+    const key = `${Math.floor(p.x / 4)},${Math.floor(p.z / 4)}`;
+    (grid.get(key) ?? grid.set(key, []).get(key)!).push(pi);
+  });
+  for (const p of pts) {
+    const gx = Math.floor(p.x / 4);
+    const gz = Math.floor(p.z / 4);
+    for (let x = gx - 1; x <= gx + 1; x++)
+      for (let z = gz - 1; z <= gz + 1; z++)
+        for (const qi of grid.get(`${x},${z}`) ?? []) {
+          const o = pts[qi];
+          if (o.run === p.run || o.q <= p.q || tq.lapSep(o.q, p.q) < 20) continue;
+          if ((o.x - p.x) ** 2 + (o.z - p.z) ** 2 < 1.3 ** 2) drop.add(`${o.run}:${o.q}`);
+        }
+  }
+  if (drop.size) {
+    const before = runs;
+    runs = [];
+    before.forEach((r, ri) => split({ side: r.side, a: r.i0, b: r.i1, kind: r.kind, corner: r.corner }, (k) => !drop.has(`${ri}:${wrap(k, n)}`)));
+  }
   runs.sort((p, q) => p.i0 - q.i0 || p.side - q.side);
   runCache.set(t, runs);
   return runs;

@@ -51,6 +51,53 @@ export interface Trackside {
   lamps: Lamp[]; // floodlight heads, aimed at the track
 }
 
+/**
+ * The tyre wall's polylines, per side: points every 2 samples at the barrier, kept where no part
+ * of the circuit is near and the land is buildable, and split wherever a piece between two points
+ * would cross road (another section's, or its own where the offset line folds at a tight corner).
+ */
+export function wallRuns(t: TrackModel, ground: GroundPainter | null): { side: number; pts: [number, number][] }[] {
+  const hw = t.halfWidth;
+  const wallOff = hw + t.runoff + 0.65;
+  const out: { side: number; pts: [number, number][] }[] = [];
+  const landOk = (x: number, z: number) => {
+    if (!ground) return true;
+    const c = ground.classAt(x, z);
+    return c !== Land.Building && c !== Land.Water;
+  };
+  const crossesRoad = (ax: number, az: number, bx: number, bz: number) => {
+    const L = Math.hypot(bx - ax, bz - az);
+    const steps = Math.max(1, Math.ceil(L));
+    for (let k = 1; k < steps; k++) {
+      const f = k / steps;
+      if (!t.clearOfTrack(ax + (bx - ax) * f, az + (bz - az) * f, hw + 2)) return true;
+    }
+    return false;
+  };
+  for (const side of [-1, 1]) {
+    let run: [number, number][] = [];
+    const flush = () => {
+      if (run.length > 1) out.push({ side, pts: run });
+      run = [];
+    };
+    for (let i = 0; i <= t.n; i += 2) {
+      const q = i % t.n;
+      const [nx, nz] = t.normal(q);
+      const x = t.px[q] + nx * side * wallOff;
+      const z = t.pz[q] + nz * side * wallOff;
+      if (!t.clearOfTrack(x, z, wallOff - 0.3) || !landOk(x, z)) {
+        flush();
+        continue;
+      }
+      const last = run[run.length - 1];
+      if (last && crossesRoad(last[0], last[1], x, z)) flush();
+      run.push([x, z]);
+    }
+    flush();
+  }
+  return out;
+}
+
 export function buildTrackside(track: TrackModel, ground: GroundPainter | null, seed: string, aniso: number): Trackside {
   const group = new THREE.Group();
   const rand = rng(hashString(seed + ':side'));
@@ -206,15 +253,14 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
         }
         run = [];
       };
-      let u = 0;
-      for (let i = 0; i <= t.n; i += 2) {
-        const [x, z] = at(i, side, wallOff);
-        if (clearAt(x, z, wallOff - 0.3) && landOk(x, z)) {
-          if (run.length) u += Math.hypot(x - run[run.length - 1][0], z - run[run.length - 1][1]) / 12.5;
+      for (const pts of wallRuns(t, ground).filter((w) => w.side === side).map((w) => w.pts)) {
+        let u = 0;
+        pts.forEach(([x, z], k) => {
+          if (k) u += Math.hypot(x - pts[k - 1][0], z - pts[k - 1][1]) / 12.5;
           run.push([x, z, u]);
-        } else if (run.length) flush();
+        });
+        flush();
       }
-      flush();
     }
     if (pos.length) {
       const g = new THREE.BufferGeometry();
