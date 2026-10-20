@@ -466,3 +466,77 @@ export class Hud {
     this.root.remove();
   }
 }
+
+// ---------- Tow (Lane D, multiplayer only)
+
+/**
+ * A small chip beside the speed while you're in another kart's slipstream: three chevrons that
+ * fill with how much of it you have, and the word Tow. Nothing in the middle of the screen; it
+ * fades in after a moment in the tow and out a moment after, so a brief pass doesn't flicker it.
+ */
+export class TowIndicator {
+  private el: HTMLElement | null;
+  private onT = 0; // s in the tow
+  private offT = 0; // s out of it
+  private n = 0; // chevrons lit (0 = hidden)
+
+  constructor(hudRoot: HTMLElement) {
+    const box = hudRoot.querySelector<HTMLElement>('.h-speed-box');
+    this.el = box && document.createElement('div');
+    if (!box || !this.el) return;
+    this.el.className = 'h-tow';
+    this.el.setAttribute('aria-hidden', 'true');
+    this.el.innerHTML = '<i></i><i></i><i></i><span>Tow</span>';
+    box.appendChild(this.el);
+  }
+
+  /** Strength 0..1 (MultiplayerRace, every frame). */
+  set(strength: number, dt: number) {
+    if (!this.el) return;
+    const want = strength < 0.06 ? 0 : strength < 0.3 ? 1 : strength < 0.55 ? 2 : 3;
+    if (want) {
+      this.onT += dt;
+      this.offT = 0;
+    } else {
+      this.offT += dt;
+      this.onT = 0;
+    }
+    // Shows after 0.15 s in the tow, then follows it; hides 0.4 s after it ends.
+    const n = want ? (this.n || this.onT >= 0.15 ? want : 0) : this.offT >= 0.4 ? 0 : this.n;
+    if (n === this.n) return;
+    this.n = n;
+    if (n) this.el.dataset.n = String(n);
+    this.el.classList.toggle('on', n > 0);
+  }
+
+  dispose() {
+    this.el?.remove();
+  }
+}
+
+// ---------- Launch hint (Lane D, multiplayer only)
+
+/**
+ * Classic controls on a multiplayer grid: the kart only launches at lights out if you're already
+ * holding Gas (Simple players launch by themselves), so the grid's controls reminder says so.
+ * Once the lights go out the usual reminder is back.
+ */
+export class LaunchHint {
+  private el: HTMLElement | null;
+  private on = false;
+  private html = touchDevice() ? 'Hold Gas: you launch at lights out' : 'Hold Gas <kbd>W</kbd> · you launch at lights out';
+
+  constructor(private root: HTMLElement) {
+    this.el = root.querySelector<HTMLElement>('[data-el="hint"]');
+  }
+
+  /** Every frame: `grid` while waiting for the lights. */
+  update(grid: boolean) {
+    if (!this.el) return;
+    const scheme = this.root.dataset.controls as ControlScheme | undefined;
+    const want = grid && scheme === 'classic';
+    if (want && this.el.innerHTML !== this.html) this.el.innerHTML = this.html; // (again, if the controls changed)
+    else if (!want && this.on && scheme) this.el.innerHTML = hintHtml(scheme);
+    this.on = want;
+  }
+}
