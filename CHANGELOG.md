@@ -6,6 +6,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-10-21
+
 ### Added
 - **Slipstream in multiplayer**: tuck in behind another kart for a tow worth 2–4 km/h on a straight,
   with a small Tow sign beside your speed. Time-trial ghosts never give a tow, so leaderboards are
@@ -464,7 +466,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 ### Fixed
 - Leaderboard and lap submission on the live site.
 
-[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.25.0...HEAD
+[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.26.0...HEAD
+[0.26.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.22.0...v0.23.0
