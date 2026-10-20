@@ -276,6 +276,7 @@
 .h-loading { position: absolute; bottom: calc(var(--b) + 110px); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 5px 12px; border-radius: 3px; background: var(--hud); font-family: var(--ui); font-weight: 700; font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-2); white-space: nowrap; }
 .h-loading::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--yellow); animation: live 1.2s infinite; }
 .h-attrib { position: absolute; bottom: 3px; left: 50%; transform: translateX(-50%); font-family: var(--mono); font-size: 9.5px; color: rgba(242, 243, 245, 0.55); white-space: nowrap; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6); }
+.hud.paused .h-attrib { display: none; } /* on phones it sat over the pause menu's stats; the scene it credits is behind the menu anyway */
 
 /* ---------- Pause: the pit wall */
 .h-pause { position: absolute; inset: 0; display: flex; overflow-y: auto; padding: max(16px, env(safe-area-inset-top, 0px)) 16px max(16px, env(safe-area-inset-bottom, 0px)); background: rgba(6, 7, 8, 0.8); pointer-events: auto; animation: h-fade 0.2s; }
