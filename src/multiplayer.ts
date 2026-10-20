@@ -1,7 +1,8 @@
 // Multiplayer controller: routes #/room[/CODE], owns the RoomClient, the lobby and the
 // multiplayer Race. The rest of the app only provides enter()/leave() (see MULTIPLAYER.md).
-import { Race } from './game/race';
-import { MultiplayerRace } from './game/mpRace';
+// The race code (and Three.js) loads on demand: the lobby doesn't need it.
+import type { Race } from './game/race';
+import type { MultiplayerRace } from './game/mpRace';
 import { Lobby } from './ui/lobby';
 import { RoomClient, type RoomCloseReason } from './net/room';
 import type { Driver } from './net/api';
@@ -181,8 +182,10 @@ class MultiplayerController {
     if (!me || !cfg.grid.some((g) => g.mid === room.mid) || me.fin?.r === cfg.race) return;
     this.raceId = cfg.race;
     let track: TrackData;
+    let Race: typeof import('./game/race').Race;
+    let MultiplayerRace: typeof import('./game/mpRace').MultiplayerRace;
     try {
-      track = await this.trackFor(room, cfg.track);
+      [track, { Race }, { MultiplayerRace }] = await Promise.all([this.trackFor(room, cfg.track), import('./game/race'), import('./game/mpRace')]);
     } catch {
       this.raceId = 0;
       return;

@@ -1152,11 +1152,4 @@ function disposeTree(root: THREE.Object3D) {
   });
 }
 
-/** Local personal best for a track (used by the atlas). */
-export function localPB(trackId: string, dir: Dir): number | null {
-  try {
-    return JSON.parse(localStorage.getItem(`ak:pb:${trackId}:${dir}`) || 'null')?.ms ?? null;
-  } catch {
-    return null;
-  }
-}
+export { localPB } from './prefs';
