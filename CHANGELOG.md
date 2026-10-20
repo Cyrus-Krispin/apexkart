@@ -6,6 +6,34 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+### Changed
+- **A new look: Pit Wall.** Every circuit is a live session, so ApexKart now reads like a race timing
+  screen: carbon black, broadcast type, and timing colours (purple for fastest, green for your
+  best, yellow for actions).
+- **The home screen is a timing tower** instead of a world map.
+  - **Live** ranks circuits by who's on track.
+  - **Near me** sorts them by distance, from you or any city you search for.
+  - **World** lists every track by country.
+  - The daily circuit sits on a yellow bar at the top, and **Box box** races your last circuit.
+  - It opens faster too: the home screen now downloads less than half as much.
+- **Tap a circuit to see its layout**, drawn with sector colours, numbered turns and a dot for
+  everyone on track, with no map behind it. Its pit board shows your position, best lap and gap
+  to the next medal, the classification with a ghost on every lap, and a green **Start**.
+- On desktop the tower and the circuit sit side by side, with the latest laps running along the
+  bottom.
+- **The grid screen before a race** draws the circuit, and a dot laps it as the world loads.
+- **The race display** is restyled. On desktop the track map now sits at the top in the middle.
+  The pause menu shows your session on a pit board.
+- **Classic controls** are throttle, brake and steer. Space brakes in both schemes.
+- The multiplayer lobby, race results, this page and the layout editor have the new look. The
+  editor now opens full screen.
+- The 22 featured circuits are no longer a separate list; they're on the tower with every other
+  track.
+
+### Removed
+- **Drift**, including the Drift button, Space/Shift and the gamepad drift buttons.
+- **The satellite world option.** Races always use the stylised world built from OpenStreetMap.
+
 ## [0.15.0] - 2026-10-20
 
 ### Changed
