@@ -1,11 +1,11 @@
 import type { Controls } from './kart';
 
-/** Simple accelerates by itself (brake and steer only); Classic is throttle, brake and drift. */
+/** Simple accelerates by itself (brake and steer only); Classic is throttle and brake. */
 export type ControlScheme = 'simple' | 'classic';
 
 export const SCHEME_LABEL: Record<ControlScheme, string> = { simple: 'Simple', classic: 'Classic' };
 
-type TouchKey = 'left' | 'right' | 'gas' | 'brake' | 'drift';
+type TouchKey = 'left' | 'right' | 'gas' | 'brake';
 
 /** Phones and tablets: the same test that shows the on-screen controls. */
 export function touchDevice(): boolean {
@@ -137,7 +137,7 @@ export class Input {
     const pad = navigator.getGamepads?.().find((p) => p && p.connected);
     const dpad = (b: number) => !classic && !!pad?.buttons[b]?.pressed; // Classic keeps its original pad mapping
     let throttle = classic && (k.has('ArrowUp') || k.has('w') || this.touching('gas')) ? 1 : 0;
-    let brake = k.has('ArrowDown') || k.has('s') || (!classic && k.has(' ')) || this.touching('brake') ? 1 : 0;
+    let brake = k.has('ArrowDown') || k.has('s') || k.has(' ') || this.touching('brake') ? 1 : 0;
     const l = k.has('ArrowLeft') || k.has('a') || this.touching('left') || dpad(14);
     const r = k.has('ArrowRight') || k.has('d') || this.touching('right') || dpad(15);
     const target = (r ? 1 : 0) - (l ? 1 : 0);
@@ -145,15 +145,11 @@ export class Input {
     const rate = target === 0 ? 9 : Math.sign(target) !== Math.sign(this.keySteer) ? 10 : 4.5;
     this.keySteer += Math.max(-rate * dt, Math.min(rate * dt, target - this.keySteer));
     let steer = this.keySteer;
-    let drift = classic && (k.has(' ') || k.has('Shift') || this.touching('drift'));
 
     if (pad) {
       const ax = pad.axes[0] ?? 0;
       if (Math.abs(ax) > 0.12) steer = Math.sign(ax) * ((Math.abs(ax) - 0.12) / 0.88) ** 1.4;
-      if (classic) {
-        throttle = Math.max(throttle, pad.buttons[7]?.value ?? 0, pad.buttons[0]?.pressed ? 1 : 0);
-        drift = drift || !!pad.buttons[2]?.pressed || !!pad.buttons[5]?.pressed;
-      }
+      if (classic) throttle = Math.max(throttle, pad.buttons[7]?.value ?? 0, pad.buttons[0]?.pressed ? 1 : 0);
       brake = Math.max(brake, pad.buttons[6]?.value ?? 0, pad.buttons[1]?.pressed ? 1 : 0);
       for (const [btn, key] of [[9, 'Escape'], [3, 'r']] as const) {
         const now = !!pad.buttons[btn]?.pressed;
@@ -164,7 +160,7 @@ export class Input {
     // Simple: always on the throttle except while braking. Brake held at a standstill
     // reverses (KartPhysics), so a player can back off a wall.
     if (!classic) throttle = 1 - brake;
-    return { throttle, brake, steer, drift };
+    return { throttle, brake, steer, drift: false }; // no drift: the field stays for the physics and ghosts
   }
 
   dispose() {
