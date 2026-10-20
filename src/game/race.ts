@@ -608,7 +608,9 @@ export class Race {
       const before = L - prev;
       const frac = before / Math.max(1e-6, before + s);
       const tCross = this.simT - dt + dt * frac;
-      // Backstop: no lap can be shorter than the shortest line inside the limits.
+      // Every sector gate passed (by driving through it, not jumping), and no lap shorter than the
+      // shortest line inside the limits (a backstop).
+      if (this.lapStart !== null && !(this.sectorsHit[0] && this.sectorsHit[1])) this.invalidate('Missed a sector');
       if (this.lapStart !== null && this.phys.odo - this.lapOdo < this.track.minLapLength) this.invalidate('Cut the track', true);
       if (this.lapStart !== null) this.finishLap(tCross);
       this.lapStart = tCross;
@@ -628,7 +630,8 @@ export class Race {
     const lapT = (this.simT - this.lapStart) * 1000;
     for (let k = 0; k < 2; k++) {
       const b = (L * (k + 1)) / 3;
-      if (!this.sectorsHit[k] && prev < b && s >= b && s - prev < 30) {
+      // Progress is continuous (clean laps step < 3.1 m), so a gate only counts when driven through.
+      if (!this.sectorsHit[k] && prev < b && s >= b && s - prev < 10 && !rejoin) {
         if (k === 1 && !this.sectorsHit[0]) this.invalidate('Missed a sector');
         this.sectorsHit[k] = true;
         const total = this.sectorTimes.reduce((a, x) => a + x, 0);
