@@ -6,6 +6,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-20
+
 ### Changed
 - **A new look: Pit Wall.** Every circuit is a live session, so ApexKart now reads like a race timing
   screen: carbon black, broadcast type, and timing colours (purple for fastest, green for your
@@ -294,7 +296,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 ### Fixed
 - Leaderboard and lap submission on the live site.
 
-[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.13.0...v0.13.1
