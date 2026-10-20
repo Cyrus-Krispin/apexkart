@@ -4,6 +4,7 @@ import { buildTrackScene, type TrackScene } from './trackMesh';
 import { buildKart, KartPhysics, type KartVisual } from './kart';
 import { availableSchemes, controlsPref, Input, saveControlsPref, SCHEME_LABEL, type ControlScheme } from './input';
 import { KartAudio } from './audio';
+import { KartFx } from './fx';
 import { Atmosphere, resolveTime, type TimePref } from './atmosphere';
 import { awardMedal, earnedMedal, MEDAL_NAME, MEDALS, medalFor, targets } from './medals';
 import { recordDailyLap } from '../shared/daily';
@@ -128,7 +129,7 @@ export class Race {
   private throttle = 0;
   private nextSyncAt = 0;
   private minimap!: { bg: HTMLCanvasElement; map: (x: number, z: number) => [number, number] };
-  private skid!: { geo: THREE.BufferGeometry; pos: Float32Array; i: number; prev: (THREE.Vector3 | null)[] };
+  private fx!: KartFx; // particles and skid marks
   autopilot = false;
 
   constructor(private opts: RaceOptions) {
@@ -181,7 +182,7 @@ export class Race {
     if (opts.rival && !opts.mode) this.loadRival(opts.rival);
     this.syncToggles();
     this.buildMinimap();
-    this.buildSkids();
+    this.fx = new KartFx(this.scene, this.track);
     this.resetToGrid();
     this.state = 'intro';
     this.applyMode();
@@ -329,21 +330,6 @@ export class Race {
       g.restore();
     }
     this.minimap = { bg, map };
-  }
-
-  private buildSkids() {
-    const max = 3000;
-    const pos = new Float32Array(max * 6 * 3);
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    geo.setDrawRange(0, 0);
-    const mesh = new THREE.Mesh(
-      geo,
-      new THREE.MeshBasicMaterial({ color: 0x050505, transparent: true, opacity: 0.42, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }),
-    );
-    mesh.frustumCulled = false;
-    this.scene.add(mesh);
-    this.skid = { geo, pos, i: 0, prev: [null, null] };
   }
 
   // ------------------------------------------------------------------ flow
@@ -568,7 +554,7 @@ export class Race {
     this.phys.step(dt, c);
     this.audio.update(this.phys.speed, c.throttle, this.phys.slip, this.phys.surface === 'grass');
     if (this.state === 'racing') this.timing(dt);
-    this.updateSkids(c.drift);
+    this.fx.sense(this.phys, c, dt, this.simT);
     this.throttle = c.throttle;
     this.opts.mode?.addon?.tick?.(dt);
   }
@@ -906,6 +892,8 @@ export class Race {
     k.body.position.y = p.surface === 'grass' ? Math.sin(this.simT * 40) * 0.012 : p.surface === 'kerb' ? Math.sin(this.simT * 70) * 0.02 : 0;
     for (const f of k.frontPivots) f.rotation.y = -p.steerAngle * 1.2;
     for (const w of k.wheels) w.rotation.x = p.wheelSpin;
+    const live = this.state === 'grid' || this.state === 'racing';
+    this.fx.frame(live ? dt : 0, this.camera, this.pipeline.renderer, this.pipeline.quality, this.atmos.time === 'night');
 
     const { fwd, pos, look, tmp, up } = this.v;
     fwd.set(Math.sin(heading), 0, Math.cos(heading));
@@ -1023,40 +1011,6 @@ export class Race {
     g.lineWidth = 3.5;
     g.strokeStyle = '#f2f3f5';
     g.stroke();
-  }
-
-  private updateSkids(drift: boolean) {
-    const p = this.phys;
-    const skidding = p.surface !== 'grass' && p.speed > 4 && (p.slip > 2.6 || (drift && Math.abs(p.yawRate) > 0.6));
-    const fx = Math.sin(p.heading);
-    const fz = Math.cos(p.heading);
-    const sk = this.skid;
-    [-0.6, 0.6].forEach((side, w) => {
-      const cx = p.x + fz * side - fx * 0.62;
-      const cz = p.z - fx * side - fz * 0.62;
-      const prev = sk.prev[w];
-      const cur = this.v.tmp.set(cx, 0.05, cz);
-      if (skidding && prev && prev.distanceToSquared(cur) > 0.04) {
-        const dx = cur.x - prev.x;
-        const dz = cur.z - prev.z;
-        const len = Math.hypot(dx, dz) || 1;
-        const nx = (-dz / len) * 0.1;
-        const nz = (dx / len) * 0.1;
-        const quad = [prev.x - nx, prev.z - nz, prev.x + nx, prev.z + nz, cur.x - nx, cur.z - nz, cur.x + nx, cur.z + nz];
-        const tri = [0, 1, 2, 1, 3, 2];
-        const base = (sk.i % 3000) * 18;
-        tri.forEach((v, n) => {
-          sk.pos[base + n * 3] = quad[v * 2];
-          sk.pos[base + n * 3 + 1] = 0.05;
-          sk.pos[base + n * 3 + 2] = quad[v * 2 + 1];
-        });
-        sk.i++;
-        sk.geo.setDrawRange(0, Math.min(sk.i, 3000) * 6);
-        (sk.geo.attributes.position as THREE.BufferAttribute).needsUpdate = true;
-        prev.set(cx, 0.05, cz);
-      } else if (!skidding) sk.prev[w] = null;
-      else if (!prev) sk.prev[w] = new THREE.Vector3(cx, 0.05, cz); // once per skid, not per tick
-    });
   }
 
   private onResize = () => {
