@@ -552,7 +552,6 @@ export class Race {
     }
     this.simT += dt;
     this.phys.step(dt, c);
-    this.audio.update(this.phys.speed, c.throttle, this.phys.slip, this.phys.surface === 'grass');
     if (this.state === 'racing') this.timing(dt);
     this.fx.sense(this.phys, c, dt, this.simT);
     this.throttle = c.throttle;
@@ -893,7 +892,12 @@ export class Race {
     for (const f of k.frontPivots) f.rotation.y = -p.steerAngle * 1.2;
     for (const w of k.wheels) w.rotation.x = p.wheelSpin;
     const live = this.state === 'grid' || this.state === 'racing';
-    this.fx.frame(live ? dt : 0, this.camera, this.pipeline.renderer, this.pipeline.quality, this.atmos.time === 'night');
+    const fb = this.fx.frame(live ? dt : 0, this.camera, this.pipeline.renderer, this.pipeline.quality, this.atmos.time === 'night');
+    if (live) {
+      if (fb.impact) this.audio.impact(fb.impact);
+      const cockpit = CAMS[this.camMode].id === 'hood';
+      this.audio.update({ speed: p.speed, vmax: p.vmax, throttle: this.throttle, squeal: fb.squeal, kerb: fb.kerb, grass: fb.grass, scrape: fb.scrape, cockpit });
+    }
 
     const { fwd, pos, look, tmp, up } = this.v;
     fwd.set(Math.sin(heading), 0, Math.cos(heading));
