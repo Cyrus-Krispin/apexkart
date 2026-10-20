@@ -44,6 +44,7 @@ export interface EditorCallbacks {
 export class LayoutEditor {
   private pts: LatLon[];
   private layer = L.layerGroup();
+  private casing: L.Polyline;
   private line: L.Polyline;
   private handles: L.Marker[] = [];
   private mids: L.Marker[] = [];
@@ -56,8 +57,11 @@ export class LayoutEditor {
     private cb: EditorCallbacks,
   ) {
     this.pts = simplifyLoop(initial);
-    this.line = L.polyline([], { color: '#ff4d00', weight: 4, opacity: 0.95, interactive: false });
+    // Pit Wall yellow on a dark casing, so it reads over bright concrete and dark trees alike.
+    this.casing = L.polyline([], { color: '#0b0c10', weight: 8, opacity: 0.55, interactive: false });
+    this.line = L.polyline([], { color: '#ffd60a', weight: 3.5, opacity: 1, interactive: false });
     this.layer.addTo(map);
+    this.casing.addTo(this.layer);
     this.line.addTo(this.layer);
     map.on('click', this.onMapClick);
     map.getContainer().classList.add('editing');
@@ -72,24 +76,30 @@ export class LayoutEditor {
     this.cb.onChange({ points: this.pts.length, lengthM: this.pts.length > 2 ? loopLength(this.pts) : 0, drawing: this.drawing });
   }
 
+  private setLine(ll: LatLon[]) {
+    this.casing.setLatLngs(ll);
+    this.line.setLatLngs(ll);
+  }
+
   private render() {
     this.handles.forEach((h) => h.remove());
     this.mids.forEach((h) => h.remove());
     this.handles = [];
     this.mids = [];
     const closed = !this.drawing && this.pts.length > 2;
-    this.line.setLatLngs(closed ? [...this.pts, this.pts[0]] : this.pts);
+    this.setLine(closed ? [...this.pts, this.pts[0]] : this.pts);
     this.pts.forEach((p, i) => {
       const first = i === 0;
       const h = L.marker(p, {
         draggable: true,
-        icon: L.divIcon({ className: `ed-handle${first ? ' first' : ''}${this.drawing && first && this.pts.length > 3 ? ' closable' : ''}`, iconSize: [14, 14] }),
+        // A 26px hit area (thumbs); editor.css draws the visible dot inside it.
+        icon: L.divIcon({ className: `ed-handle${first ? ' first' : ''}${this.drawing && first && this.pts.length > 3 ? ' closable' : ''}`, iconSize: [26, 26] }),
         title: first ? 'Start / finish' : 'Drag onto the middle of the track. Right-click to delete.',
       });
       h.on('drag', () => {
         const ll = h.getLatLng();
         this.pts[i] = [ll.lat, ll.lng];
-        this.line.setLatLngs(closed ? [...this.pts, this.pts[0]] : this.pts);
+        this.setLine(closed ? [...this.pts, this.pts[0]] : this.pts);
       });
       h.on('dragend', () => {
         this.render();
@@ -117,7 +127,7 @@ export class LayoutEditor {
     for (let i = 0; i < this.pts.length; i++) {
       const a = this.pts[i];
       const b = this.pts[(i + 1) % this.pts.length];
-      const m = L.marker([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], { icon: L.divIcon({ className: 'ed-mid', iconSize: [10, 10] }), title: 'Add a point here' });
+      const m = L.marker([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], { icon: L.divIcon({ className: 'ed-mid', iconSize: [20, 20] }), title: 'Add a point here' });
       m.on('click', (e) => {
         L.DomEvent.stopPropagation(e);
         this.pts.splice(i + 1, 0, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]);

@@ -1,14 +1,100 @@
-/* Layout editor screen (src/ui/editorScreen.ts) and its map handles (src/ui/layoutEditor.ts). */
-.ed-lede { margin: 0 0 14px; font-size: 14px; color: var(--ink-2); }
-.ed-steps { list-style: none; margin: 0 0 16px; padding: 0; display: grid; gap: 8px; font-size: 13.5px; }
-.ed-steps li { display: grid; grid-template-columns: 28px 1fr; }
-.ed-steps b.mono { color: var(--signal-deep); font-size: 12px; padding-top: 1px; }
-.ed-stats { border-top: 1px solid var(--ink); margin-bottom: 12px; }
-.ed-tools { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 10px; }
-.ed-tools .btn { height: 38px; padding: 0 8px; font-size: 13px; }
-.ed-status { min-height: 20px; margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--signal-deep); }
-.ed-handle { background: #fff; border: 2.5px solid var(--signal); border-radius: 50%; box-shadow: 0 0 0 1.5px var(--ink); cursor: grab; }
-.ed-handle.first { background: conic-gradient(#111 0 25%, #fff 0 50%, #111 0 75%, #fff 0) 0 0 / 7px 7px; border-color: var(--ink); width: 18px !important; height: 18px !important; margin: -9px 0 0 -9px !important; }
-.ed-handle.closable { animation: live 1.2s infinite; }
-.ed-mid { background: rgba(255, 255, 255, 0.55); border: 1.5px solid var(--ink); border-radius: 50%; cursor: copy; opacity: 0.7; }
-.ed-mid:hover { opacity: 1; background: var(--signal); }
+/* Layout editor screen (src/ui/editorScreen.ts) and its map handles (src/ui/layoutEditor.ts). Pit Wall.
+   Desktop: satellite map with the panel down the right. Phones: map on top, panel as a bottom sheet. */
+.ed-screen {
+  position: fixed; inset: 0; z-index: 2000; display: grid; grid-template-columns: minmax(0, 1fr) 380px;
+  background: var(--carbon); color: var(--text); outline: 0;
+}
+.ed-screen .ed-map { position: relative; z-index: 0; isolation: isolate; min-height: 0; background: var(--carbon-2); }
+.ed-screen .ed-map.leaflet-container { font-family: var(--ui); }
+/* Hide the hairline seams between tiles at fractional zoom (Chromium). */
+.ed-screen .ed-map img.leaflet-tile { mix-blend-mode: plus-lighter; }
+.ed-screen .ed-map .leaflet-control-zoom { border: 0; box-shadow: none; margin: 12px 0 0 12px; display: grid; gap: 4px; }
+.ed-screen .ed-map .leaflet-control-zoom a {
+  width: 44px; height: 44px; line-height: 44px; border: 0; border-radius: var(--radius); background: rgba(11, 12, 16, 0.86); color: var(--text);
+  font: 700 22px/44px var(--mono);
+}
+.ed-screen .ed-map .leaflet-control-zoom a:hover { background: var(--panel-3); }
+.ed-screen .ed-map .leaflet-control-zoom a.leaflet-disabled { color: var(--dim); background: rgba(11, 12, 16, 0.6); }
+.ed-screen .ed-map .leaflet-control-attribution { background: rgba(6, 7, 8, 0.7); color: var(--muted); font: 600 10.5px/1.6 var(--ui); letter-spacing: 0.04em; padding: 0 6px; }
+
+.ed-panel {
+  display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  padding: 16px 16px max(16px, env(safe-area-inset-bottom)); background: var(--carbon); border-left: 1px solid var(--line);
+  padding-top: max(16px, env(safe-area-inset-top));
+}
+.ed-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-bottom: 10px; border-bottom: 2px solid var(--yellow); }
+.ed-top > .label:first-child { color: var(--yellow); }
+.ed-src b { color: var(--text-2); font-size: 13px; letter-spacing: -0.02em; margin-left: 4px; }
+.ed-src small, .ed-stats small { font-size: 0.72em; margin-left: 2px; color: var(--muted); }
+
+.ed-trow { display: flex; gap: 10px; align-items: flex-start; }
+.ed-trow .pw-stripe { margin-top: 2px; }
+.ed-tname { display: grid; gap: 6px; min-width: 0; }
+.ed-tname b.display { font-size: 24px; line-height: 1.02; overflow-wrap: anywhere; }
+.ed-tname .pw-code { font-size: inherit; color: var(--yellow); margin-right: 2px; }
+.ed-lede { font-size: 14px; line-height: 1.4; color: var(--text-2); }
+
+.ed-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 14px; line-height: 1.35; color: var(--text-2); }
+.ed-steps li { display: grid; grid-template-columns: 34px 1fr; align-items: center; min-height: 34px; padding-right: 10px; background: var(--panel); border-radius: 3px; }
+.ed-steps li > b.mono { align-self: stretch; display: grid; place-items: center; background: var(--panel-3); color: var(--yellow); font-size: 12px; border-radius: 3px 0 0 3px; margin-right: 10px; }
+.ed-steps li > span { padding: 7px 0; }
+.ed-steps li b:not(.mono) { color: var(--text); font-weight: 600; }
+
+.ed-stats { margin: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px; }
+.ed-stats > div { padding: 8px 10px; background: var(--carbon-2); border-radius: 3px; min-width: 0; }
+.ed-stats dt { font-size: 11px; }
+.ed-stats dd { margin: 3px 0 0; font-size: 20px; line-height: 1; white-space: nowrap; }
+.ed-stats dd.ui { font-size: 18px; font-style: italic; }
+.ed-stats dd.ok { color: var(--green); }
+.ed-stats dd.open { color: var(--yellow); }
+
+.ed-tools { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+.ed-tools .btn { padding: 0 6px; font-size: 13.5px; letter-spacing: 0.05em; white-space: nowrap; }
+
+.ed-status { margin: 0; min-height: 20px; font-size: 14px; letter-spacing: 0.06em; color: var(--text-2); }
+.ed-status:empty { display: none; }
+.ed-status.warn { color: var(--yellow); }
+.ed-status.err { color: var(--red); }
+
+.ed-acts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px; margin-top: auto; padding-top: 4px; }
+.ed-acts .btn.primary[aria-disabled='true'] { background: var(--panel-2); border-color: var(--line-2); color: var(--muted); filter: none; }
+.ed-acts kbd { opacity: 0.6; }
+.ed-screen.saving .ed-panel .btn { pointer-events: none; opacity: 0.6; }
+
+/* ---------- Map handles (Leaflet divIcons: a 26px hit area, the dot drawn inside) */
+.ed-handle, .ed-mid { background: none; border: 0; }
+.ed-handle { cursor: grab; }
+.ed-handle:active { cursor: grabbing; }
+.ed-handle::after, .ed-mid::after { content: ''; position: absolute; left: 50%; top: 50%; border-radius: 50%; transform: translate(-50%, -50%); }
+.ed-handle::after { width: 14px; height: 14px; background: var(--text); border: 3px solid var(--carbon); box-shadow: 0 0 0 1.5px var(--yellow); }
+.ed-handle.first::after {
+  width: 20px; height: 20px; border: 2px solid var(--carbon); box-shadow: 0 0 0 2px var(--yellow);
+  background: conic-gradient(#000 25%, #fff 0 50%, #000 0 75%, #fff 0) 0 0 / 8px 8px;
+}
+.ed-handle.closable::after { animation: ed-pulse 1s infinite; }
+@keyframes ed-pulse { 50% { box-shadow: 0 0 0 7px rgba(255, 214, 10, 0.45); } }
+.ed-mid { cursor: copy; }
+.ed-mid::after { width: 9px; height: 9px; background: rgba(11, 12, 16, 0.75); border: 1.5px solid var(--yellow); }
+.ed-mid:hover::after { width: 12px; height: 12px; background: var(--yellow); }
+
+/* ---------- Phones and narrow windows: map on top, the panel as a bottom sheet */
+@media (max-width: 760px) {
+  .ed-screen { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  .ed-panel {
+    max-height: min(56dvh, 460px); gap: 8px; padding: 12px 12px max(12px, env(safe-area-inset-bottom));
+    border: 0; border-top: 2px solid var(--yellow); border-radius: 6px 6px 0 0; box-shadow: 0 -10px 24px rgba(0, 0, 0, 0.5); margin-top: -6px; position: relative; z-index: 1;
+  }
+  .ed-top { display: none; }
+  .ed-tname b.display { font-size: 20px; }
+  .ed-lede { display: none; }
+  .ed-steps { font-size: 13.5px; }
+  .ed-steps li { min-height: 30px; }
+  .ed-steps li > span { padding: 5px 0; }
+  .ed-stats > div { padding: 6px 8px; }
+  .ed-stats dd { font-size: 17px; }
+  .ed-stats dd.ui { font-size: 16px; }
+  /* Save stays in reach while the sheet scrolls. */
+  .ed-acts { position: sticky; bottom: calc(-1 * max(12px, env(safe-area-inset-bottom))); margin: auto -12px calc(-1 * max(12px, env(safe-area-inset-bottom))); padding: 8px 12px max(12px, env(safe-area-inset-bottom)); background: var(--carbon); }
+  .ed-acts .btn.lg { font-size: 20px; }
+  .ed-screen .ed-map .leaflet-control-zoom { margin: max(10px, env(safe-area-inset-top)) 0 0 10px; }
+}

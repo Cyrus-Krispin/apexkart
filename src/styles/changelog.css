@@ -1,44 +1,78 @@
-/* Changelog page (#/changelog) and the version link in the atlas top bar. Paddock Paper tokens. */
+/* What's new (#/changelog) and the version link in the home header. Pit Wall (docs/pit-wall.md):
+   releases as broadcast captions, section tags in the timing colours. */
+
+/* ---------- Version link (home header .top-right) */
 .ver-chip {
-  display: inline-flex; align-items: center; height: 34px; padding: 0 10px; border: 1px solid var(--rule-strong); border-radius: var(--radius);
-  font-size: 12px; font-weight: 700; color: var(--ink-2); text-decoration: none; white-space: nowrap;
+  position: relative; display: inline-flex; align-items: center; height: 36px; padding: 0 10px; flex: none;
+  border: 1.5px solid var(--line-2); border-radius: var(--radius); background: transparent;
+  font-size: 12.5px; font-weight: 600; color: var(--text-2); text-decoration: none; white-space: nowrap;
 }
-.ver-chip:hover { border-color: var(--ink); color: var(--ink); }
-
-.cl-page { position: fixed; inset: 0; z-index: 1600; overflow-y: auto; padding: 28px 16px 48px; overscroll-behavior: contain; }
-.cl-card { width: min(720px, 100%); margin: 0 auto; background: var(--paper); border: 1px solid var(--ink); box-shadow: 6px 6px 0 var(--ink); }
-.cl-card > * { padding: 18px 26px; }
-.cl-card > * + * { border-top: 1px solid var(--rule); }
-.cl-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.cl-head h1 { margin: 4px 0 0; font-size: 40px; }
-.cl-back { font-weight: 700; font-size: 14px; color: var(--ink-2); white-space: nowrap; padding-top: 2px; }
-.cl-back:hover { color: var(--signal-deep); }
-.cl-intro { margin: 0; color: var(--ink-2); }
-.cl-intro code, .cl-rel code { font-family: var(--mono); font-size: 0.88em; padding: 1px 4px; background: var(--paper-2); border: 1px solid var(--rule); }
-.cl-intro a, .cl-rel a { color: var(--ink); text-decoration-color: var(--signal); text-underline-offset: 2px; }
-
-.cl-rel > header { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 4px; }
-.cl-rel h2 { margin: 0; font-size: 30px; }
-.cl-rel.current h2 { color: var(--signal-deep); }
-.cl-v { text-transform: none; }
-.cl-now { align-self: center; font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; padding: 2px 7px; background: var(--signal); color: var(--ink); }
-.cl-kind { display: flex; align-items: center; gap: 8px; margin: 16px 0 6px; }
-.cl-kind i { width: 10px; height: 10px; background: var(--ink-3); }
-.cl-kind.added i { background: var(--green); }
-.cl-kind.changed i { background: var(--signal); }
-.cl-kind.fixed i { background: var(--purple); }
-.cl-kind.removed i { background: var(--red); }
-.cl-rel ul { margin: 0; padding: 0 0 0 18px; display: grid; gap: 5px; }
-.cl-rel li { line-height: 1.45; }
-.cl-rel li::marker { color: var(--ink-3); }
-.cl-rel li ul { margin-top: 5px; gap: 3px; }
-
-@media (max-width: 560px) {
-  .cl-page { padding: 12px 10px 32px; }
-  .cl-card > * { padding: 14px 16px; }
-  .cl-head h1 { font-size: 30px; }
-  .cl-rel h2 { font-size: 24px; }
-}
+.ver-chip::before { content: ''; position: absolute; inset: -4px; } /* 44px touch target */
+.ver-chip:hover { border-color: var(--yellow); color: var(--text); }
 @media (max-width: 420px) {
   .ver-chip { padding: 0 7px; font-size: 11px; }
+}
+
+/* ---------- Page */
+.cl-page { position: fixed; inset: 0; z-index: 1600; overflow-y: auto; overscroll-behavior: contain; background-color: var(--carbon); background-image: var(--hatch); }
+.cl-card { width: min(760px, 100%); margin: 0 auto; padding: 0 max(16px, env(safe-area-inset-right)) max(48px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
+.cl-bar {
+  position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 52px;
+  padding-top: env(safe-area-inset-top); box-sizing: content-box; margin: 0 -16px; padding-left: 16px; padding-right: 16px;
+  background: rgba(11, 12, 16, 0.94); border-bottom: 1px solid var(--line);
+}
+.cl-back { height: 44px; display: inline-flex; align-items: center; gap: 6px; font-size: 16px; letter-spacing: 0.06em; color: var(--yellow); }
+.cl-back .mono { font-size: 20px; line-height: 1; }
+.cl-back:hover { color: var(--text); }
+.cl-bar-t { font-size: 14px; letter-spacing: 0.14em; color: var(--muted); }
+
+.cl-head { padding: 28px 0 8px; display: grid; gap: 6px; }
+.cl-head .label { margin: 0; color: var(--yellow); }
+.cl-head .label .mono { letter-spacing: 0; }
+.cl-head h1 { margin: 0; font-size: 56px; }
+.cl-intro { margin: 4px 0 0; max-width: 62ch; color: var(--text-2); font-size: 15px; }
+.cl-intro code, .cl-rel code { font-family: var(--mono); font-size: 0.86em; padding: 1px 5px; border-radius: 2px; background: var(--panel-2); color: var(--text); }
+.cl-intro a, .cl-rel a { color: var(--text); text-decoration-color: var(--yellow); text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
+.cl-intro a:hover, .cl-rel a:hover { color: var(--yellow); }
+.cl-intro b, .cl-rel b { color: var(--text); font-weight: 600; }
+
+/* A release: a lower-third caption (version block, date), then its tagged sections. */
+.cl-rel { margin-top: 26px; scroll-margin-top: 64px; }
+.cl-cap { display: flex; align-items: stretch; min-height: 44px; background: linear-gradient(90deg, var(--panel-2), var(--panel)); border-radius: 3px; overflow: hidden; }
+.cl-cap h2 { display: flex; align-items: center; margin: 0; padding: 0 14px; background: var(--text); color: var(--carbon); font-size: 28px; white-space: nowrap; }
+.cl-v { text-transform: none; margin-right: 1px; }
+.cl-date { display: flex; align-items: center; padding: 0 14px; min-width: 0; font-size: 15px; letter-spacing: 0.06em; color: var(--text-2); }
+.cl-now { display: flex; align-items: center; margin-left: auto; padding: 0 12px; font-size: 13px; font-style: italic; font-weight: 800; letter-spacing: 0.1em; color: var(--yellow); white-space: nowrap; }
+.cl-rel.current .cl-cap h2 { background: var(--yellow); }
+.cl-rel.current .cl-cap { box-shadow: inset 0 0 0 1.5px rgba(255, 214, 10, 0.4); }
+.cl-rel.unreleased .cl-cap h2 { background: var(--panel-3); color: var(--text); }
+.cl-rel.unreleased .cl-date::before { content: ''; width: 7px; height: 7px; margin-right: 8px; border-radius: 50%; background: var(--red); flex: none; animation: live 1.2s infinite; }
+
+.cl-kind { margin: 16px 0 8px; line-height: 1; }
+.cl-kind span {
+  display: inline-block; padding: 4px 8px 3px; border-radius: 2px; background: var(--panel-3); color: var(--text-2);
+  font-family: var(--ui); font-weight: 800; font-style: italic; font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase;
+}
+.cl-kind.added span { background: var(--green); color: #05170b; }
+.cl-kind.changed span { background: var(--yellow); color: var(--carbon); }
+.cl-kind.fixed span { background: var(--purple); color: #fff; }
+.cl-kind.removed span { background: var(--red); color: #fff; }
+.cl-kind.security span { background: transparent; color: var(--red); box-shadow: inset 0 0 0 1.5px var(--red); }
+
+.cl-list { --k: var(--muted); list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
+.cl-list.added { --k: var(--green); } .cl-list.changed { --k: var(--yellow); } .cl-list.fixed { --k: var(--purple); }
+.cl-list.removed, .cl-list.security { --k: var(--red); }
+.cl-list li { position: relative; padding-left: 18px; font-size: 15px; line-height: 1.5; color: var(--text-2); overflow-wrap: anywhere; }
+.cl-list li::before { content: ''; position: absolute; left: 2px; top: 0.62em; width: 6px; height: 6px; border-radius: 1px; background: var(--k); }
+.cl-list li ul { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
+.cl-list li li { padding-left: 16px; font-size: 14.5px; }
+.cl-list li li::before { width: 6px; height: 1.5px; top: 0.75em; background: var(--muted); }
+
+@media (max-width: 560px) {
+  .cl-head { padding-top: 20px; }
+  .cl-head h1 { font-size: 44px; }
+  .cl-cap h2 { font-size: 23px; padding: 0 11px; }
+  .cl-date { padding: 8px 11px; font-size: 13.5px; line-height: 1.2; }
+  .cl-now { padding: 0 10px; font-size: 12px; }
+  .cl-list li { font-size: 14.5px; }
 }

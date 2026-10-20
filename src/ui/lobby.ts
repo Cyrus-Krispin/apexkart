@@ -7,6 +7,7 @@ import { CODE_RE, KART_COLORS, LAPS_DEFAULT, LAPS_MAX, LAPS_MIN, isReady, roomTi
 import type { TrackData } from '../track/osm';
 import { analyzeShape, type TrackShape } from '../track/shape';
 import { trackArt } from './trackArt';
+import { circuitCode, stripeStyle } from './pitwall';
 import { cleanDriverName } from './profile';
 import type { RoomClient } from '../net/room';
 import type { LinkInfo } from '../net/mesh';
@@ -44,7 +45,7 @@ function outline(t: TrackData | null, dir: Dir) {
   if (!t?.points?.length) return '';
   let shape = shapes.get(t.id);
   if (!shape) shapes.set(t.id, (shape = analyzeShape(t.points)));
-  return trackArt(shape, { w: 150, h: 104, pad: 12, reverse: dir === 'rev', arrows: true, road: true });
+  return trackArt(shape, { w: 150, h: 104, pad: 12, reverse: dir === 'rev', arrows: true, road: true, sectors: true });
 }
 
 export class Lobby {
@@ -63,7 +64,7 @@ export class Lobby {
     private actions: LobbyActions,
   ) {
     this.root = document.createElement('div');
-    this.root.className = 'mp-lobby graph-paper';
+    this.root.className = 'mp-lobby';
     this.root.hidden = true;
     this.root.innerHTML = LOBBY_HTML;
     this.root.querySelectorAll<HTMLElement>('[data-el]').forEach((e) => (this.$[e.dataset.el!] = e));
@@ -139,6 +140,10 @@ export class Lobby {
         if (el && this.root.contains(el)) fn(el);
       });
     click('[data-act="close"]', () => this.actions.close());
+    // Esc goes back from create/join; in a room it would mean leaving, so it does nothing there.
+    addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !e.defaultPrevented && !this.root.hidden && !this.$.home.hidden) this.actions.close();
+    });
     click('[data-act="create"]', () =>
       this.run(async () => {
         const t = this.homeTrack();
@@ -270,8 +275,11 @@ export class Lobby {
       this.$.outline.innerHTML = art;
     }
     this.$.trackName.textContent = cfg.trackName;
+    this.$.stripe.setAttribute('style', stripeStyle(t?.country));
     const night = roomTime(cfg) === 'night';
     this.$.trackMeta.textContent = `${(cfg.lengthM / 1000).toFixed(2)} km · ${cfg.dir === 'rev' ? 'reverse' : 'normal'} · ${cfg.laps} lap${cfg.laps > 1 ? 's' : ''}${night ? ' · night' : ''}`;
+    this.$.boardTrack.textContent = circuitCode(cfg.trackName);
+    this.$.boardLaps.textContent = `${cfg.laps} LAP${cfg.laps > 1 ? 'S' : ''}`;
     this.$.hostControls.hidden = !host;
     const lobby = cfg.phase === 'lobby';
     this.$.hostControls.querySelectorAll<HTMLButtonElement | HTMLSelectElement>('button, select').forEach((b) => (b.disabled = !lobby));
@@ -295,26 +303,31 @@ export class Lobby {
       !l
         ? '<span class="link"></span>'
         : l.state === 'p2p'
-          ? `<span class="link p2p" title="Direct peer-to-peer link">● ${l.rtt != null ? Math.round(l.rtt) + ' ms' : 'direct'}</span>`
+          ? `<span class="link p2p" title="Direct peer-to-peer link">${l.rtt != null ? Math.round(l.rtt) + ' MS' : 'DIRECT'}</span>`
           : l.state === 'relay'
-            ? `<span class="link relay" title="A direct connection isn't possible between your networks (no TURN server), so positions go through the server a few times a second.">● relayed</span>`
-            : `<span class="link" title="Setting up a direct connection">● connecting…</span>`;
+            ? `<span class="link relay" title="A direct connection isn't possible between your networks (no TURN server), so positions go through the server a few times a second.">RELAY</span>`
+            : `<span class="link" title="Setting up a direct connection">LINKING…</span>`;
     const racing = s.cfg.phase === 'racing';
     const onGrid = new Set(s.cfg.grid.map((g) => g.mid));
     this.$.players.innerHTML = s.players
-      .map((p) => {
+      .map((p, i) => {
         const me = p.mid === room.mid;
-        const ready = racing ? (onGrid.has(p.mid) ? (p.fin?.r === s.cfg.race ? 'DONE' : 'RACING') : 'WAITING') : p.mid === s.cfg.host ? '' : isReady(p, s.cfg) ? 'READY' : 'NOT READY';
-        return `<li class="${me ? 'me' : ''}">
-          <span class="bar" style="background:${escapeHtml(p.color)}"></span>
-          <span class="nm">${escapeHtml(p.name)}${me ? ' <small>(you)</small>' : ''}${p.mid === s.cfg.host ? '<span class="host">HOST</span>' : ''}</span>
-          <span class="state ${ready === 'READY' || ready === 'DONE' ? 'yes' : ''}">${ready}</span>
+        const host = p.mid === s.cfg.host;
+        const ready = racing ? (onGrid.has(p.mid) ? (p.fin?.r === s.cfg.race ? 'DONE' : 'RACING') : 'WAITING') : host ? '' : isReady(p, s.cfg) ? 'READY' : 'NOT READY';
+        const tone = ready === 'READY' || ready === 'DONE' ? 'yes' : ready === 'RACING' ? 'live' : '';
+        const c = escapeHtml(p.color);
+        return `<li class="pw-row${me ? ' me' : ''}">
+          <span class="pw-pos${me ? ' me' : ''}">${i + 1}</span>
+          <span class="pw-stripe" style="--c1:${c};--c2:${c}"></span>
+          <span class="nm"><span class="nm-t">${escapeHtml(p.name)}</span>${me ? '<small>YOU</small>' : ''}${host ? '<span class="host">HOST</span>' : ''}</span>
           ${me ? '<span class="link"></span>' : linkLabel(links.get(p.mid))}
-          ${room.isHost && !me ? `<button class="kick" data-kick="${p.mid}" title="Remove from room">✕</button>` : '<span class="kick"></span>'}
+          <span class="state ${tone}">${ready}</span>
+          ${room.isHost && !me ? `<button class="kick" data-kick="${p.mid}" title="Remove from room" aria-label="Remove ${escapeHtml(p.name)}">✕</button>` : '<span class="kick"></span>'}
         </li>`;
       })
       .join('');
     this.$.count.textContent = `${s.players.length} / 8`;
+    this.$.boardGrid.textContent = `${s.players.length}/8`;
     const taken = new Set(s.players.filter((p) => p.mid !== room.mid).map((p) => p.color));
     const mine = room.me?.color;
     this.$.swatches.innerHTML = KART_COLORS.map(
@@ -336,8 +349,10 @@ export class Lobby {
     const iAmReady = !!me && isReady(me, cfg);
     readyBtn.textContent = iAmReady ? 'Ready ✓' : 'Ready up';
     readyBtn.classList.toggle('primary', !iAmReady);
+    readyBtn.classList.toggle('done', iAmReady);
     startBtn.disabled = waiting.length > 0;
-    startBtn.innerHTML = `${s.players.length === 1 ? 'Start solo race' : 'Start race'} <span class="arrow">→</span>`;
+    const code = escapeHtml(circuitCode(cfg.trackName));
+    startBtn.innerHTML = `${s.players.length === 1 ? `Start solo · ${code}` : `Start ${code}`} <span class="arrow">→</span>`;
     this.$.hint.textContent = racing
       ? ''
       : room.isHost
@@ -373,25 +388,31 @@ export class Lobby {
     const lead = last.rows[0]?.ms;
     this.$.lastTitle.textContent = `Last race · ${last.trackName} · ${last.laps} lap${last.laps > 1 ? 's' : ''}`;
     this.$.lastRows.innerHTML = last.rows
-      .map(
-        (r, i) => `<li class="${r.mid === this.room!.mid ? 'me' : ''}"><span class="pos">${r.ms != null ? i + 1 : '–'}</span>
-        <span class="bar" style="background:${escapeHtml(r.color)}"></span><span class="nm">${escapeHtml(r.name)}</span>
-        <span class="tm">${r.ms == null ? 'DNF' : i === 0 ? formatMs(r.ms) : '+' + ((r.ms - lead!) / 1000).toFixed(3)}</span></li>`,
-      )
+      .map((r, i) => {
+        const dnf = r.ms == null;
+        const c = escapeHtml(r.color);
+        return `<li class="${r.mid === this.room!.mid ? 'me' : ''}${dnf ? ' dnf' : ''}"><span class="p">${dnf ? '–' : i + 1}</span>
+        <span class="pw-stripe" style="--c1:${c};--c2:${c}"></span><span class="nm">${escapeHtml(r.name)}</span>
+        <span class="tm${!dnf && i === 0 ? ' p' : ''}">${dnf ? 'DNF' : i === 0 ? formatMs(r.ms) : '+' + ((r.ms! - lead!) / 1000).toFixed(3)}</span></li>`;
+      })
       .join('');
   }
 }
 
 const LOBBY_HTML = /* html */ `
-<div class="mp-card">
-  <header class="mp-head">
-    <div><p class="label">Multiplayer</p><h1 class="display">Race with friends</h1></div>
-    <button class="mp-back" data-act="close"><span class="mono">←</span> Circuits</button>
+<div class="mp-wrap">
+  <header class="mp-bar">
+    <button class="mp-back ui" data-act="close"><span class="mono">‹</span> Circuits</button>
+    <span class="mp-bar-t ui">Race friends</span>
   </header>
 
   <section class="mp-home" data-el="home">
-    <p class="mp-lede">Create a room, send your friends the link or code, and race each other live.</p>
-    <label class="mp-field"><span class="label">Circuit</span><select data-el="homeTrackSel"></select></label>
+    <div class="mp-hero">
+      <p class="label">Multiplayer · up to 8</p>
+      <h1 class="display">Race friends</h1>
+      <p class="mp-lede">Create a room, send your friends the link or code, and race each other live.</p>
+    </div>
+    <label class="mp-field"><span class="label">Circuit</span><span class="pw-select"><select data-el="homeTrackSel"></select></span></label>
     <button class="btn primary lg block" data-act="create">Create room <span class="arrow">→</span></button>
     <div class="mp-or label">or join one</div>
     <form class="mp-join" data-el="joinForm">
@@ -402,51 +423,65 @@ const LOBBY_HTML = /* html */ `
   </section>
 
   <section class="mp-room" data-el="inRoom" hidden>
-    <div class="mp-code">
-      <span class="label">Room</span><span class="code" data-el="code"></span><span class="grow"></span>
-      <button class="btn" data-act="copy">Copy link</button>
-      <button class="btn" data-act="share">Share</button>
-    </div>
-    <div class="mp-banner" data-el="banner"></div>
-
-    <div class="mp-track">
-      <div class="mp-art" data-el="outline"></div>
-      <div class="mp-settings">
-        <div><div class="display name" data-el="trackName"></div><div class="label" data-el="trackMeta"></div></div>
-        <div data-el="hostControls" class="mp-settings">
-          <label class="mp-field"><select data-el="trackSel" aria-label="Circuit"></select></label>
-          <div class="mp-row">
-            <div class="mp-seg" data-el="dirs"><button data-dir="fwd">Normal</button><button data-dir="rev">Reverse</button></div>
-            <div class="mp-laps"><button data-laps="-1" aria-label="Fewer laps">−</button><b class="mono" data-el="laps"></b><button data-laps="1" aria-label="More laps">+</button><span class="label">laps</span></div>
-          </div>
-          <div class="mp-row">
-            <div class="mp-seg" data-el="times" role="group" aria-label="Time of day for everyone"><button data-time="day">Day</button><button data-time="night">Night</button></div>
-            <span class="label">Everyone races at this time of day</span>
+    <div class="mp-col">
+      <div class="mp-boardwrap">
+        <div class="pw-board" aria-label="Room code">
+          <div class="pw-board-in">
+            <div class="pw-board-row"><span>ROOM</span><span class="y mp-code" data-el="code"></span></div>
+            <div class="pw-board-row"><span data-el="boardTrack">–</span><span class="sm" data-el="boardLaps"></span></div>
+            <div class="pw-board-row"><span>GRID</span><span class="sm" data-el="boardGrid"></span></div>
           </div>
         </div>
+        <div class="mp-share">
+          <button class="btn" data-act="copy">Copy link</button>
+          <button class="btn" data-act="share">Share</button>
+        </div>
+      </div>
+      <div class="mp-banner ui" data-el="banner"></div>
+
+      <div class="mp-track">
+        <div class="mp-art graph-paper" data-el="outline"></div>
+        <div class="mp-tinfo">
+          <div class="mp-tname"><span class="pw-stripe big" data-el="stripe"></span><b class="display" data-el="trackName"></b></div>
+          <div class="label" data-el="trackMeta"></div>
+        </div>
+      </div>
+      <div data-el="hostControls" class="mp-settings">
+        <span class="pw-select"><select data-el="trackSel" aria-label="Circuit"></select></span>
+        <div class="mp-set"><span class="label">Direction</span><div class="pw-tabs" data-el="dirs"><button data-dir="fwd">Normal</button><button data-dir="rev">Reverse</button></div></div>
+        <div class="mp-set"><span class="label">Laps</span><div class="mp-laps"><button data-laps="-1" aria-label="Fewer laps">−</button><b class="mono" data-el="laps"></b><button data-laps="1" aria-label="More laps">+</button></div></div>
+        <div class="mp-set"><span class="label">Time of day</span><div class="pw-tabs soft" data-el="times" role="group" aria-label="Time of day for everyone"><button data-time="day">Day</button><button data-time="night">Night</button></div></div>
+        <p class="mp-note">Everyone races at the time of day you pick.</p>
       </div>
     </div>
 
-    <div class="mp-players">
-      <h3 class="label"><span>Drivers</span><span data-el="count"></span></h3>
-      <ul data-el="players"></ul>
-      <div class="mp-me"><input data-el="myName" maxlength="16" autocomplete="off" spellcheck="false" aria-label="Your name" /><div class="mp-swatches" data-el="swatches"></div></div>
+    <div class="mp-col">
+      <div class="mp-players">
+        <h3 class="mp-colh label"><span>Drivers</span><span class="mono" data-el="count"></span></h3>
+        <ul class="mp-tower" data-el="players"></ul>
+        <div class="mp-me">
+          <span class="label">Your kart</span>
+          <input data-el="myName" maxlength="16" autocomplete="off" spellcheck="false" aria-label="Your name" />
+          <div class="mp-swatches" data-el="swatches"></div>
+        </div>
+      </div>
+      <div class="mp-last" data-el="last" hidden>
+        <h3 class="mp-colh label" data-el="lastTitle"></h3>
+        <ol class="mp-cls" data-el="lastRows"></ol>
+      </div>
     </div>
 
-    <div class="mp-last" data-el="last" hidden>
-      <h3 class="label" data-el="lastTitle"></h3>
-      <ol data-el="lastRows"></ol>
-    </div>
-
-    <div class="mp-msg" data-el="roomMsg"></div>
-    <div class="mp-net" data-el="net"></div>
-    <div class="mp-actions">
-      <button class="btn" data-act="leave">Leave</button>
-      <span class="grow" data-el="hint"></span>
-      <button class="btn" data-act="end" data-el="endBtn" hidden title="End the race for everyone">End race</button>
-      <button class="btn primary lg" data-act="rejoin" data-el="rejoin" hidden>Back to race <span class="arrow">→</span></button>
-      <button class="btn primary lg" data-act="ready" data-el="readyBtn">Ready up</button>
-      <button class="btn primary lg" data-act="start" data-el="startBtn">Start race <span class="arrow">→</span></button>
+    <div class="mp-foot">
+      <div class="mp-msg" data-el="roomMsg"></div>
+      <div class="mp-net" data-el="net"></div>
+      <p class="mp-hint" data-el="hint"></p>
+      <div class="mp-actions">
+        <button class="btn" data-act="leave">Leave</button>
+        <button class="btn" data-act="end" data-el="endBtn" hidden title="End the race for everyone">End race</button>
+        <button class="btn primary lg" data-act="rejoin" data-el="rejoin" hidden>Back to race <span class="arrow">→</span></button>
+        <button class="btn primary lg" data-act="ready" data-el="readyBtn">Ready up</button>
+        <button class="btn go lg" data-act="start" data-el="startBtn">Start race <span class="arrow">→</span></button>
+      </div>
     </div>
   </section>
 </div>`;
