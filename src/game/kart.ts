@@ -335,6 +335,9 @@ export class KartPhysics {
     ds = Math.min(ds, this.track.length - ds);
     if (near.dist <= hw && !this.rejoin && ds < 3) this.goodS = near.s;
     this.surface = near.dist <= hw ? 'track' : near.dist <= hw + KERB ? 'kerb' : 'grass';
+    // Asphalt is asphalt: another part of the lap's road grips like the road (where sections merge
+    // or cross). Limits and the reset point still go by this part's own road.
+    if (near.dist > hw && this.track.nearestOther(this.x, this.z, near.i, hw) >= 0) this.surface = 'track';
     this.bump *= Math.exp(-dt * 6);
     this.impact = null;
     const touching = near.dist > wall;

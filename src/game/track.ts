@@ -203,7 +203,7 @@ export class TrackModel {
   /**
    * Could a kart at sample `from` be on sample `i`? Always, on today's flat tracks. A bridge's
    * elevation profile plugs in here (e.g. |elev[i] - elev[from]| < 1.8 m), so a kart under the
-   * deck never rejoins onto it; closest() already asks.
+   * deck never rejoins onto it; closest() and nearestOther() already ask.
    */
   sameLevel(_from: number, _i: number): boolean {
     return true;
@@ -240,6 +240,31 @@ export class TrackModel {
       }
     }
     return this.project(best < 0 ? Math.max(0, from) : best, x, z);
+  }
+
+  /**
+   * A sample of another part of the lap (more than `minSep` metres away along it from sample
+   * `from`, on the same level) within `r` of (x, z); -1 if there's none.
+   */
+  nearestOther(x: number, z: number, from: number, r: number, minSep = 30): number {
+    const cx = Math.floor(x / CELL);
+    const cz = Math.floor(z / CELL);
+    const span = Math.ceil(r / CELL);
+    let best = -1;
+    let bestD = r * r;
+    for (let gx = cx - span; gx <= cx + span; gx++)
+      for (let gz = cz - span; gz <= cz + span; gz++) {
+        const cell = this.grid.get(`${gx},${gz}`);
+        if (!cell) continue;
+        for (const i of cell) {
+          const d = this.d2(i, x, z);
+          if (d <= bestD && Math.abs(this.gain(from, i)) > minSep && this.sameLevel(from, i)) {
+            bestD = d;
+            best = i;
+          }
+        }
+      }
+    return best;
   }
 
   /** Half-width plus the grace: beyond this offset from its own part of the lap, the lap is invalid. */
