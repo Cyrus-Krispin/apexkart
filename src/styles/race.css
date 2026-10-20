@@ -144,6 +144,12 @@
 .h-sectors .sec.done.purple { background: var(--purple); } .sec.done.purple i { background: transparent; } .sec.done.purple span { color: #fff; }
 .h-sectors .sec.done.green { background: var(--green); } .sec.done.green i { background: transparent; } .sec.done.green span { color: #05170b; }
 .h-sectors .sec.done.yellow { background: var(--yellow); } .sec.done.yellow i { background: transparent; } .sec.done.yellow span { color: var(--carbon); }
+/* A sector just done: the chip flashes in its colour and shows the gap to your best sector (hud.sectorFlash). */
+.h-sectors .sec[data-flash]::after { content: attr(data-dl); position: absolute; inset: 0; display: grid; place-items: center; font: 600 12px/1 var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; background: var(--fl); color: var(--fl-ink); animation: h-sec 0.6s ease-out; }
+.h-sectors .sec[data-flash='purple'] { --fl: var(--purple); --fl-ink: #fff; }
+.h-sectors .sec[data-flash='green'] { --fl: var(--green); --fl-ink: #05170b; }
+.h-sectors .sec[data-flash='yellow'] { --fl: var(--yellow); --fl-ink: var(--carbon); }
+@keyframes h-sec { 0%, 30% { filter: brightness(1.2); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.9); } 100% { filter: none; box-shadow: inset 0 0 0 2px transparent; } }
 .h-timing footer { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--line); }
 .h-timing footer div { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 7px 12px; }
 .h-timing footer div + div { border-left: 1px solid var(--line); }
@@ -392,7 +398,7 @@
   .h-time { padding: 5px 8px 2px; font-size: 26px; }
   .h-sectors { padding: 3px 8px 7px; gap: 2px; }
   .h-sectors .sec { height: 18px; }
-  .h-sectors .sec span { font-size: 10.5px; }
+  .h-sectors .sec span, .h-sectors .sec[data-flash]::after { font-size: 10.5px; }
   .h-timing footer { display: none; } /* last and best: in the pause menu and on the circuit page */
   .h-timing footer div { display: grid; gap: 1px; padding: 4px 8px 5px; }
   .h-timing footer .pw-k { font-size: 10px; }

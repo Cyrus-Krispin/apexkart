@@ -4,11 +4,13 @@ import { buildTrackScene, type TrackScene } from './trackMesh';
 import { buildKart, KartPhysics, type KartVisual } from './kart';
 import { availableSchemes, controlsPref, Input, saveControlsPref, SCHEME_LABEL, type ControlScheme } from './input';
 import { KartAudio } from './audio';
+import { KartFx, type FxFrame } from './fx';
+import { Haptics } from './haptics';
 import { Atmosphere, resolveTime, type TimePref } from './atmosphere';
 import { awardMedal, earnedMedal, MEDAL_NAME, MEDALS, medalFor, targets } from './medals';
 import { recordDailyLap } from '../shared/daily';
-import { floodlit } from './floodlights';
-import { RenderPipeline, autoQuality, initialQuality, type Quality, type QualitySetting } from './render';
+import { floodlit, floodTextures } from './floodlights';
+import { RenderPipeline, autoQuality, initialQuality, loadAutoTier, maxRatio, MIN_RATIO, saveAutoTier, texturesUnder, type AutoTier, type Quality, type QualitySetting } from './render';
 import { buildWorld, fetchLiveEnv, type World } from './world';
 import { Hud, type SectorColor } from './hud';
 import { RaceIntro } from '../ui/intro';
@@ -75,7 +77,19 @@ export class Race {
   private worldBuild = 0; // rebuilds can overlap (surroundings arriving late); only the newest is kept
   private rival: { name: string; ms: number; beaten: boolean } | null = null;
   private liveEnvAsked = false;
-  private frameTimes: number[] = [];
+  /** Auto's verdict for this GPU and screen, from an earlier race or this one's warm-up. */
+  private autoRec: AutoTier | null = null;
+  /** The pixel ratio the grid settled on: in the race Auto only goes below it, and back up to it. */
+  private ratioCap = 1;
+  /** Auto's in-race frame-time window (time-based, so 120 Hz screens aren't judged twice as fast). */
+  private perf = { start: 0, t: 0, dts: [] as number[], slow: 0, fast: 0, changed: 0, quietUntil: 0, raised: false, noRaise: false, ghosts: 0 };
+  /** Work to run inside the next frame, just before its own render (warm-up views). */
+  private frameJobs: (() => void)[] = [];
+  private warmGen = 0; // a newer warm-up (time of day, quality, a rebuilt world) supersedes an older one
+  private warming = false;
+  /** Surroundings that arrived mid-race, waiting for a calm moment to go in (the lap count then). */
+  private envPending: { lap: number } | null = null;
+  private rebuilding = false;
   private camera = new THREE.PerspectiveCamera(62, 1, 0.1, 5000);
   private track: TrackModel;
   private trackScene!: TrackScene;
@@ -83,6 +97,8 @@ export class Race {
   private phys: KartPhysics;
   private input: Input;
   private audio = new KartAudio();
+  private haptics = new Haptics(() => this.audio.muted);
+  private pbSeen: number | null | undefined; // a new personal best buzzes once
   private ground!: THREE.Mesh;
   private root: HTMLElement;
   private hud: Hud;
@@ -123,6 +139,8 @@ export class Race {
   private camMode = 0;
   private camPos = new THREE.Vector3();
   private camLook = new THREE.Vector3();
+  /** Camera springs: impact kick offset (o, v), FOV punch, smooth shake, corner look-ahead, eased FOV. */
+  private cam = { ox: 0, oy: 0, oz: 0, vx: 0, vy: 0, vz: 0, fov: 0, fovV: 0, shake: 0, side: 0, fovBase: 62 };
   private showGhosts = localStorage.getItem('ak:ghosts') !== '0';
   private ghosts: Ghost[] = [];
   private board: BoardResponse | null = null;
@@ -132,7 +150,7 @@ export class Race {
   private throttle = 0;
   private nextSyncAt = 0;
   private minimap!: { bg: HTMLCanvasElement; map: (x: number, z: number) => [number, number] };
-  private skid!: { geo: THREE.BufferGeometry; pos: Float32Array; i: number; prev: (THREE.Vector3 | null)[] };
+  private fx!: KartFx; // particles and skid marks
   autopilot = false;
 
   constructor(private opts: RaceOptions) {
@@ -149,7 +167,9 @@ export class Race {
     this.root.className = 'race';
     opts.container.appendChild(this.root);
 
-    this.pipeline = new RenderPipeline(this.scene, this.camera, this.qualitySetting === 'auto' ? autoQuality() : this.qualitySetting);
+    this.pipeline = new RenderPipeline(this.scene, this.camera, 'medium');
+    this.autoRec = loadAutoTier(this.pipeline.gpu);
+    this.pipeline.quality = this.qualitySetting === 'auto' ? this.autoTier() : this.qualitySetting;
     this.root.appendChild(this.pipeline.renderer.domElement);
 
     this.hud = new Hud(this.root, { trackName: opts.track.name, dirLabel: rot.label, dirIcon: rot.icon, color: opts.driver.color }, (a) => this.action(a));
@@ -185,7 +205,7 @@ export class Race {
     if (opts.rival && !opts.mode) this.loadRival(opts.rival);
     this.syncToggles();
     this.buildMinimap();
-    this.buildSkids();
+    this.fx = new KartFx(this.scene, this.track);
     this.resetToGrid();
     this.state = 'intro';
     this.applyMode();
@@ -202,7 +222,7 @@ export class Race {
 
   private buildWorld() {
     const s = this.scene;
-    this.pipeline.setQuality(this.pipeline.quality);
+    this.setTier(this.pipeline.quality);
     // Sky, fog, sun or moon, and the floodlights at night.
     const look = resolveTime(this.timeSetting, this.opts.track.center);
     this.atmos = new Atmosphere(s, this.pipeline, this.kart.root, look.time, look.sun);
@@ -214,58 +234,325 @@ export class Race {
 
     const aniso = this.pipeline.renderer.capabilities.getMaxAnisotropy();
     this.trackScene = buildTrackScene(this.track, aniso);
+    // Start lights: a pure red that stays red through tone mapping when lit (the grid drives them at 4).
+    for (const m of this.trackScene.lights) m.emissive.setRGB(0.3, 0.004, 0.004);
     s.add(this.trackScene.group);
     floodlit(this.ground);
     floodlit(this.trackScene.group);
     this.rebuildWorld();
   }
 
-  private async rebuildWorld() {
-    const build = ++this.worldBuild;
-    if (this.world) {
-      this.scene.remove(this.world.group);
-      disposeTree(this.world.group);
-      this.world = null;
-    }
-    const world = await buildWorld({
-      track: this.track,
-      data: this.opts.track,
-      quality: this.pipeline.quality,
-      aniso: this.pipeline.renderer.capabilities.getMaxAnisotropy(),
-      onStage: (label, f) => this.intro.stage(label, f),
-      isDisposed: () => this.disposed,
-    }).catch((e) => {
-      console.error(e);
-      this.intro.failed();
-      return null;
-    });
-    if (world && (this.disposed || build !== this.worldBuild)) disposeTree(world.group); // a newer build replaced it
-    if (!world || this.disposed || build !== this.worldBuild) return;
-    this.world = world;
-    this.scene.add(world.group);
-    // No baked surroundings: race now, and add the buildings and trees when Overpass delivers them.
-    if (!world.stats.env && !this.liveEnvAsked) {
-      this.liveEnvAsked = true;
-      fetchLiveEnv(this.opts.track).then((got) => {
-        if (got && !this.disposed) this.rebuildWorld();
-      });
-    }
-    this.atmos.setWorld([world.group], world.lamps, world.emissive);
-    (this.ground.material as THREE.MeshLambertMaterial).color.copy(world.groundColor);
-    await this.warmShaders();
+  /**
+   * Build the world around the circuit. The first build goes straight in. A later one (surroundings
+   * arriving from Overpass once the race is under way, on circuits without baked ones) waits for a
+   * calm moment: at once on the grid screen (START waits for it) or while paused, otherwise the next
+   * time you complete a lap, under the lap card. Never mid-corner.
+   */
+  rebuildWorld() {
+    if (!this.world) return void this.buildAndSwap();
+    this.envPending = { lap: this.lapNo };
+    this.maybeRebuild();
   }
 
-  /** Compile every shader now (including a ghost kart's) so nothing compiles mid-lap. */
-  private async warmShaders() {
-    const warm = this.ghostVisual(this.opts.driver.color).root;
-    warm.position.set(this.phys.x, -50, this.phys.z);
-    this.scene.add(warm);
-    try {
-      await this.pipeline.renderer.compileAsync(this.scene, this.camera);
-    } catch {
-      /* best effort */
+  /** Each frame: start a waiting rebuild if now is a calm moment. */
+  private maybeRebuild() {
+    const p = this.envPending;
+    if (!p || this.rebuilding) return;
+    p.lap = Math.min(p.lap, this.lapNo); // a restart reset the lap count
+    if (this.state === 'intro' || this.state === 'paused' || (this.state === 'racing' && this.lapNo > Math.max(1, p.lap))) {
+      this.envPending = null;
+      this.buildAndSwap();
     }
-    this.scene.remove(warm);
+  }
+
+  private async buildAndSwap() {
+    const build = ++this.worldBuild;
+    const first = !this.world;
+    const onGrid = this.state === 'intro';
+    const hold = !first && onGrid;
+    let warmed = false;
+    if (hold) {
+      this.intro.hold('Adding the surroundings');
+      this.warmGen++; // a warm-up still running must not unlock START under the rebuild
+      this.warming = true;
+    }
+    this.rebuilding = true;
+    const stale = () => this.disposed || build !== this.worldBuild;
+    try {
+      const world = await buildWorld({
+        track: this.track,
+        data: this.opts.track,
+        quality: this.pipeline.quality,
+        aniso: this.pipeline.renderer.capabilities.getMaxAnisotropy(),
+        onStage: (label, f) => (first || onGrid) && this.intro.stage(label, f),
+        isDisposed: () => this.disposed,
+      }).catch((e) => {
+        console.error(e);
+        if (first) this.intro.failed();
+        return null;
+      });
+      if (!world) return;
+      if (stale()) return disposeTree(world.group); // a newer build replaced it
+      floodlit(world.group);
+      if (!first) {
+        // Compile it against the live scene while the old world still holds its shaders: every program
+        // the two share (nearly all) is reused rather than rebuilt. Then upload its textures (the
+        // ground canvas alone is tens of MB with mipmaps) before anything draws it.
+        await Promise.race([this.pipeline.compile(world.group).catch(() => {}), new Promise((r) => setTimeout(r, 15000))]);
+        if (stale()) return disposeTree(world.group);
+        for (const t of texturesUnder(world.group)) this.pipeline.renderer.initTexture(t);
+      }
+      const old = this.world;
+      if (old) this.scene.remove(old.group);
+      this.world = world;
+      this.scene.add(world.group);
+      this.atmos.setWorld([world.group], world.lamps, world.emissive);
+      for (const t of floodTextures()) this.pipeline.renderer.initTexture(t);
+      (this.ground.material as THREE.MeshLambertMaterial).color.copy(world.groundColor);
+      if (old) disposeTree(old.group); // only now: the shaders the new world shares stay alive
+      this.perf.quietUntil = performance.now() + 1500;
+      // No baked surroundings: race now, and add the buildings and trees when Overpass delivers them.
+      if (!world.stats.env && !this.liveEnvAsked) {
+        this.liveEnvAsked = true;
+        fetchLiveEnv(this.opts.track).then((got) => {
+          if (got && !this.disposed) this.rebuildWorld();
+        });
+      }
+      // On the grid screen, settle everything (again) before START.
+      if (first || this.state === 'intro') {
+        warmed = true;
+        await this.warmUp(hold ? 'Adding the surroundings' : undefined);
+      }
+    } finally {
+      this.rebuilding = false;
+      if (hold && !warmed && !stale()) {
+        this.warming = false;
+        this.intro.stage('Ready', 1); // the rebuild fell through: give START back
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------ warm-up
+
+  /**
+   * Settle everything before START, behind the grid screen: compile every shader for the real render
+   * target (and, at night, the next tier down's light rig), upload every texture, then render a view
+   * from above with the shadow cameras opened over the whole world and a dozen chase views round the
+   * lap, so shadow shaders, buffers, ghosts and the skid mesh are all on the GPU before lights out.
+   * START unlocks when it's done. A newer warm-up (new time of day, quality or world) replaces it.
+   */
+  private async warmUp(label = 'Warming up') {
+    const gen = ++this.warmGen;
+    const live = () => !this.disposed && gen === this.warmGen;
+    this.warming = true;
+    // Your best lap's ghost (same template as any ghost of your colour) rides along for the warm-up.
+    const ghost = this.ghostVisual(this.opts.driver.color).root;
+    ghost.visible = false;
+    this.scene.add(ghost);
+    try {
+      this.intro.stage(label, 0.9);
+      await this.compileScene();
+      if (!live()) return;
+      await this.warmLowerRig();
+      if (!live()) return;
+      this.intro.stage(label, 0.93);
+      await this.uploadTextures(texturesUnder(this.scene).concat(floodTextures()), live);
+      if (!live()) return;
+      await this.inFrame(() => this.renderOverview());
+      const times = await this.tour(12, ghost, live, (f) => this.intro.stage(label, 0.94 + 0.04 * f));
+      if (!live()) return;
+      await this.calibrate(times.slice(4), ghost, live); // the first views still pay first-draw costs
+    } catch (e) {
+      console.warn('warm-up', e); // best effort: anything missed compiles on first sight, as before
+    } finally {
+      this.scene.remove(ghost);
+      if (gen === this.warmGen && !this.disposed) {
+        this.warming = false;
+        this.intro.stage('Ready', 1);
+      }
+    }
+  }
+
+  /** `n` chase views spread round the lap, one per frame; each one's synced render time in ms. */
+  private async tour(n: number, ghost: THREE.Object3D, live: () => boolean, progress?: (f: number) => void) {
+    const times: number[] = [];
+    for (let k = 0; k < n && live(); k++) {
+      times.push(await this.inFrame(() => this.renderPose(((k + 0.5) / n) * this.track.length, ghost)));
+      progress?.((k + 1) / n);
+    }
+    return times;
+  }
+
+  /**
+   * Auto, once per device: judge the tier on the warm-up's timed frames (render plus a GPU sync, so an
+   * upper bound) and remember it for this GPU and screen. Medium stays if its frames take 9 ms or
+   * less, else Low. Low then takes the sharpest pixel ratio that still fits, up to 2 on phones.
+   * Only on the grid: a tier change recompiles everything, so it never happens in the race.
+   */
+  private async calibrate(times: number[], ghost: THREE.Object3D, live: () => boolean) {
+    if (this.qualitySetting !== 'auto' || this.autoRec || !times.length || (this.state !== 'intro' && this.state !== 'grid')) return;
+    let ms = median(times);
+    let q = this.pipeline.quality;
+    // A second look before demoting, in case something else had the machine busy for a moment.
+    if (q === 'medium' && ms > 9) ms = Math.min(ms, median((await this.tour(6, ghost, live)).slice(1)));
+    if (!live()) return;
+    if (q === 'medium' && ms > 9) {
+      this.intro.stage('Tuning the graphics', 0.985);
+      q = 'low';
+      this.setTier(q);
+      await this.compileScene();
+      if (!live()) return;
+      await this.inFrame(() => this.renderOverview());
+      ms = median((await this.tour(5, ghost, live)).slice(1));
+      if (!live()) return;
+    }
+    if (q === 'low') {
+      // Low at ratio 1 on a 3x phone is a soft, 375-pixel-wide picture; many can afford more.
+      // Fill cost grows with pixels, the rest doesn't: estimate, then check.
+      let pr = 1;
+      for (let r = maxRatio('low'); r > 1; r -= 0.25)
+        if (ms * (0.35 + 0.65 * r * r) <= 6.5) {
+          pr = r;
+          break;
+        }
+      if (pr > 1) {
+        this.pipeline.setPixelRatio(pr);
+        const check = median((await this.tour(4, ghost, live)).slice(1));
+        if (!live()) return;
+        if (check > 9) this.pipeline.setPixelRatio(1);
+      }
+    }
+    this.autoRec = saveAutoTier({ tier: q, pixelRatio: this.pipeline.pixelRatio, gpu: this.pipeline.gpu, ms: Math.round(ms * 100) / 100 });
+    this.ratioCap = this.pipeline.pixelRatio;
+    this.syncToggles();
+  }
+
+  /** Compile every material in the scene for the target it renders into (bounded, in case the driver never answers). */
+  private compileScene(q?: Quality) {
+    return Promise.race([this.pipeline.compile(this.scene, this.scene, q).catch(() => {}), new Promise((r) => setTimeout(r, 15000))]);
+  }
+
+  /** Night: compile the next tier down's light rig too (it has fewer lights, so different shaders). */
+  private async warmLowerRig() {
+    const q = this.pipeline.quality;
+    const lower: Quality | null = q === 'high' ? 'medium' : q === 'medium' ? 'low' : null;
+    if (this.atmos.time !== 'night' || !lower) return;
+    const undo = this.atmos.useRig(lower);
+    let done: Promise<unknown>;
+    try {
+      done = this.compileScene(lower); // the programs are created synchronously in here
+    } finally {
+      undo(); // before any frame renders with the wrong rig
+      this.atmos.snap(this.phys.x, this.phys.z);
+    }
+    await done;
+  }
+
+  /** Upload textures a few milliseconds' worth per frame (the ground canvas alone is tens of MB with mipmaps). */
+  private async uploadTextures(list: THREE.Texture[], live: () => boolean) {
+    let i = 0;
+    while (i < list.length && live())
+      await this.inFrame(() => {
+        const t0 = performance.now();
+        do this.pipeline.renderer.initTexture(list[i++]);
+        while (i < list.length && performance.now() - t0 < 8);
+      });
+  }
+
+  /** Run `fn` inside the next frame, just before that frame's own render, so the screen never shows what it drew. */
+  private inFrame<T>(fn: () => T): Promise<T> {
+    return new Promise((resolve, reject) =>
+      this.frameJobs.push(() => {
+        try {
+          resolve(fn());
+        } catch (e) {
+          reject(e);
+        }
+      }),
+    );
+  }
+
+  private runFrameJobs() {
+    if (!this.frameJobs.length) return;
+    const jobs = this.frameJobs;
+    this.frameJobs = [];
+    for (const j of jobs) j();
+  }
+
+  /** Swap the camera for a warm-up view, run `draw`, and put the camera back. */
+  private withCamera<T>(set: (cam: THREE.PerspectiveCamera) => void, draw: () => T): T {
+    const cam = this.camera;
+    const pos = cam.position.clone();
+    const rot = cam.quaternion.clone();
+    const { fov, far } = cam;
+    try {
+      set(cam);
+      cam.updateProjectionMatrix();
+      cam.updateMatrixWorld();
+      return draw();
+    } finally {
+      cam.position.copy(pos);
+      cam.quaternion.copy(rot);
+      cam.fov = fov;
+      cam.far = far;
+      cam.updateProjectionMatrix();
+      cam.updateMatrixWorld();
+    }
+  }
+
+  /** One frame from high above with the shadow cameras opened over everything: every mesh and every
+   *  kind of shadow caster draws once, whatever the chase views happen to frame. */
+  private renderOverview() {
+    const box = new THREE.Box3().setFromObject(this.trackScene.group);
+    if (this.world) box.union(new THREE.Box3().setFromObject(this.world.group));
+    const c = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const r = Math.max(size.x, size.z) / 2 + 10;
+    const undo = this.atmos.wideShadows(c.x, c.z, r);
+    try {
+      this.withCamera(
+        (cam) => {
+          cam.fov = 70;
+          const h = r / Math.tan(THREE.MathUtils.degToRad(35)) + 20;
+          cam.far = Math.max(cam.far, h + 100);
+          cam.position.set(c.x, h, c.z + h * 0.02);
+          cam.lookAt(c.x, 0, c.z);
+        },
+        () => this.pipeline.render(),
+      );
+    } finally {
+      undo();
+      this.atmos.snap(this.phys.x, this.phys.z);
+    }
+  }
+
+  /** One chase view s metres round the lap, with every ghost in shot so their buffers upload too. */
+  private renderPose(s: number, ghost: THREE.Object3D) {
+    const t = this.track;
+    const a = t.at(s);
+    const fx = Math.sin(a.heading);
+    const fz = Math.cos(a.heading);
+    const shown = [ghost, ...this.ghosts.map((g) => g.visual?.root).filter((o): o is THREE.Group => !!o)];
+    shown.forEach((o, k) => {
+      o.visible = true;
+      o.position.set(a.x + fx * (5 + k * 2.5), 0, a.z + fz * (5 + k * 2.5));
+      o.rotation.y = a.heading;
+    });
+    this.atmos.snap(a.x, a.z);
+    try {
+      return this.withCamera(
+        (cam) => {
+          cam.fov = 64;
+          cam.position.set(a.x - fx * 5.2, 2.3, a.z - fz * 5.2);
+          cam.lookAt(a.x + fx * 3.5, 0.7, a.z + fz * 3.5);
+        },
+        () => this.pipeline.timedRender(),
+      );
+    } finally {
+      // The frame's own render follows straight after: back to where the kart really is.
+      shown.forEach((o) => (o.visible = false));
+      this.atmos.snap(this.phys.x, this.phys.z);
+    }
   }
 
   private buildMinimap() {
@@ -335,21 +622,6 @@ export class Race {
     this.minimap = { bg, map };
   }
 
-  private buildSkids() {
-    const max = 3000;
-    const pos = new Float32Array(max * 6 * 3);
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    geo.setDrawRange(0, 0);
-    const mesh = new THREE.Mesh(
-      geo,
-      new THREE.MeshBasicMaterial({ color: 0x050505, transparent: true, opacity: 0.42, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }),
-    );
-    mesh.frustumCulled = false;
-    this.scene.add(mesh);
-    this.skid = { geo, pos, i: 0, prev: [null, null] };
-  }
-
   // ------------------------------------------------------------------ flow
 
   private begin() {
@@ -387,7 +659,7 @@ export class Race {
       const order: QualitySetting[] = ['auto', 'high', 'medium', 'low'];
       this.qualitySetting = order[(order.indexOf(this.qualitySetting) + 1) % order.length];
       localStorage.setItem('ak:quality', this.qualitySetting);
-      this.applyQuality(this.qualitySetting === 'auto' ? autoQuality() : this.qualitySetting);
+      this.applyQuality(this.qualitySetting === 'auto' ? this.autoTier() : this.qualitySetting);
     }
     if (a === 'time') this.setTime(({ live: 'day', day: 'night', night: 'live' } as const)[this.timeSetting], true);
     if (a === 'controls') {
@@ -415,7 +687,12 @@ export class Race {
     const look = resolveTime(t, this.opts.track.center);
     const flip = look.time !== this.atmos.time;
     this.atmos.set(look.time, look.sun); // every material recompiles
-    if (this.world && flip) this.warmShaders(); // light counts changed
+    if (this.world && flip) {
+      // Light counts changed: new shaders. On the grid, START waits for them.
+      const label = look.time === 'night' ? 'Switching on the floodlights' : 'Bringing the daylight';
+      if (this.state === 'intro') this.intro.hold(label);
+      this.warmUp(label);
+    }
     if (toast) {
       const night = look.time === 'night';
       this.hud.toast(t === 'live' ? `Live · ${night ? 'night at the circuit, floodlights on' : 'the sun where it is right now'}` : night ? 'Night session · floodlights on' : 'Day session');
@@ -423,11 +700,25 @@ export class Race {
     this.syncToggles();
   }
 
+  /** Auto's tier: what it measured on this device before, else its first guess. */
+  private autoTier(): Quality {
+    return this.autoRec?.tier ?? autoQuality();
+  }
+
+  /** Switch tier: render path, pixel ratio and night light rig. Never mid-race: on the grid or from the pause menu. */
+  private setTier(q: Quality) {
+    const rec = this.qualitySetting === 'auto' && this.autoRec?.tier === q ? this.autoRec : null;
+    if (this.atmos && q !== this.pipeline.quality) this.atmos.setQuality(q);
+    this.pipeline.setQuality(q, rec?.pixelRatio);
+    this.ratioCap = this.pipeline.pixelRatio;
+  }
+
+  /** From the pause menu. */
   private applyQuality(q: Quality) {
     if (q === this.pipeline.quality) return;
-    this.pipeline.setQuality(q);
-    this.atmos.setQuality(q);
-    if (this.world && this.atmos.time === 'night') this.warmShaders();
+    this.setTier(q);
+    // Each tier renders into a different target (and at night has its own lights): new shaders.
+    if (this.world) this.warmUp();
   }
 
   private syncToggles() {
@@ -526,24 +817,62 @@ export class Race {
     }
     this.boardTimer -= dt;
     if (this.boardTimer <= 0) this.refreshBoard();
+    this.runFrameJobs(); // warm-up views: drawn before the frame's own render, so never on screen
     this.render(dt);
     this.adaptQuality(dt);
+    this.maybeRebuild();
   };
 
-  /** In auto mode, step quality down if the frame rate can't keep up. */
+  /**
+   * Auto in the race: the tier never changes (that recompiles every shader, and at night changes
+   * the lights); only the pixel ratio moves, in 1/8 steps, judged on the frame rate over 1-second
+   * windows (the mean, as vsync makes the median jump between 16.7 and 33.3 ms).
+   * Nothing moves before lap 1 is done, at most once every 2 s, and windows that saw a known hitch
+   * (a world swap, a ghost arriving, a tab switch) don't count.
+   */
   private adaptQuality(dt: number) {
-    if (this.qualitySetting !== 'auto' || this.state !== 'racing' || document.hidden) return;
-    this.frameTimes.push(dt);
-    if (this.frameTimes.length < 120) return;
-    const sorted = [...this.frameTimes].sort((a, b) => a - b);
-    const p50 = sorted[Math.floor(sorted.length * 0.5)];
-    const p90 = sorted[Math.floor(sorted.length * 0.9)];
-    this.frameTimes = [];
-    // Step down on a low average *or* on frequent spikes (the spikes are what read as stutter).
-    if ((p50 > 1 / 45 || p90 > 1 / 30) && this.pipeline.quality !== 'low') {
-      this.applyQuality(this.pipeline.quality === 'high' ? 'medium' : 'low');
-      this.syncToggles();
+    const w = this.perf;
+    const now = performance.now();
+    if (this.ghosts.length !== w.ghosts) {
+      w.ghosts = this.ghosts.length;
+      w.quietUntil = now + 1000;
     }
+    if (document.hidden || dt >= 0.1) w.quietUntil = now + 1000;
+    if (this.qualitySetting !== 'auto' || this.state !== 'racing' || this.lapNo < 2 || this.warming) {
+      w.dts.length = 0;
+      return;
+    }
+    if (!w.dts.length) {
+      w.start = now;
+      w.t = 0;
+    }
+    w.dts.push(dt);
+    w.t += dt;
+    if (w.t < 1) return;
+    const clean = w.quietUntil <= w.start;
+    const fps = w.dts.length / w.t;
+    w.dts.length = 0;
+    if (!clean) {
+      w.slow = w.fast = 0;
+      return;
+    }
+    w.slow = fps < 45 ? w.slow + 1 : 0;
+    w.fast = fps > 57 ? w.fast + 1 : 0;
+    if (now - w.changed < 2000) return;
+    const pr = this.pipeline.pixelRatio;
+    let next = pr;
+    if (w.slow >= 2 && pr > MIN_RATIO) {
+      next = pr - 0.125;
+      if (w.raised) w.noRaise = true; // it went up and it didn't hold: stay down for this race
+    } else if (w.fast >= 8 && !w.noRaise && pr < this.ratioCap) {
+      next = Math.min(this.ratioCap, pr + 0.125);
+      w.raised = true;
+    }
+    if (next === pr) return;
+    this.pipeline.setPixelRatio(next);
+    w.changed = now;
+    w.slow = w.fast = 0;
+    w.quietUntil = now + 500; // the resize itself
   }
 
   private tick(dt: number) {
@@ -557,6 +886,7 @@ export class Race {
         this.trackScene.lights.forEach((m, k) => (m.emissiveIntensity = k < lit ? 4 : 0));
         this.hud.lights(lit);
         this.audio.beep(false);
+        this.haptics.light(false);
       }
       if (this.gridT >= this.goAt) {
         this.state = 'racing';
@@ -564,6 +894,7 @@ export class Race {
         this.trackScene.lights.forEach((m) => (m.emissiveIntensity = 0));
         this.hud.lights(null);
         this.audio.beep(true);
+        this.haptics.light(true);
         this.hud.banner('Go', 'go', 1.1);
         this.hud.hint(true, 4000);
       }
@@ -572,9 +903,9 @@ export class Race {
     }
     this.simT += dt;
     this.phys.step(dt, c);
-    this.audio.update(this.phys.speed, c.throttle, this.phys.slip, this.phys.surface === 'grass');
     if (this.state === 'racing') this.timing(dt);
-    this.updateSkids(c.drift);
+    this.sectorFlash();
+    this.fx.sense(this.phys, c, dt, this.simT);
     this.throttle = c.throttle;
     this.opts.mode?.addon?.tick?.(dt);
   }
@@ -678,6 +1009,41 @@ export class Race {
     while (this.ghostRec.length * GHOST_DT * 1000 <= lapT) this.ghostRec.push({ x: this.phys.x, z: this.phys.z, h: this.phys.heading });
     const si = Math.floor(s / SPLIT);
     if (s < L - 5) while (this.splits.length <= si) this.splits.push(lapT);
+  }
+
+  // What timing() had at the end of the previous step, so a sector completed in this one can be shown.
+  private secSeen = { lap: 0, n: 0, start: null as number | null, invalid: false, times: [0, 0], best: [0, 0, 0] };
+
+  /** A sector just completed on a clean lap: flash its chip with the gap to your best sector, chime on purple. */
+  private sectorFlash() {
+    const s = this.secSeen;
+    const n = this.sectorTimes.length;
+    let k = -1;
+    let t = 0;
+    let color: SectorColor = '';
+    if (this.lapNo !== s.lap) {
+      // A new lap began, so timing() has already reset the sectors: S3 = lap time − S1 − S2.
+      if (s.start !== null && this.lapStart !== null && s.n === 2 && !s.invalid) {
+        k = 2;
+        t = (this.lapStart - s.start) * 1000 - s.times[0] - s.times[1];
+        const lead = this.board?.entries[0]?.sectors?.[2];
+        color = !s.best[2] || t <= s.best[2] ? (!lead || t <= lead ? 'purple' : 'green') : 'yellow';
+      }
+    } else if (n > s.n && !this.invalid) {
+      k = n - 1;
+      t = this.sectorTimes[k];
+      color = this.sectorColors[k];
+    }
+    if (k >= 0 && s.best[k] && !this.autopilot) {
+      this.hud.sectorFlash(k, color, (t - s.best[k]) / 1000);
+      if (color === 'purple') this.audio.chime();
+    }
+    s.lap = this.lapNo;
+    s.n = n;
+    s.start = this.lapStart;
+    s.invalid = this.invalid;
+    for (let i = 0; i < 2; i++) s.times[i] = this.sectorTimes[i] ?? 0;
+    for (let i = 0; i < 3; i++) s.best[i] = this.bestSectors[i] ?? 0;
   }
 
   private sectorColor(k: number, t: number): SectorColor {
@@ -927,11 +1293,55 @@ export class Race {
     this.snapPrev();
     this.camPos.set(this.phys.x - Math.sin(this.phys.heading) * 6, 2.6, this.phys.z - Math.cos(this.phys.heading) * 6);
     this.camLook.set(this.phys.x, 0.6, this.phys.z);
+    Object.assign(this.cam, { ox: 0, oy: 0, oz: 0, vx: 0, vy: 0, vz: 0, fov: 0, fovV: 0, shake: 0, side: 0 });
+  }
+
+  /** A wall hit kicks the camera away from the wall, punches the FOV and starts a short shake. */
+  private kickCamera(speed: number, nx: number, nz: number) {
+    const k = Math.min(1, speed / 8);
+    const c = this.cam;
+    c.vx -= nx * 3 * k;
+    c.vz -= nz * 3 * k;
+    c.vy += 1.3 * k;
+    c.fovV += 55 * k;
+    c.shake = Math.min(1, c.shake + 0.8 * k);
+  }
+
+  /** Advance the camera springs; returns the shake offset to add this frame (deterministic in simT). */
+  private springCamera(dt: number, fb: FxFrame, out: THREE.Vector3) {
+    const c = this.cam;
+    // Damped springs: the kick at ω 18 rad/s, ζ 0.5; the FOV punch softer at ω 12, ζ 0.6.
+    for (let left = dt; left > 1e-6; ) {
+      const h = Math.min(left, 1 / 120);
+      left -= h;
+      c.vx += (-324 * c.ox - 18 * c.vx) * h;
+      c.vy += (-324 * c.oy - 18 * c.vy) * h;
+      c.vz += (-324 * c.oz - 18 * c.vz) * h;
+      c.ox += c.vx * h;
+      c.oy += c.vy * h;
+      c.oz += c.vz * h;
+      c.fovV += (-144 * c.fov - 14.4 * c.fovV) * h;
+      c.fov += c.fovV * h;
+    }
+    c.shake *= Math.exp(-dt / 0.22);
+    const t = this.simT;
+    const sh = c.shake;
+    // Two smooth octaves instead of per-frame white noise; then a few millimetres of kerb buzz at the
+    // stripe rate and a grass rumble.
+    const kerb = fb.kerb * 0.004 * (Math.sin((Math.PI * this.phys.s) / 0.8) > 0 ? 1 : -1);
+    const grass = fb.grass * 0.005 * (Math.sin(53 * t) + Math.sin(71 * t + 1));
+    out.set(
+      c.ox + sh * (0.1 * Math.sin(41 * t) + 0.04 * Math.sin(97 * t + 1.3)),
+      c.oy + sh * (0.08 * Math.sin(37 * t + 0.7) + 0.03 * Math.sin(89 * t + 2.1)) + kerb + grass,
+      c.oz,
+    );
+    return out;
   }
 
   // Scratch objects reused every frame (no per-frame allocations, so no GC hitches).
   private readonly v = { fwd: new THREE.Vector3(), pos: new THREE.Vector3(), look: new THREE.Vector3(), tmp: new THREE.Vector3(), up: new THREE.Vector3(0, 1, 0) };
   private prev = { x: 0, z: 0, h: 0 };
+  private body = { vf: 0, acc: 0 }; // low-passed longitudinal acceleration for the body pitch
   private alpha = 1; // how far between the last two physics steps this frame sits
   private viewW = 1;
   private viewH = 1;
@@ -949,15 +1359,41 @@ export class Race {
     const heading = this.prev.h + dh * a;
     k.root.position.set(x, 0, z);
     k.root.rotation.y = heading;
-    k.body.rotation.z += (THREE.MathUtils.clamp(p.yawRate * p.forwardSpeed * 0.004, -0.07, 0.07) - k.body.rotation.z) * Math.min(1, dt * 8);
-    k.body.rotation.x += ((this.throttle ? -0.012 : 0.01) - k.body.rotation.x) * Math.min(1, dt * 5);
-    k.body.position.y = p.surface === 'grass' ? Math.sin(this.simT * 40) * 0.012 : p.surface === 'kerb' ? Math.sin(this.simT * 70) * 0.02 : 0;
+    // Body motion from the real accelerations (render only): dive under braking, squat on the power,
+    // roll that only saturates near 3 g, and on the kerb a bob at the stripe rate that follows speed.
+    const vf = p.forwardSpeed;
+    if (dt > 0) this.body.acc += (THREE.MathUtils.clamp((vf - this.body.vf) / dt, -40, 40) - this.body.acc) * (1 - Math.exp(-dt * 50));
+    this.body.vf = vf;
+    k.body.rotation.z += (THREE.MathUtils.clamp(p.yawRate * vf * 0.0028, -0.08, 0.08) - k.body.rotation.z) * Math.min(1, dt * 8);
+    k.body.rotation.x += (THREE.MathUtils.clamp(-0.0035 * this.body.acc, -0.025, 0.04) - k.body.rotation.x) * Math.min(1, dt * 8);
+    const stripe = Math.sin((Math.PI * p.s) / 0.8) > 0 ? 1 : -1;
+    k.body.position.y = p.surface === 'grass' ? Math.sin(this.simT * 40) * 0.012 : p.onKerb ? stripe * 0.014 * Math.min(1, p.speed / 10) : 0;
     for (const f of k.frontPivots) f.rotation.y = -p.steerAngle * 1.2;
     for (const w of k.wheels) w.rotation.x = p.wheelSpin;
+    const live = this.state === 'grid' || this.state === 'racing';
+    const fb = this.fx.frame(live ? dt : 0, this.camera, this.pipeline.renderer, this.pipeline.quality, this.atmos.time === 'night');
+    if (live) {
+      if (fb.impact) {
+        this.audio.impact(fb.impact);
+        this.haptics.impact(fb.impact);
+        this.kickCamera(fb.impact, fb.nx, fb.nz);
+      }
+      this.haptics.kerb(fb.kerb, p.speed);
+      const pb = this.pb?.ms ?? null;
+      if (pb !== this.pbSeen && this.pbSeen !== undefined && pb !== null) this.haptics.personalBest();
+      this.pbSeen = pb;
+      const cockpit = CAMS[this.camMode].id === 'hood';
+      this.audio.update({ speed: p.speed, vmax: p.vmax, throttle: this.throttle, squeal: fb.squeal, kerb: fb.kerb, grass: fb.grass, scrape: fb.scrape, cockpit });
+    }
 
     const { fwd, pos, look, tmp, up } = this.v;
     fwd.set(Math.sin(heading), 0, Math.cos(heading));
     const mode = CAMS[this.camMode].id;
+    const cam = this.cam;
+    // Portrait phones (0 at aspect 0.8 or wider, 1 at 0.48 and taller): with the wider view below, the
+    // chase camera sits higher and looks down a little more, so the road ahead fills the screen between
+    // the timing panels and the speedometer instead of sky.
+    const tall = THREE.MathUtils.clamp((0.8 - this.camera.aspect) / 0.32, 0, 1);
     let lerp = 1 - Math.exp(-dt * 7);
     if (this.state === 'intro') {
       // Slow cinematic orbit; tight so the camera stays on the circuit (real pit buildings often sit beside the grid).
@@ -980,20 +1416,28 @@ export class Race {
       lerp = 1 - Math.exp(-dt * 3);
     } else {
       const far = mode === 'far';
-      pos.set(x, far ? 4.2 : 2.3, z).addScaledVector(fwd, far ? -9.5 : -5.2);
-      look.set(x, 0.7, z).addScaledVector(fwd, 3.5);
+      // Look a little into the corner, toward the apex (yawRate > 0 turns left).
+      const side = THREE.MathUtils.clamp(-p.yawRate * p.forwardSpeed * 0.04, -1, 1);
+      cam.side += (side - cam.side) * (1 - Math.exp(-dt * 3));
+      tmp.set(-fwd.z, 0, fwd.x); // right of travel
+      pos.set(x, far ? 4.2 + 0.8 * tall : 2.3 + 1.5 * tall, z).addScaledVector(fwd, far ? -9.5 : -5.2 - 0.4 * tall);
+      look.set(x, 0.7 - 0.3 * tall, z).addScaledVector(fwd, 3.5 + 0.5 * tall).addScaledVector(tmp, cam.side);
     }
     this.camPos.lerp(pos, lerp);
     this.camLook.lerp(look, Math.min(1, lerp * 1.6));
-    this.camera.position.copy(this.camPos);
-    if (p.bump > 0.02) {
-      this.camera.position.x += (Math.random() - 0.5) * p.bump * 0.4;
-      this.camera.position.y += (Math.random() - 0.5) * p.bump * 0.3;
-    }
+    const shake = this.springCamera(live ? dt : 0, fb, tmp);
+    const amount = this.state === 'intro' || mode === 'tv' ? 0 : mode === 'hood' ? 0.5 : 1;
+    this.camera.position.copy(this.camPos).addScaledVector(shake, amount);
     this.camera.lookAt(this.camLook);
-    const fov = this.state === 'intro' ? 42 : (mode === 'hood' ? 70 : 60) + p.speed * 0.38;
-    if (Math.abs(this.camera.fov - fov) > 0.05) {
-      this.camera.fov += (fov - this.camera.fov) * Math.min(1, dt * 4);
+    // FOV: wider with speed; never narrower than 44-50° across (portrait phones), at most 100° tall;
+    // plus the impact punch.
+    const base = this.state === 'intro' ? 42 : (mode === 'hood' ? 70 : 60) + p.speed * 0.38;
+    const across = this.state === 'intro' ? 0 : 44 + 6 * Math.min(1, p.speed / p.vmax);
+    const floor = THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(across / 2)) / this.camera.aspect));
+    cam.fovBase += (Math.min(100, Math.max(base, floor)) - cam.fovBase) * Math.min(1, dt * 4);
+    const fov = cam.fovBase + cam.fov * amount;
+    if (Math.abs(this.camera.fov - fov) > 0.01) {
+      this.camera.fov = fov;
       this.camera.updateProjectionMatrix();
     }
     k.root.visible = mode !== 'hood' || this.state === 'intro';
@@ -1071,40 +1515,6 @@ export class Race {
     g.lineWidth = 3.5;
     g.strokeStyle = '#f2f3f5';
     g.stroke();
-  }
-
-  private updateSkids(drift: boolean) {
-    const p = this.phys;
-    const skidding = p.surface !== 'grass' && p.speed > 4 && (p.slip > 2.6 || (drift && Math.abs(p.yawRate) > 0.6));
-    const fx = Math.sin(p.heading);
-    const fz = Math.cos(p.heading);
-    const sk = this.skid;
-    [-0.6, 0.6].forEach((side, w) => {
-      const cx = p.x + fz * side - fx * 0.62;
-      const cz = p.z - fx * side - fz * 0.62;
-      const prev = sk.prev[w];
-      const cur = this.v.tmp.set(cx, 0.05, cz);
-      if (skidding && prev && prev.distanceToSquared(cur) > 0.04) {
-        const dx = cur.x - prev.x;
-        const dz = cur.z - prev.z;
-        const len = Math.hypot(dx, dz) || 1;
-        const nx = (-dz / len) * 0.1;
-        const nz = (dx / len) * 0.1;
-        const quad = [prev.x - nx, prev.z - nz, prev.x + nx, prev.z + nz, cur.x - nx, cur.z - nz, cur.x + nx, cur.z + nz];
-        const tri = [0, 1, 2, 1, 3, 2];
-        const base = (sk.i % 3000) * 18;
-        tri.forEach((v, n) => {
-          sk.pos[base + n * 3] = quad[v * 2];
-          sk.pos[base + n * 3 + 1] = 0.05;
-          sk.pos[base + n * 3 + 2] = quad[v * 2 + 1];
-        });
-        sk.i++;
-        sk.geo.setDrawRange(0, Math.min(sk.i, 3000) * 6);
-        (sk.geo.attributes.position as THREE.BufferAttribute).needsUpdate = true;
-        prev.set(cx, 0.05, cz);
-      } else if (!skidding) sk.prev[w] = null;
-      else if (!prev) sk.prev[w] = new THREE.Vector3(cx, 0.05, cz); // once per skid, not per tick
-    });
   }
 
   private onResize = () => {
@@ -1204,6 +1614,11 @@ export class Race {
     this.pipeline.renderer.forceContextLoss(); // free the GL context now; multiplayer starts a race every round
     this.root.remove();
   }
+}
+
+function median(xs: number[]) {
+  const s = [...xs].sort((a, b) => a - b);
+  return s.length ? s[s.length >> 1] : 0;
 }
 
 function disposeTree(root: THREE.Object3D) {

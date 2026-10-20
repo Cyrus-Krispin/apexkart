@@ -6,6 +6,45 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-10-21
+
+### Added
+- **Particles**: wheels in the grass throw clods and dust, wall hits spark and puff smoke, and hard
+  braking and big slides leave tyre smoke. Skid marks fade over about half a minute, and the grass
+  gets brown ruts.
+- **Sound**: a thump on wall hits, kerb rumble, grass and gravel crunch, wind that rises with speed
+  and a scrape along the barriers. The engine has a rev limiter, pops when you lift off and a
+  slipping clutch at the launch.
+- **Vibration** on Android phones and gamepads for wall hits, kerbs, the start lights and a personal
+  best. It's off when muted or when your system asks for reduced motion.
+- **Sector flash**: when you finish a sector, its chip flashes purple, green or yellow with the gap to
+  your best sector, and a purple sector plays a short chime.
+
+### Changed
+- **Portrait phones see the corners**: the camera shows much more of the road ahead and sits a
+  little higher.
+- **Wall hits kick the camera smoothly** instead of shaking it, and the camera looks slightly into
+  corners.
+- **The kart moves like a kart**: the nose dips under braking, lifts under power, and the body rolls
+  with cornering force.
+- Kerb rumble only happens on the painted kerbs, not along every track edge.
+
+## [0.24.0] - 2026-10-21
+
+### Fixed
+- **No more stutter in the first seconds of a race.** The grid screen now shows "Warming up" while
+  the game quietly prepares every shader, texture, shadow, ghost and skid mark, and START lights up
+  once that's done. Switching day or night on the grid briefly does the same for the new lighting.
+- **Auto graphics settles before you race.** It picks the graphics level once, on the grid, and
+  remembers it for your device; during a race it only adjusts sharpness. Phones that are fast
+  enough now render sharper (up to twice the resolution).
+- On tracks where buildings and trees arrive after you've started, they're added while you're on
+  the grid, paused, or crossing the line, without a stutter.
+
+### Changed
+- **New colours**: start lights that are truly red, a bluer sky, warm sunlight with cool shadows,
+  brand reds and oranges that stay true, and a night look that stays readable.
+
 ## [0.23.0] - 2026-10-21
 
 ### Changed
@@ -407,7 +446,9 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 ### Fixed
 - Leaderboard and lap submission on the live site.
 
-[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.23.0...HEAD
+[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.25.0...HEAD
+[0.25.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.24.0...v0.25.0
+[0.24.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.20.0...v0.21.0
