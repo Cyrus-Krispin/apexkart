@@ -6,6 +6,24 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+### Changed
+- **A cleaner circuit page.** Everything before a race is on one page:
+  - the track
+  - your best lap and position
+  - a medal ladder that shows how close you are to the next medal
+  - the leaderboard, with a Today tab on the daily circuit
+  - one **Setup** card for direction, time of day and controls
+
+  **Race** takes you to the grid, with buttons beside it to race friends or send a challenge.
+- **The grid is the moment before the race.** The world loads as a lap of the track, and the grid
+  shows the medal you're chasing and your setup. **Start** goes green when it's ready. This brings
+  back the Start button that v0.17.0 removed; all the settings are now on the circuit page instead.
+- **One number for your gap.** The ghost bar is gone. Your gap to your best lap sits on top of the
+  track map: green when you're ahead, red when you're behind. The medal panel now just shows the
+  target time.
+- **Calmer on phones**: bigger rows with one line per circuit, a lighter header (What's new is in
+  your profile menu now), and a simpler timing panel in the race.
+
 ## [0.17.0] - 2026-10-20
 
 ### Changed

@@ -55,13 +55,14 @@ spec is [docs/pit-wall.md](docs/pit-wall.md); tokens and shared components live 
   daily circuit is a yellow bar with a Race button, and one search box covers circuits, countries,
   venues and cities. On desktop the tower sits beside the circuit
   as a broadcast wall, with race control (the latest laps) running along the bottom.
-- **Pit board**: each circuit's page draws the layout with sector colours, numbered turns,
-  direction and dots for the drivers on track. It shows your position, best lap and gap to the next
-  medal, the medal targets, the classification with a ghost button on every lap, and a green
-  **Start** with five red lights.
-- **One tap to race**: tap a circuit, press **Start**, and you're on the grid. The grid screen shows
-  a dot lapping the circuit as the world loads, lighting each sector, and goes straight to the start
-  lights when it's ready. There's nothing to press twice.
+- **Circuit page**: everything before a race, on one page. It draws the layout with sector colours,
+  numbered turns and dots for the drivers on track. It shows your best lap and position, a medal
+  ladder from bronze to platinum with you on it, and the leaderboard with a ghost to race on every
+  lap (and a Today tab on the daily circuit). One **Setup** card holds direction, time of day and
+  controls. **Race** takes you to the grid, with racing friends and challenge links beside it.
+- **Grid**: the moment before the race. A dot laps the circuit as the world loads, lighting each
+  sector, beside the medal you're chasing and your setup. **Start** (or any key) goes green when it's
+  ready and runs the five red lights.
 - Two control schemes (Simple and Classic) on keyboard, gamepad and touch;
   synthesized engine and tyre audio; skid marks; four cameras.
 
