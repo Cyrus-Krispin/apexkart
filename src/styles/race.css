@@ -1,5 +1,5 @@
 /* Race screens in the Pit Wall style (docs/pit-wall.md): the grid, the race HUD and pause.
-   Panels are carbon at 86% so the timing stays readable over bright satellite imagery and night races. */
+   Panels are carbon at 86% so the timing stays readable over bright daylight scenery and night races. */
 
 /* ---------- Race shell */
 #game { position: fixed; inset: 0; pointer-events: none; z-index: 1000; }
@@ -50,11 +50,31 @@
 .io-code .pw-code { color: var(--yellow); }
 .io-code .pw-k { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .io-name { margin: 4px 0 0; font-size: clamp(30px, 3.6vw, 48px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.io-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin: 6px 0 0; font-family: var(--ui); font-weight: 700; font-size: 14px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-2); }
+.io-meta .mono { font-size: 13px; text-transform: none; letter-spacing: -0.02em; }
 .io-art { position: relative; flex: 1; min-height: 0; border-radius: var(--radius); }
 .io-art .track-art { position: absolute; inset: 14px; width: calc(100% - 28px); height: calc(100% - 28px); }
-.io-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; margin: 0; font-family: var(--ui); font-weight: 700; font-size: 14px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-2); }
-.io-meta .mono { font-size: 13px; text-transform: none; letter-spacing: -0.02em; }
-.io-leg { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; color: var(--muted); }
+/* The loading lap (src/ui/intro.ts): the road draws in from the line, the sectors wait as dim
+   lines, and a trace in each sector's timing colour follows the dot round. */
+.io-art .track-art.draw .ta-road { animation: none; stroke-dasharray: none; stroke-dashoffset: 0; }
+.io-art .ta-casing { stroke: #353a45; }
+.io-art .ta-road { stroke: #14161c; }
+.io-art .ta-center { opacity: 0; }
+.io-art .ta-sector.io-unlit { stroke: rgba(242, 243, 245, 0.14); }
+.io-art .ta-s1 { color: var(--purple); } .io-art .ta-s2 { color: var(--green); } .io-art .ta-s3 { color: var(--yellow); }
+.io-art .io-trace.lit { animation: io-lit 0.8s var(--ease); }
+@keyframes io-lit { from { filter: drop-shadow(0 0 7px currentColor) brightness(1.7); } }
+.io-art .ta-turn, .io-art .ta-arrow { opacity: 0; transition: opacity 0.45s; }
+.io-art.drawn .ta-turn, .io-art.drawn .ta-arrow { opacity: 1; }
+.io-dot { fill: #fff; filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.9)); }
+.io-art.flag .io-dot { fill: var(--green); filter: drop-shadow(0 0 6px var(--green)); }
+.io-art.flag .ta-sf { animation: io-flag 0.36s 3; }
+@keyframes io-flag { 50% { opacity: 0.25; filter: drop-shadow(0 0 8px #fff); } }
+.io-load { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 16px; margin: 0; font-size: 12px; color: var(--text-2); text-transform: uppercase; }
+.io-load .mono { letter-spacing: 0.02em; }
+.io-load b { font-weight: 600; color: var(--text); }
+.io-art.flag + .io-load .mono, .io-art.flag + .io-load b { color: var(--green); }
+.io-leg { display: inline-flex; align-items: center; gap: 6px; font-family: var(--ui); font-weight: 700; font-size: 13px; letter-spacing: 0.06em; color: var(--muted); }
 .io-leg i { width: 14px; height: 4px; border-radius: 1px; margin-left: 6px; }
 .io-leg i.p { background: var(--purple); } .io-leg i.g { background: var(--green); } .io-leg i.y { background: var(--yellow); }
 
@@ -85,15 +105,6 @@
 .io-rules b { font-family: var(--ui); font-weight: 700; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text); }
 
 .io-foot { grid-area: foot; display: grid; gap: 10px; padding: 12px max(var(--px), env(safe-area-inset-right, 0px)) max(20px, env(safe-area-inset-bottom, 0px)) 0; }
-.io-load { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 6px 12px; }
-.io-load .pw-k { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-2); }
-.io-pct { font-size: 13px; color: var(--text-2); }
-.io-bar { grid-column: 1 / -1; position: relative; height: 6px; border-radius: 1px; background: var(--panel-3); overflow: hidden; }
-/* The world loads like a lap: S1, S2, S3 fill in turn in their timing colours. */
-.io-bar i { position: absolute; inset: 0; background: linear-gradient(90deg, var(--purple) 0 33.33%, var(--green) 33.33% 66.67%, var(--yellow) 66.67%); clip-path: inset(0 100% 0 0); transition: clip-path 0.25s; }
-.io-bar s { position: absolute; top: 0; bottom: 0; left: 33.33%; width: 2px; margin-left: -1px; background: var(--carbon); }
-.io-bar s + s { left: 66.67%; }
-.intro-ov.ready .io-load .pw-k, .intro-ov.ready .io-pct { color: var(--green); }
 .io-go { height: 62px; font-size: 26px; }
 .io-go-sub { font-family: var(--mono); font-style: normal; font-weight: 500; font-size: 11px; letter-spacing: 0; text-transform: uppercase; opacity: 0.65; }
 .io-go-sub:empty { display: none; }
@@ -312,12 +323,10 @@
   .ht-l { display: flex; gap: 10px; }
   .ht-l [data-touch] { width: 82px; height: 92px; background: rgba(11, 12, 16, 0.55); border-color: rgba(255, 255, 255, 0.32); color: #fff; }
   .ht-l [data-touch].on { background: rgba(242, 243, 245, 0.34); }
-  /* Pedals: Drift yellow above Brake red, Gas green under the right thumb */
-  .ht-pedals { display: grid; grid-template-columns: 76px 82px; grid-template-rows: 44px 92px; gap: 10px; }
-  .ht-drift { grid-column: 1; grid-row: 1; font-size: 14px; border-color: var(--yellow); color: var(--yellow); background: linear-gradient(rgba(255, 214, 10, 0.16), rgba(255, 214, 10, 0.16)) rgba(11, 12, 16, 0.6); }
-  .ht-brk { grid-column: 1; grid-row: 2; border-color: var(--red); color: #ff6b60; background: linear-gradient(rgba(255, 59, 48, 0.2), rgba(255, 59, 48, 0.2)) rgba(11, 12, 16, 0.6); }
-  .ht-gas { grid-column: 2; grid-row: 1 / 3; border-color: var(--green); color: var(--green); background: linear-gradient(rgba(43, 212, 107, 0.18), rgba(43, 212, 107, 0.18)) rgba(11, 12, 16, 0.6); }
-  .ht-drift.on { background: var(--yellow); color: var(--carbon); }
+  /* Pedals: Brake red, then Gas green, the bigger pad, under the right thumb */
+  .ht-pedals { display: flex; align-items: flex-end; gap: 10px; }
+  .ht-brk { width: 80px; height: 96px; border-color: var(--red); color: #ff6b60; background: linear-gradient(rgba(255, 59, 48, 0.2), rgba(255, 59, 48, 0.2)) rgba(11, 12, 16, 0.6); }
+  .ht-gas { width: 96px; height: 128px; font-size: 17px; border-color: var(--green); color: var(--green); background: linear-gradient(rgba(43, 212, 107, 0.18), rgba(43, 212, 107, 0.18)) rgba(11, 12, 16, 0.6); }
   .ht-brk.on { background: var(--red); color: #fff; }
   .ht-gas.on { background: var(--green); color: #05170b; }
   /* Simple: bigger steer buttons, one brake under the right thumb */
@@ -341,14 +350,13 @@
   .intro-ov { --px: 16px; display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; }
   .io-top { flex: none; height: 52px; margin-bottom: 12px; gap: 12px; }
   .io-map { flex: none; padding: 0 var(--px); }
-  .io-art { flex: none; height: min(62vw, 360px); }
+  .io-art { flex: none; height: min(78vw, 400px); }
   .io-art .track-art { inset: 8px; width: calc(100% - 16px); height: calc(100% - 16px); }
   .io-panel { flex: none; overflow: visible; padding: 16px var(--px) 12px; }
   .io-foot {
     position: sticky; bottom: 0; z-index: 1; margin-top: auto; padding: 12px max(var(--px), env(safe-area-inset-right, 0px)) max(14px, env(safe-area-inset-bottom, 0px)) max(var(--px), env(safe-area-inset-left, 0px));
     background: rgba(6, 7, 8, 0.97); border-top: 1px solid var(--line);
   }
-  .io-leg { margin-left: 0; }
 }
 @media (max-width: 520px) {
   .io-sess { display: none; }
@@ -364,6 +372,21 @@
   .h-gap { top: calc(var(--top) + 160px); left: var(--l); transform: none; width: 290px; }
   .h-lapcard { top: calc(var(--top) + 208px); }
   .h-toasts { top: 44%; }
+}
+/* Desktop: the minimap sits top centre, so the layout reads at a glance. The ghost gap, toasts,
+   start lights and banners stack under it, clear of the kart. */
+@media (min-width: 900px) and (hover: hover) {
+  .hud { --map: clamp(200px, 17vw, 260px); }
+  .h-map { top: var(--top); bottom: auto; left: 50%; transform: translateX(-50%); width: var(--map); height: var(--map); box-shadow: inset 0 0 0 1px var(--line); }
+  .h-gap { top: calc(var(--top) + var(--map) + 8px); }
+  .h-lights { top: calc(var(--top) + var(--map) + 56px); }
+  .h-banner { top: calc(var(--top) + var(--map) + 62px); } /* GO takes the lights' place */
+  .h-toasts { top: auto; bottom: calc(var(--b) + 132px); } /* race control, along the bottom above the speed */
+}
+@media (min-width: 900px) and (max-width: 1079px) and (hover: hover) {
+  .h-gap { top: calc(var(--top) + 160px); }
+  .h-lights { top: calc(var(--top) + var(--map) + 10px); }
+  .h-banner { top: calc(var(--top) + var(--map) + 16px); }
 }
 
 /* Phones: narrow upright, or short when held sideways */
@@ -433,10 +456,12 @@
   .h-touch { left: calc(env(safe-area-inset-left, 0px) + 8px); right: calc(env(safe-area-inset-right, 0px) + 8px); bottom: calc(env(safe-area-inset-bottom, 0px) + 18px); }
   .ht-l { gap: 8px; }
   .ht-l [data-touch], .hud[data-controls='simple'] .ht-l [data-touch] { width: clamp(62px, 19vw, 80px); height: 86px; }
-  .ht-pedals { grid-template-columns: clamp(58px, 18vw, 72px) clamp(62px, 19vw, 78px); grid-template-rows: 42px 86px; gap: 8px; }
-  .ht-brake { width: clamp(96px, 30vw, 120px); height: 86px; }
+  .ht-pedals { gap: 8px; }
+  .ht-brk { width: clamp(62px, 19vw, 78px); height: 88px; }
+  .ht-gas { width: clamp(76px, 24vw, 96px); height: 118px; }
+  .ht-brake { width: clamp(96px, 30vw, 120px); height: 88px; }
   .h-touch svg { width: 30px; height: 30px; }
-  .h-speed { bottom: calc(env(safe-area-inset-bottom, 0px) + 168px); }
+  .h-speed { bottom: calc(env(safe-area-inset-bottom, 0px) + 150px); }
 }
 /* A phone held sideways: the speed sits low in the middle, on the road between the thumbs, and
    the briefing goes into two columns with START under the right thumb */
@@ -461,7 +486,8 @@
   .io-art { flex: 1; height: auto; }
   .io-art .track-art { inset: 4px; width: calc(100% - 8px); height: calc(100% - 8px); }
   .io-ctl { order: -2; } .io-tod { order: -1; } /* what you'll race with first */
-  .io-meta { gap: 4px 12px; font-size: 12.5px; }
+  .io-meta { gap: 2px 12px; margin-top: 2px; font-size: 12.5px; }
+  .io-load { font-size: 11px; }
   .io-panel { overflow-y: auto; padding: 0 max(var(--px), env(safe-area-inset-right, 0px)) 6px 0; gap: 12px; }
   .io-foot { position: static; margin: 0; padding: 8px max(var(--px), env(safe-area-inset-right, 0px)) max(10px, env(safe-area-inset-bottom, 0px)) 0; background: none; border: 0; gap: 8px; }
   .io-go { height: 54px; font-size: 22px; }

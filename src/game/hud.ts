@@ -23,7 +23,6 @@ const GAP_RANGE = 1.5;
 
 const ICON = {
   gauge: '<svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 16a8 8 0 1116 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 16l4-5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
-  globe: '<svg viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M4 12h16M12 4c3 3 3 13 0 16M12 4c-3 3-3 13 0 16" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>',
   pause: '<svg viewBox="0 0 24 24" width="16" height="16"><path d="M7 5h3v14H7zM14 5h3v14h-3z" fill="currentColor"/></svg>',
   cam: '<svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 7h11v10H4zM15 10l5-3v10l-5-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>',
   ghost: '<svg viewBox="0 0 24 24" width="18" height="18"><path d="M5 20V10a7 7 0 0114 0v10l-2.5-2-2.3 2-2.2-2-2.2 2-2.3-2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="9.5" cy="10.5" r="1.3" fill="currentColor"/><circle cx="14.5" cy="10.5" r="1.3" fill="currentColor"/></svg>',
@@ -39,7 +38,7 @@ const ICON = {
 const STEER = `<div class="ht-l"><div data-touch="left" role="button" aria-label="Steer left">${ICON.left}</div><div data-touch="right" role="button" aria-label="Steer right">${ICON.right}</div></div>`;
 const TOUCH: Record<ControlScheme, string> = {
   classic: `${STEER}
-    <div class="ht-r ht-pedals"><div data-touch="drift" role="button" class="ht-drift">Drift</div><div data-touch="brake" role="button" class="ht-brk">Brake</div><div data-touch="gas" role="button" class="ht-gas">Gas</div></div>`,
+    <div class="ht-r ht-pedals"><div data-touch="brake" role="button" class="ht-brk">Brake</div><div data-touch="gas" role="button" class="ht-gas">Gas</div></div>`,
   simple: `${STEER}
     <div class="ht-r"><div data-touch="brake" role="button" class="ht-brk ht-brake">Brake</div></div>`,
 };
@@ -49,7 +48,7 @@ function hintHtml(s: ControlScheme): string {
   if (touchDevice()) return s === 'simple' ? 'Steer ◀ ▶ · Brake on the right' : 'Steer ◀ ▶ · Gas and brake on the right';
   return s === 'simple'
     ? 'Steer <kbd>A</kbd><kbd>D</kbd> · Brake <kbd>Space</kbd>'
-    : 'Throttle <kbd>W</kbd> · Steer <kbd>A</kbd><kbd>D</kbd> · Brake <kbd>S</kbd> · Drift <kbd>Space</kbd>';
+    : 'Throttle <kbd>W</kbd> · Steer <kbd>A</kbd><kbd>D</kbd> · Brake <kbd>S</kbd> or <kbd>Space</kbd>';
 }
 
 const signed = (s: number, dp: number) => `${s < 0 ? '−' : '+'}${Math.abs(s).toFixed(dp)}`;
@@ -135,8 +134,8 @@ export class Hud {
       <div class="h-banner" data-el="banner"><span data-el="bannerText"></span></div>
       <div class="h-tags" data-el="tags"></div>
       <div class="h-toasts" data-el="toasts"></div>
-      <div class="h-loading" data-el="loading" hidden>Loading satellite imagery</div>
-      <div class="h-attrib">Imagery © Esri, Maxar, Earthstar Geographics · Track © OpenStreetMap contributors</div>
+      <div class="h-loading" data-el="loading" hidden>Loading the world</div>
+      <div class="h-attrib">Track and world © OpenStreetMap contributors</div>
 
       <div class="h-touch" data-el="touch"></div>
 
@@ -165,7 +164,6 @@ export class Hud {
                 <button data-act="ghosts" data-el="ghostToggle"></button>
                 <button data-act="cam" data-el="camToggle"></button>
                 <button data-act="quality" data-el="qualityToggle"></button>
-                <button data-act="style" data-el="styleToggle"></button>
                 <button data-act="time" data-el="timeToggle"></button>
               </div>
             </div>
@@ -425,7 +423,7 @@ export class Hud {
     }
   }
 
-  toggles(o: { controls: string; muted: boolean; ghosts: boolean; cam: string; quality: string; style: string; night: boolean; time: string }) {
+  toggles(o: { controls: string; muted: boolean; ghosts: boolean; cam: string; quality: string; night: boolean; time: string }) {
     const row = (icon: string, label: string, value: string, off = false) =>
       `${icon}<span>${label}</span><b class="${off ? 'off' : ''}">${escapeHtml(value)}</b><i aria-hidden="true">›</i>`;
     this.$.controlsToggle.innerHTML = row(ICON.wheel, 'Controls', o.controls);
@@ -433,7 +431,6 @@ export class Hud {
     this.$.ghostToggle.innerHTML = row(ICON.ghost, 'Ghosts', o.ghosts ? 'On' : 'Off', !o.ghosts);
     this.$.camToggle.innerHTML = row(ICON.cam, 'Camera', o.cam);
     this.$.qualityToggle.innerHTML = row(ICON.gauge, 'Graphics', o.quality);
-    this.$.styleToggle.innerHTML = row(ICON.globe, 'World', o.style);
     this.$.timeToggle.innerHTML = row(o.night ? ICON.moon : ICON.sun, 'Time of day', o.time);
     this.$.muteBtn.classList.toggle('off', o.muted);
     this.$.ghostBtn.classList.toggle('off', !o.ghosts);
