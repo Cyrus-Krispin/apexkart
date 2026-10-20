@@ -6,6 +6,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-10-21
+
 ### Changed
 - **Ghosts are a clean see-through outline** in their colour with a soft glowing edge, instead of a
   jumble of parts showing through each other. They fade out near the camera and no longer turn
@@ -510,7 +512,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 ### Fixed
 - Leaderboard and lap submission on the live site.
 
-[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.28.0...HEAD
+[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.29.0...HEAD
+[0.29.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.25.0...v0.26.0
