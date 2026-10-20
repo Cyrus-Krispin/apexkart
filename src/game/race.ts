@@ -18,6 +18,7 @@ import { decodeGhost, encodeGhost, sampleGhost, GHOST_DT, type GhostData, type G
 import type { TrackData } from '../track/osm';
 import { api, formatMs, type BoardResponse, type Dir, type Driver } from '../net/api';
 import { gridPose, type RaceContext, type RaceMode } from './raceMode';
+import { autopilot } from './autopilot';
 
 export interface RaceOptions {
   track: TrackData;
@@ -578,17 +579,9 @@ export class Race {
     this.opts.mode?.addon?.tick?.(dt);
   }
 
-  /** Pure-pursuit driver: steer at a look-ahead point, brake for curvature ahead. */
+  /** The built-in driver (src/game/autopilot.ts): pure pursuit at a speed planned from the road ahead. */
   private autoControls() {
-    const p = this.phys;
-    const t = this.track;
-    const look = t.at(p.s + 5 + p.speed * 0.45);
-    let ang = Math.atan2(look.x - p.x, look.z - p.z) - p.heading;
-    ang = Math.atan2(Math.sin(ang), Math.cos(ang));
-    let k = 0;
-    for (let d = 0; d < 35; d += 2) k = Math.max(k, Math.abs(t.curv[t.at(p.s + d + p.speed * 0.3).i]));
-    const vTarget = Math.min(p.vmax, Math.sqrt((2.1 * 9.81) / Math.max(k, 1e-3)));
-    return { throttle: p.speed < vTarget ? 1 : 0, brake: p.speed > vTarget + 1.5 ? 1 : 0, steer: THREE.MathUtils.clamp(-ang * 3, -1, 1), drift: false };
+    return autopilot(this.phys, this.track);
   }
 
   private timing(dt: number) {
@@ -699,6 +692,7 @@ export class Race {
   private invalidate(reason: string, again = false) {
     if ((this.invalid && !again) || this.lapStart === null) return;
     this.invalid = true;
+    if (this.autopilot) return; // the game is driving (the cool-down lap): not your lap to lose
     this.hud.banner(`Lap invalid · ${reason}`, 'warn', 2);
   }
 

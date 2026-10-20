@@ -120,7 +120,9 @@ Lifecycle and rules (housekeeping runs lazily inside any request that loads the 
 - **Progress / laps**: `MultiplayerRace` integrates distance along the centreline. It wraps at the
   line and ignores jumps no kart could make in one step, so going back and forth over the line or
   cutting across the infield earns nothing. The flag is at `laps × length`, and the crossing
-  is interpolated within the physics step. After the flag the kart drives a cool-down lap on autopilot.
+  is interpolated within the physics step. After the flag the kart drives a cool-down lap on autopilot
+  (`src/game/autopilot.ts`: pure pursuit at a speed planned from the real road ahead; it stays within
+  ~2 m of the centreline on every circuit, and no "Lap invalid" banner shows while it drives).
 - **Standings**: finished players by time, then by progress, then DNF / left. Every client computes
   the same order. Position badges also appear on name tags and the minimap.
 - **Trust**: like the leaderboard, the client is trusted. The server only rejects implausible
