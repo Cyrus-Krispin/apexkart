@@ -6,6 +6,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-20
+
 ### Changed
 - **Every track on the world map is ready to race.** The map now shows only tracks whose layouts
   are already built (4,894 of them), so every dot opens instantly. Venues that couldn't be built
@@ -219,7 +221,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 ### Fixed
 - Leaderboard and lap submission on the live site.
 
-[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.9.0...v0.10.0
