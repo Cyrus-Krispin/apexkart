@@ -58,7 +58,7 @@ timing panels with F1 sector colours. Tokens live in `src/styles/base.css`.
   a sheet with numbered turns, its other layouts, rotation and the live board.
 - **Pre-race briefing**: the circuit drawing animates in while satellite tiles load, alongside
   controls and rules, then you press any key to go.
-- Three control schemes (Simple, Classic and Tilt on phones) on keyboard, gamepad and touch;
+- Two control schemes (Simple and Classic) on keyboard, gamepad and touch;
   synthesized engine and tyre audio; skid marks; four cameras.
 
 ### Controls
@@ -69,14 +69,6 @@ the device (`ak:controls` in localStorage).
 - **Simple** (the default): the kart accelerates by itself, so you only brake and
   steer. Hold brake when you've stopped to reverse, say off a wall.
 - **Classic**: throttle, brake and drift yourself.
-- **Tilt** (phones and tablets with a motion sensor): hold the phone sideways
-  and tilt it like a steering wheel; the kart accelerates by itself and the big pad on the right
-  brakes. **Recentre** sets straight ahead (it's also set at lights out and on resume). iOS asks for
-  motion access on the first tap; if it's refused or there's no sensor, the game switches to Simple.
-
-On a phone every race is played in landscape: starting a race goes full screen and locks the screen
-sideways where the browser allows it (Android), and otherwise a "turn your phone" card holds the race
-until the phone is turned. Tablets can race either way up, except with Tilt.
 
 | Action | Simple | Classic |
 | --- | --- | --- |

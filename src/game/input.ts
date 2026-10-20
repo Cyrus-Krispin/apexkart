@@ -1,10 +1,9 @@
 import type { Controls } from './kart';
-import { Tilt, type TiltFailure } from './tilt';
 
-/** Simple and Tilt accelerate by themselves (brake and steer only); Classic is throttle, brake and drift. */
-export type ControlScheme = 'tilt' | 'simple' | 'classic';
+/** Simple accelerates by itself (brake and steer only); Classic is throttle, brake and drift. */
+export type ControlScheme = 'simple' | 'classic';
 
-export const SCHEME_LABEL: Record<ControlScheme, string> = { tilt: 'Tilt', simple: 'Simple', classic: 'Classic' };
+export const SCHEME_LABEL: Record<ControlScheme, string> = { simple: 'Simple', classic: 'Classic' };
 
 type TouchKey = 'left' | 'right' | 'gas' | 'brake' | 'drift';
 
@@ -13,17 +12,12 @@ export function touchDevice(): boolean {
   return matchMedia('(hover: none) and (pointer: coarse)').matches;
 }
 
-/** A phone rather than a tablet: a touch screen whose short side is phone-sized. Phones race in landscape. */
-export function phone(): boolean {
-  return touchDevice() && Math.min(screen.width, screen.height) < 600;
-}
-
-/** Schemes this device offers, in toggle order. Tilt needs a touch screen with a motion sensor API. */
+/** The schemes, in toggle order. */
 export function availableSchemes(): ControlScheme[] {
-  return touchDevice() && 'DeviceOrientationEvent' in window ? ['tilt', 'simple', 'classic'] : ['simple', 'classic'];
+  return ['simple', 'classic'];
 }
 
-/** The player's scheme; Simple until they pick another (Tilt is opt-in: it asks for motion access and turns the phone sideways). */
+/** The player's scheme; Simple until they pick another (a saved "tilt" from v0.14 falls back to Simple). */
 export function controlsPref(): ControlScheme {
   const v = localStorage.getItem('ak:controls') as ControlScheme | null;
   return v && availableSchemes().includes(v) ? v : 'simple';
@@ -33,9 +27,8 @@ export function saveControlsPref(s: ControlScheme) {
   localStorage.setItem('ak:controls', s);
 }
 
-/** Keyboard + gamepad + touch (+ tilt), merged into one Controls value per frame. */
+/** Keyboard + gamepad + touch, merged into one Controls value per frame. */
 export class Input {
-  readonly tilt: Tilt;
   private keys = new Set<string>();
   private fingers = new Map<number, TouchKey | null>(); // pointerId -> the control under that finger
   private keySteer = 0;
@@ -46,9 +39,7 @@ export class Input {
   constructor(
     private touchRoot: HTMLElement,
     public scheme: ControlScheme,
-    onTiltFail: (why: TiltFailure) => void,
   ) {
-    this.tilt = new Tilt(onTiltFail);
     const down = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
@@ -83,7 +74,7 @@ export class Input {
       (document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>('[data-touch]')?.dataset.touch as TouchKey | undefined) ?? null;
     root.addEventListener('pointerdown', (e) => {
       const el = e.target as HTMLElement;
-      if (el.closest('[data-act]')) return; // a real button (Recentre): let it click
+      if (el.closest('[data-act]')) return; // a real button: let it click
       e.preventDefault();
       el.setPointerCapture?.(e.pointerId); // keep this finger's moves and release coming here
       this.fingers.set(e.pointerId, under(e));
@@ -127,12 +118,10 @@ export class Input {
     this.paintTouch();
   }
 
-  /** Switch schemes. Switching to Tilt starts the sensor, so call it inside a tap (iOS asks for access). */
+  /** Switch schemes. */
   setScheme(s: ControlScheme) {
     this.scheme = s;
     this.releaseFingers(); // the on-screen layout changes under any finger that's down
-    if (s === 'tilt') this.tilt.start();
-    else this.tilt.stop();
   }
 
   /** One-shot key press (consumed on read). */
@@ -156,10 +145,6 @@ export class Input {
     const rate = target === 0 ? 9 : Math.sign(target) !== Math.sign(this.keySteer) ? 10 : 4.5;
     this.keySteer += Math.max(-rate * dt, Math.min(rate * dt, target - this.keySteer));
     let steer = this.keySteer;
-    if (this.scheme === 'tilt' && this.tilt.live) {
-      const tilt = this.tilt.read(dt);
-      if (target === 0) steer = tilt;
-    }
     let drift = classic && (k.has(' ') || k.has('Shift') || this.touching('drift'));
 
     if (pad) {
@@ -176,14 +161,13 @@ export class Input {
         this.padPrev[btn] = now;
       }
     }
-    // Simple and Tilt: always on the throttle except while braking. Brake held at a standstill
+    // Simple: always on the throttle except while braking. Brake held at a standstill
     // reverses (KartPhysics), so a player can back off a wall.
     if (!classic) throttle = 1 - brake;
     return { throttle, brake, steer, drift };
   }
 
   dispose() {
-    this.tilt.stop();
     this.cleanup.forEach((f) => f());
   }
 }
