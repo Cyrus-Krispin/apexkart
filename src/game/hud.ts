@@ -73,7 +73,7 @@ export class Hud {
 
   constructor(
     container: HTMLElement,
-    o: { trackName: string; dirLabel: string; dirIcon: string; color: string },
+    o: { trackName: string; dirLabel: string; dirIcon: string; color: string; lapRestart?: boolean },
     private onAction: (act: string) => void,
   ) {
     const code = escapeHtml(circuitCode(o.trackName));
@@ -82,7 +82,13 @@ export class Hud {
     this.root.innerHTML = `
       <div class="h-left">
       <section class="h-timing">
-        <header><span class="pw-code">${code}</span><span class="h-lapno"><span class="pw-k">Lap</span><b class="mono" data-el="lap">OUT</b></span><span class="h-dir" title="${o.dirLabel}">${o.dirIcon}</span></header>
+        <header><span class="pw-code">${code}</span><span class="h-lapno"><span class="pw-k">Lap</span><b class="mono" data-el="lap">OUT</b></span>${
+          // A time trial puts a flying-lap restart where the direction arrow sits in a race (the
+          // direction is on the grid and in the pause menu).
+          o.lapRestart
+            ? `<button class="h-relap" data-act="relap" title="Restart the lap (Backspace)" aria-label="Restart the lap: a flying start just before the line">${ICON.reset}<kbd>⌫</kbd></button>`
+            : `<span class="h-dir" title="${o.dirLabel}">${o.dirIcon}</span>`
+        }</header>
         <div class="h-time-row"><div class="h-time mono" data-el="time">0:00.000</div><b class="h-dl mono" data-el="delta" hidden title="Gap to your best lap"></b></div>
         <div class="h-sectors" data-el="sectors">${[1, 2, 3].map((k) => `<div class="sec"><i></i><span class="mono">S${k}</span></div>`).join('')}</div>
         <footer>
@@ -172,8 +178,10 @@ export class Hud {
     this.touch = this.$.touch;
     this.speedSegs = [...this.$.segs.children] as HTMLElement[];
     this.root.addEventListener('click', (e) => {
-      const act = (e.target as HTMLElement).closest<HTMLElement>('[data-act]')?.dataset.act;
+      const el = (e.target as HTMLElement).closest<HTMLElement>('[data-act]');
+      const act = el?.dataset.act;
       if (act) this.onAction(act);
+      if (act === 'relap') el!.blur(); // Space brakes: it mustn't press this button again
     });
   }
 

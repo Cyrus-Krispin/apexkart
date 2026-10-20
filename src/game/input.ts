@@ -42,7 +42,7 @@ export class Input {
   ) {
     const down = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
-      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' ', 'Backspace'].includes(e.key)) e.preventDefault();
       const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
       if (!this.keys.has(k)) this.pressed.add(k);
       this.keys.add(k);
@@ -151,7 +151,8 @@ export class Input {
       if (Math.abs(ax) > 0.12) steer = Math.sign(ax) * ((Math.abs(ax) - 0.12) / 0.88) ** 1.4;
       if (classic) throttle = Math.max(throttle, pad.buttons[7]?.value ?? 0, pad.buttons[0]?.pressed ? 1 : 0);
       brake = Math.max(brake, pad.buttons[6]?.value ?? 0, pad.buttons[1]?.pressed ? 1 : 0);
-      for (const [btn, key] of [[9, 'Escape'], [3, 'r']] as const) {
+      // Start pauses, Y resets onto the track, Select (Back) restarts the lap in a time trial.
+      for (const [btn, key] of [[9, 'Escape'], [3, 'r'], [8, 'Backspace']] as const) {
         const now = !!pad.buttons[btn]?.pressed;
         if (now && !this.padPrev[btn]) this.pressed.add(key);
         this.padPrev[btn] = now;

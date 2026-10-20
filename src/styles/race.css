@@ -512,3 +512,23 @@
   .h-reset { font-size: 18px; }
   .h-stuck-tip { padding: 4px 8px; font-size: 12px; }
 }
+
+/* ---------- Lane G (time trial): the flying-lap restart in the lap panel's header, where a race
+   shows the direction arrow (hud.ts, race.ts restartLap). Small and out of the thumbs' way; on touch
+   its hit area runs down over the lap time (nothing to press there) to about 44px. */
+.h-relap {
+  position: relative; display: inline-flex; align-items: center; gap: 6px; height: 100%; margin: 0 -12px 0 auto; padding: 0 12px 0 10px;
+  color: var(--text-2); touch-action: manipulation; transition: color 0.15s, background-color 0.15s;
+}
+.h-relap svg { flex: none; width: 16px; height: 16px; }
+.h-relap kbd { height: 16px; min-width: 18px; padding: 0 3px; font-family: var(--ui); font-size: 14px; line-height: 1; }
+@media (hover: hover) { .h-relap:hover { color: var(--text); background: rgba(242, 243, 245, 0.08); } }
+.h-relap:active svg { transform: rotate(-40deg); }
+@media (hover: none) and (pointer: coarse) {
+  .h-relap kbd { display: none; }
+  .h-relap::after { content: ''; position: absolute; inset: 0 0 -18px -8px; }
+  .h-relap svg { width: 18px; height: 18px; }
+}
+@media (max-width: 640px), (pointer: coarse) and (max-height: 520px) {
+  .h-relap { margin-right: -8px; padding: 0 10px 0 10px; }
+}

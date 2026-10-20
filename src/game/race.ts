@@ -20,6 +20,7 @@ import { decodeGhost, encodeGhost, sampleGhost, GHOST_DT, type GhostData, type G
 import type { TrackData } from '../track/osm';
 import { api, formatMs, type BoardResponse, type Dir, type Driver } from '../net/api';
 import { gridPose, type RaceContext, type RaceMode } from './raceMode';
+import { speedProfile } from './speedProfile';
 
 export interface RaceOptions {
   track: TrackData;
@@ -171,7 +172,7 @@ export class Race {
     this.pipeline.quality = this.qualitySetting === 'auto' ? this.autoTier() : this.qualitySetting;
     this.root.appendChild(this.pipeline.renderer.domElement);
 
-    this.hud = new Hud(this.root, { trackName: opts.track.name, dirLabel: rot.label, dirIcon: rot.icon, color: opts.driver.color }, (a) => this.action(a));
+    this.hud = new Hud(this.root, { trackName: opts.track.name, dirLabel: rot.label, dirIcon: rot.icon, color: opts.driver.color, lapRestart: !opts.mode }, (a) => this.action(a));
     this.hud.setVisible(false);
     this.hud.best(this.pb?.ms ?? null);
     this.input = new Input(this.hud.touch, controlsPref());
@@ -650,6 +651,7 @@ export class Race {
     }
     if (a === 'exit') this.opts.onExit();
     if (a === 'reset' && this.state === 'racing') this.recover();
+    if (a === 'relap') this.restartLap();
     if (a === 'pause') this.togglePause();
     if (a === 'mute') this.audio.toggleMute();
     if (a === 'ghosts') this.toggleGhosts();
@@ -753,6 +755,55 @@ export class Race {
     this.snapCamera();
   }
 
+  /** The centreline speed profile (speedProfile.ts), worked out on the first flying-lap restart. */
+  private profile: Float32Array | null = null;
+
+  /**
+   * Time trial: straight onto a flying lap (Backspace, gamepad Select, or ↺ in the lap panel). The
+   * kart goes min(150 m, 15% of the lap) before the line, on the centreline, at 90% of the speed it
+   * could carry there (at most 22 m/s), so it's never launched into a braking zone. The lights are
+   * skipped. Nothing is timed until the line: crossing it starts lap 1 the usual way, so its timing,
+   * sectors, ghost recording, track limits and distance backstop all start at the line as before.
+   */
+  private restartLap() {
+    if (this.opts.mode || (this.state !== 'grid' && this.state !== 'racing')) return;
+    const L = this.track.length;
+    const s = L - Math.min(150, 0.15 * L);
+    this.profile ??= speedProfile(this.track.px, this.track.pz).v;
+    const p = this.phys;
+    p.place(s); // the track's heading there, standing still, no rejoin: not a cut
+    const v0 = Math.min(0.9 * this.profile[this.track.at(s).i], 22);
+    p.vx = Math.sin(p.heading) * v0;
+    p.vz = Math.cos(p.heading) * v0;
+    this.body.vf = v0; // no lurch of the body from the jump in speed
+    this.body.acc = 0;
+    this.lastS = p.s;
+    if (this.state === 'grid') {
+      // Lights out at once.
+      this.state = 'racing';
+      this.goTime = this.simT;
+      this.trackScene.lights.forEach((m) => (m.emissiveIntensity = 0));
+      this.hud.lights(null);
+      this.hud.hint(true, 4000);
+    }
+    // The lap in progress never happened (not counted, no lap card). The line starts lap 1.
+    this.lapStart = null;
+    this.lapNo = 0;
+    this.invalid = false;
+    this.sectorsHit = [false, false];
+    this.sectorTimes = [];
+    this.sectorColors = [];
+    this.ghostRec = [];
+    this.splits = [];
+    this.grassT = this.wrongWayT = 0;
+    this.showStuck(false);
+    this.hud.lap(null);
+    this.hud.lapTime(0, false);
+    this.hud.delta(null);
+    this.hud.sectors([], [], -1, 0);
+    this.snapCamera();
+  }
+
   private togglePause(force?: boolean) {
     if (this.state === 'intro') return;
     const pause = force ?? this.state !== 'paused';
@@ -796,9 +847,10 @@ export class Race {
       if (this.input.consume('m')) this.action('mute');
       if (this.input.consume('g')) this.action('ghosts');
       if (this.input.consume('r') && this.state === 'racing') this.recover();
+      if (this.input.consume('Backspace')) this.restartLap();
     } else {
       // Keys pressed on the intro screen shouldn't leak into the race.
-      ['Escape', 'p', 'c', 'm', 'g', 'r'].forEach((k) => this.input.consume(k));
+      ['Escape', 'p', 'c', 'm', 'g', 'r', 'Backspace'].forEach((k) => this.input.consume(k));
     }
 
     if (this.state === 'grid' || this.state === 'racing') {
