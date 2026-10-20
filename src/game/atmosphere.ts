@@ -1,6 +1,6 @@
 // Time of day: sky, fog, sun or moon, fill light and, at night, the circuit floodlights.
 import * as THREE from 'three';
-import { makeNightSky, makeSky, NIGHT_SKY, SKY } from './sky';
+import { driftSky, makeNightSky, makeSky, NIGHT_SKY, SKY } from './sky';
 import { Floodlights, floodlit, type Lamp, type RigOptions } from './floodlights';
 import type { Quality, RenderPipeline } from './render';
 import { sunPosition } from './sun';
@@ -178,6 +178,7 @@ export class Atmosphere {
 
   /** Follow the kart: keep the sun's shadow box centred on it and the real floodlights nearby. */
   update(x: number, z: number, dt: number) {
+    if (this.sky) driftSky(this.sky, dt);
     const d = this.dir;
     this.key.position.set(x + d.x * 100, d.y * 100, z + d.z * 100);
     this.key.target.position.set(x, 0, z);
