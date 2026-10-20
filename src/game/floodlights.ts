@@ -302,6 +302,7 @@ export class Floodlights {
         l.shadow.camera.far = LAMP.distance;
         l.shadow.bias = -0.0006;
         l.shadow.normalBias = 0.03;
+        l.shadow.radius = 2;
       }
       this.group.add(l, l.target);
       return { light: l, lamp: -1, w: 0, want: false };

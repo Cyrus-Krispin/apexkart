@@ -97,6 +97,8 @@ export class Atmosphere {
     sc.far = 320;
     this.key.shadow.bias = -0.0004;
     this.key.shadow.normalBias = 0.03;
+    // Shadows keep some of the sky's colour instead of going grey-black.
+    this.key.shadow.intensity = 0.85;
     this.setShadowSize();
     scene.add(this.hemi, this.key, this.key.target);
     // A subtle kart headlight so the next braking point is never pitch black.
@@ -173,16 +175,34 @@ export class Atmosphere {
   private setShadowSize() {
     const s = this.quality === 'low' ? 1024 : 2048;
     this.key.shadow.mapSize.set(s, s);
+    // r186's PCF: 5 rotated taps of hardware 2x2 PCF over this many texels. Soft edges, same cost.
+    this.key.shadow.radius = this.quality === 'low' ? 1.5 : 2.5;
     this.key.shadow.map?.dispose();
     this.key.shadow.map = null;
   }
 
-  /** Follow the kart: keep the sun's shadow box centred on it and the real floodlights nearby. */
+  private snapX = new THREE.Vector3();
+  private snapY = new THREE.Vector3();
+  private snapP = new THREE.Vector3();
+
+  /**
+   * Follow the kart: keep the sun's shadow box centred on it and the real floodlights nearby.
+   * The box moves in whole shadow-map texels (in the light's own frame), so shadow edges stay put
+   * on the ground while you drive instead of crawling and shimmering.
+   */
   update(x: number, z: number, dt: number) {
     if (this.sky) driftSky(this.sky, dt);
-    const d = this.dir;
-    this.key.position.set(x + d.x * 100, d.y * 100, z + d.z * 100);
-    this.key.target.position.set(x, 0, z);
+    const d = this.dir; // unit, towards the sun: the shadow camera looks along -d with +y up
+    const sx = this.snapX.set(0, 1, 0).cross(d).normalize();
+    const sy = this.snapY.copy(d).cross(sx);
+    const sc = this.key.shadow.camera;
+    const texel = (sc.right - sc.left) / this.key.shadow.mapSize.x;
+    const p = this.snapP.set(x, 0, z);
+    const u = p.dot(sx);
+    const v = p.dot(sy);
+    p.addScaledVector(sx, Math.round(u / texel) * texel - u).addScaledVector(sy, Math.round(v / texel) * texel - v);
+    this.key.target.position.copy(p);
+    this.key.position.copy(p).addScaledVector(d, 100);
     if (this.time === 'night') this.flood.update(x, z, dt);
   }
 
