@@ -319,6 +319,48 @@ export class GroundPainter {
     return tex;
   }
 
+  /**
+   * Soft contact darkening (fake ambient occlusion) painted along polylines, such as the foot of a
+   * tyre wall or under a hoarding: three nested strokes, darkest in the middle. Free at run time.
+   */
+  contactLines(lines: [number, number][][], width: number, alpha: number) {
+    const g = this.ctx;
+    const R = this.res;
+    g.save();
+    g.lineJoin = g.lineCap = 'round';
+    g.strokeStyle = `rgba(15,25,8,${alpha / 3})`;
+    for (const k of [1, 0.62, 0.3]) {
+      g.lineWidth = width * k * R;
+      for (const pts of lines) {
+        if (pts.length < 2) continue;
+        g.beginPath();
+        pts.forEach(([x, z], i) => (i ? g.lineTo : g.moveTo).call(g, (x - this.extent.x0) * R, (z - this.extent.z0) * R));
+        g.stroke();
+      }
+    }
+    g.restore();
+  }
+
+  /** The same around footprints (grandstand, pit building, marshal posts): filled, with a soft rim `spread` metres wide. */
+  contactShapes(polys: [number, number][][], spread: number, alpha: number) {
+    const g = this.ctx;
+    const R = this.res;
+    g.save();
+    g.lineJoin = 'round';
+    g.fillStyle = g.strokeStyle = `rgba(15,25,8,${alpha / 3})`;
+    for (const k of [1, 0.6, 0.25]) {
+      g.lineWidth = 2 * spread * k * R;
+      for (const pts of polys) {
+        g.beginPath();
+        pts.forEach(([x, z], i) => (i ? g.lineTo : g.moveTo).call(g, (x - this.extent.x0) * R, (z - this.extent.z0) * R));
+        g.closePath();
+        g.fill();
+        g.stroke();
+      }
+    }
+    g.restore();
+  }
+
   /** Bake into a ground mesh. Edges fade into the base grass colour of the endless plane. */
   toMesh(maxAniso: number): THREE.Mesh {
     const g = this.ctx;

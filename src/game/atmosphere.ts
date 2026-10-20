@@ -32,6 +32,7 @@ interface Preset {
   env: number;
   bloom: { strength: number; radius: number; threshold: number };
   lampHeads: number; // floodlight lens emissive intensity
+  blob: number; // opacity of the soft shadow under the kart
 }
 
 const PRESETS: Record<TimeOfDay, Preset> = {
@@ -46,6 +47,7 @@ const PRESETS: Record<TimeOfDay, Preset> = {
     env: 0.55,
     bloom: { strength: 0.32, radius: 0.45, threshold: 0.93 },
     lampHeads: 0.6,
+    blob: 0.5,
   },
   // Dim moonlight and a low blue fill; the floodlights do the real work.
   night: {
@@ -57,6 +59,7 @@ const PRESETS: Record<TimeOfDay, Preset> = {
     env: 0.35,
     bloom: { strength: 0.62, radius: 0.55, threshold: 1.1 },
     lampHeads: 16,
+    blob: 0.6,
   },
 };
 
@@ -77,6 +80,8 @@ export class Atmosphere {
   private key = new THREE.DirectionalLight();
   private headlight = new THREE.SpotLight(0xfff0dc, 160, 40, 0.42, 0.75, 1.3);
   private flood: Floodlights;
+  /** A soft dark blob under the kart that seats it on the ground on every tier (one quad). */
+  private blob: THREE.Mesh;
   private lampHeads: THREE.MeshStandardMaterial[] = [];
   private quality: Quality;
 
@@ -106,6 +111,8 @@ export class Atmosphere {
     this.headlight.target.position.set(0, 0, 16);
     kart.add(this.headlight.target);
     this.flood = new Floodlights(RIGS[this.quality]);
+    this.blob = kartBlob();
+    kart.add(this.blob);
     this.set(time, sun);
   }
 
@@ -138,6 +145,7 @@ export class Atmosphere {
     this.pipeline.setBloom(p.bloom);
     this.pipeline.bakeEnvironment(this.sky, p.env);
     this.lampHeads.forEach((m) => (m.emissiveIntensity = p.lampHeads));
+    (this.blob.material as THREE.MeshBasicMaterial).opacity = p.blob;
 
     Floodlights.setNight(night);
     if (night) {
@@ -247,8 +255,42 @@ export class Atmosphere {
   }
 
   dispose() {
+    this.blob.removeFromParent();
+    this.blob.geometry.dispose();
+    const bm = this.blob.material as THREE.MeshBasicMaterial;
+    bm.alphaMap?.dispose();
+    bm.dispose();
     this.flood.dispose();
     this.headlight.dispose();
     Floodlights.setNight(false);
   }
+}
+
+/** The kart's contact shadow: a soft ellipse on a quad just above the road, black with an alpha ramp. */
+function kartBlob(): THREE.Mesh {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d')!;
+  const grd = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grd.addColorStop(0, '#ffffff');
+  grd.addColorStop(0.45, '#c8c8c8');
+  grd.addColorStop(1, '#000000');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, 64, 64);
+  const tex = new THREE.CanvasTexture(c);
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0x000000,
+    alphaMap: tex,
+    transparent: true,
+    depthWrite: false,
+    fog: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -4,
+  });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1.55, 2.2).rotateX(-Math.PI / 2), mat);
+  mesh.position.set(0, 0.045, 0.05); // just above the asphalt (0.04); the kart's nose is +z
+  mesh.renderOrder = -0.5; // before the other see-through things (ghosts, glare)
+  mesh.name = 'kart-blob';
+  return mesh;
 }

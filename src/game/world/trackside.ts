@@ -140,6 +140,20 @@ export function wallRuns(t: TrackModel, ground: GroundPainter | null): { side: n
   return out;
 }
 
+/** A local rectangle's corners in world x/z, for painting its contact shadow on the ground. */
+function footprint(m: THREE.Matrix4, x0: number, x1: number, z0: number, z1: number): [number, number][] {
+  const v = new THREE.Vector3();
+  return [
+    [x0, z0],
+    [x1, z0],
+    [x1, z1],
+    [x0, z1],
+  ].map(([x, z]) => {
+    v.set(x, 0, z).applyMatrix4(m);
+    return [v.x, v.z] as [number, number];
+  });
+}
+
 export function buildTrackside(track: TrackModel, ground: GroundPainter | null, seed: string, aniso: number): Trackside {
   const group = new THREE.Group();
   const rand = rng(hashString(seed + ':side'));
@@ -302,7 +316,17 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
     };
     // Each run is walked with the track on its right, so the belt's front face (A->B->C) faces
     // the track and its texture runs left to right as seen from the kart: no mirrored text.
+    const feet: [number, number][][] = [];
     for (const { pts } of wallRuns(t, ground)) {
+      // The wall's foot for the painted contact shadow: its centreline, T/2 behind the inner face.
+      feet.push(
+        pts.map(([x, z], k) => {
+          const [ax, az] = pts[Math.max(0, k - 1)];
+          const [bx, bz] = pts[Math.min(pts.length - 1, k + 1)];
+          const L = Math.hypot(bx - ax, bz - az) || 1;
+          return [x + ((bz - az) / L) * T * 0.5, z - ((bx - ax) / L) * T * 0.5] as [number, number];
+        }),
+      );
       let u = 0;
       const corner = (k: number, ox: number, oz: number) => {
         const [x, z] = pts[k];
@@ -337,6 +361,7 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
       m.receiveShadow = true;
       group.add(m);
     }
+    ground?.contactLines(feet, T + 1.3, 0.42);
   }
 
   // ---------------------------------------------------------------- floodlights
@@ -484,6 +509,7 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
     );
     const boards: THREE.BufferGeometry[] = [];
     const legs: THREE.BufferGeometry[] = [];
+    const hoardFeet: [number, number][][] = [];
     const per = Math.round(6 / (t.length / t.n));
     let k = 0;
     for (let i = 0; i < t.n; i += per) {
@@ -506,6 +532,12 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
         for (let q = 0; q < uvA.count; q++) uvA.setY(q, uvA.getY(q) > 0.5 ? v1 : v0);
         plane.rotateY(yaw).translate(x, 1.05, z);
         boards.push(plane);
+        const ax = Math.cos(yaw) * 2.8;
+        const az = -Math.sin(yaw) * 2.8;
+        hoardFeet.push([
+          [x - ax, z - az],
+          [x + ax, z + az],
+        ]);
         const back = new THREE.BoxGeometry(5.7, 1.1, 0.08).rotateY(yaw).translate(x - nx * side * -0.05, 1.05, z - nz * side * -0.05);
         legs.push(tint(back, '#2a2a2c'));
         for (const lx of [-2.4, 2.4]) {
@@ -521,6 +553,7 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
       lm.castShadow = true;
       group.add(lm);
     }
+    ground?.contactLines(hoardFeet, 1.1, 0.22);
   }
 
   // ---------------------------------------------------------------- grandstand + pits at start/finish
@@ -566,6 +599,7 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
       parts.push(tint(new THREE.BoxGeometry(L + 2, 0.7, 0.12).translate(0, 6.7, 1.6), '#ff4d00'));
       const stand = new THREE.Mesh(mergeGeometries(parts)!, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 }));
       stand.applyMatrix4(frame(standSide, -4, wallOff + 2.6));
+      ground?.contactShapes([footprint(frame(standSide, -4, wallOff + 2.6), -L / 2, L / 2, -rows * 0.9 - 0.2, 0.45)], 0.9, 0.4);
       stand.castShadow = true;
       stand.receiveShadow = true;
       group.add(stand);
@@ -642,6 +676,7 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
       signBack.position.set(0, 5.4, -0.11);
       pit.add(signBack);
       pit.applyMatrix4(frame(pitSide, 10, wallOff + 3));
+      ground?.contactShapes([footprint(frame(pitSide, 10, wallOff + 3), -len / 2, len / 2, -8, 0)], 1.0, 0.42);
       group.add(pit);
     }
   }
@@ -649,6 +684,7 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
   // ---------------------------------------------------------------- marshal posts at the big corners
   {
     const parts: THREE.BufferGeometry[] = [];
+    const posts: [number, number][][] = [];
     let last = -999;
     for (let i = 0; i < t.n; i++) {
       const c = Math.abs(t.curv[i]);
@@ -665,6 +701,7 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
       const yaw = Math.atan2(-nx * side, -nz * side);
       const m = new THREE.Matrix4().compose(new THREE.Vector3(x, 0, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw), new THREE.Vector3(1, 1, 1));
       parts.push(tint(new THREE.BoxGeometry(1.6, 2.1, 1.6).translate(0, 1.05, 0), '#f2eee5').applyMatrix4(m));
+      posts.push(footprint(m, -0.8, 0.8, -0.8, 0.8));
       parts.push(tint(new THREE.BoxGeometry(2.0, 0.18, 2.0).translate(0, 2.2, 0), '#ff4d00').applyMatrix4(m));
       parts.push(tint(new THREE.BoxGeometry(1.2, 0.6, 0.05).translate(0, 1.4, 0.81), '#2c3843').applyMatrix4(m));
       parts.push(tint(new THREE.CylinderGeometry(0.03, 0.03, 2.4, 5).translate(0.9, 1.2, 0.9), '#9aa0a6').applyMatrix4(m));
@@ -675,6 +712,7 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
       m.castShadow = true;
       group.add(m);
     }
+    ground?.contactShapes(posts, 0.6, 0.4);
   }
 
   void aniso;
