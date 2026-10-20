@@ -6,6 +6,22 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+### Changed
+- **Clouds**: soft cumulus drift slowly across the day sky, lit on the sun side, with faint clouds at
+  night. Kart paint reflects them.
+- **The world has an edge**: a ring of low-poly hills with a tree line, fading into haze, so the
+  ground no longer meets the sky in a hard line.
+- **Steadier shadows**: no more crawling or shimmering edges while you drive, softer edges, and day
+  shadows keep a little sky colour.
+- **Grass**: crisper close up, with mowing stripes that follow the track and a thin seam where the
+  concrete meets the grass (Medium and High).
+- **Things sit on the ground**: a soft shadow under your kart, and darker ground at the foot of tyre
+  walls, boards and buildings.
+- **Night**: faint light beams under the floodlights (Medium and High).
+- **Kerbs** have rubber marks on the edge the tyres hit, and 1 m stripes.
+- **Phones on Low quality** do about a third less graphics work for the main picture, with simpler
+  world materials.
+
 ## [0.27.0] - 2026-10-21
 
 ### Added
