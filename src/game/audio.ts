@@ -1,4 +1,19 @@
 /** Tiny synthesized audio: two-stroke engine drone, tyre squeal, start beeps. */
+
+// Phones only let audio start inside a tap. The race starts on its own once the world is built, so
+// the Start tap on the circuit makes the context first and the race picks it up.
+let primed: AudioContext | null = null;
+
+/** Call inside a tap or key press that leads into a race. */
+export function primeAudio() {
+  try {
+    if (!primed || primed.state === 'closed') primed = new AudioContext();
+    void primed.resume();
+  } catch {
+    /* no Web Audio */
+  }
+}
+
 export class KartAudio {
   private ctx: AudioContext | null = null;
   private master!: GainNode;
@@ -15,7 +30,9 @@ export class KartAudio {
 
   start() {
     if (this.ctx) return;
-    const ctx = new AudioContext();
+    const ctx = primed && primed.state !== 'closed' ? primed : new AudioContext();
+    primed = null;
+    void ctx.resume();
     this.ctx = ctx;
     this.master = ctx.createGain();
     this.master.gain.value = this._muted ? 0 : 0.5;

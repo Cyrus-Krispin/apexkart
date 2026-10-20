@@ -1,7 +1,8 @@
 // The home screen in the Pit Wall design (docs/pit-wall.md). Every circuit is a live session, so
 // home is a timing tower: circuits ranked by who's on track (LIVE), by distance (NEAR ME) or by
 // country (WORLD, all 4,900 venues). Pick one and its pit board shows the track, your medal
-// targets, the classification and a green Start. On desktop the tower and the pit board sit side
+// targets, the classification and a green Start that puts you on the grid (one tap: the grid screen
+// starts the race by itself once the world is built). On desktop the tower and the pit board sit side
 // by side as a broadcast wall, with race control running along the bottom.
 import { centroid, trackFromId, waysFromId, type LatLon, type TrackData } from '../track/osm';
 import { cellOf, unpackPoints, venueKey, type VenueCell } from '../shared/venues';
@@ -14,11 +15,12 @@ import { localPB, saveTimePref, timePref, type TimePref } from '../game/prefs';
 import { controlsPref, saveControlsPref, type ControlScheme } from '../game/input';
 import { earnedMedal, targets } from '../game/medals';
 import { isNightAt } from '../game/sun';
+import { primeAudio } from '../game/audio';
 import { distM, loadWorld, localeCountry, type Venue, type WorldIndex } from './world';
 import { circuitCode, stripeStyle } from './pitwall';
 import * as V from './atlasViews';
 
-const LAST_KEY = 'ak:last'; // {id, dir} of the last circuit raced: what Box box offers
+const LAST_KEY = 'ak:last'; // {id, dir} of the last circuit raced: what the desktop wall opens on
 const SAME_VENUE_M = 700; // a venue this close to a known track is that track
 const NEAR_KM = 400;
 const BATCH = 80; // tower rows rendered at a time in the long lists
@@ -86,7 +88,6 @@ export class Atlas {
   private flashes = new Map<string, { kind: 'p' | 'g'; until: number }>();
   private pbSeen = new Map<string, number>();
   private feedFails = 0;
-  private starting = false;
 
   constructor(private o: AtlasOptions) {
     o.root.innerHTML = ATLAS_HTML;
@@ -97,7 +98,6 @@ export class Atlas {
     this.bind();
     this.renderTabs();
     this.renderTower();
-    this.renderBox();
     this.load();
     window.setInterval(() => this.tickClock(), 1000);
     if (import.meta.env.DEV) Object.assign(window as any, { __atlas: this });
@@ -128,7 +128,6 @@ export class Atlas {
     this.nameTracks([...this.tracks.values()].filter((t) => !t.preset && !t.location));
     this.route();
     this.renderTower();
-    this.renderBox();
     this.renderDaily();
     this.pollFeed();
     this.pollDaily();
@@ -707,7 +706,7 @@ export class Atlas {
     }
   }
 
-  // ------------------------------------------------------------------ Box box, the daily circuit
+  // ------------------------------------------------------------------ the desktop wall's pick, the daily circuit
 
   private nowPick(): { t: TrackData; dir: Dir; why: string } | null {
     try {
@@ -723,12 +722,6 @@ export class Atlas {
     if (daily) return { t: daily, dir: 'fwd', why: 'DAILY CIRCUIT' };
     const first = [...this.tracks.values()][0];
     return first ? { t: first, dir: 'fwd', why: 'START HERE' } : null;
-  }
-
-  private renderBox() {
-    const p = this.nowPick();
-    const night = p && timePref() === 'live' && isNightAt(p.t.center);
-    this.el.box.innerHTML = V.boxBar(p ? { code: circuitCode(p.t.name), name: p.t.name, why: `${p.why}${night ? ' · NIGHT RACE' : ''}` } : null);
   }
 
   /** Today's circuit, worked out here (the same way the server does) so it shows even offline. */
@@ -763,21 +756,12 @@ export class Atlas {
     this.o.onRace(t, dir, this.isDaily(t, dir), rival);
   }
 
-  /** START: the five red lights come on and go out, then you're on the grid. */
+  /** START: straight onto the grid. This tap is the only one, so it also unlocks the race's sound. */
   private start(rival?: string) {
     const t = this.selected;
-    if (!t || this.starting) return;
-    const lights = [...this.el.pit.querySelectorAll<HTMLElement>('.pit-lights i')];
-    if (!lights.length || reduceMotion()) return this.race(t, this.dir, rival);
-    this.starting = true;
-    this.el.pit.classList.add('lights');
-    lights.forEach((l, k) => setTimeout(() => l.classList.add('on'), k * 90));
-    setTimeout(() => {
-      lights.forEach((l) => l.classList.remove('on'));
-      this.el.pit.classList.remove('lights');
-      this.starting = false;
-      if (this.selected === t) this.race(t, this.dir, rival);
-    }, lights.length * 90 + 160);
+    if (!t) return;
+    primeAudio();
+    this.race(t, this.dir, rival);
   }
 
   // ------------------------------------------------------------------ events
@@ -818,7 +802,6 @@ export class Atlas {
         root.classList.remove('search-open');
         return;
       }
-      if (act === 'box') return this.boxRace();
       if (act === 'daily') {
         const id = this.dailyId();
         if (id) location.hash = `#/t/${id}/fwd`;
@@ -874,7 +857,6 @@ export class Atlas {
         e.preventDefault();
         if (this.cursor && this.cursor !== (this.selected ? `t:${this.selected.id}` : null)) this.openKey(this.cursor);
         else if (this.selected && (this.routed || !small())) this.start(this.rival?.pid);
-        else this.boxRace();
       } else if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !typing) {
         e.preventDefault();
         this.moveCursor(e.key === 'ArrowDown' ? 1 : -1);
@@ -916,7 +898,6 @@ export class Atlas {
     if (time) {
       saveTimePref(time);
       this.renderPit();
-      this.renderBox();
       return;
     }
     const ctl = t.closest<HTMLElement>('[data-controls]')?.dataset.controls as ControlScheme | undefined;
@@ -924,11 +905,6 @@ export class Atlas {
       saveControlsPref(ctl);
       this.renderPit();
     }
-  }
-
-  private boxRace() {
-    const p = this.nowPick();
-    if (p) this.race(p.t, p.dir);
   }
 
   /** Open a tower row: a known circuit's pit board, or load a venue's layouts first. */
@@ -991,7 +967,7 @@ export class Atlas {
       this.renderTower();
     }
     this.rival = null;
-    // On desktop the wall always shows a circuit: the one you'd race with Box box.
+    // On desktop the wall always shows a circuit: the last one you raced (or the busiest, or today's daily).
     if (!small()) {
       const p = this.nowPick();
       if (p && (!this.selected || this.selected.id !== p.t.id)) {
@@ -1173,7 +1149,6 @@ export class Atlas {
     this.el.rcm.innerHTML = items.length ? items.join('') + items.join('') : '<span class="rc-item">ALL QUIET · SET THE FIRST LAP OF THE DAY</span>';
     this.el.rcm.classList.toggle('run', items.length > 0);
     if (!this.searching()) this.renderTower(true);
-    this.renderBox();
     if (this.selected && !this.closeEditor) {
       // A new record moves the medal targets; the live count changes the dots.
       const t = this.selected;
@@ -1200,7 +1175,6 @@ export class Atlas {
       this.pollBoard();
     }
     this.renderTower(true);
-    this.renderBox();
     this.renderDaily();
     this.pollFeed();
     this.pollDaily();
@@ -1237,7 +1211,6 @@ const ATLAS_HTML = /* html */ `
   <div class="tw-sub" data-el="sub" hidden></div>
   <div class="tw-head" data-el="head"></div>
   <div class="tw-list" data-el="tower"></div>
-  <div class="tw-box" data-el="box"></div>
 </section>
 <section class="pw-pit" data-el="pit" aria-label="Circuit"></section>
 <aside class="pw-live" data-el="liveSheet" aria-label="Live timing" hidden>
