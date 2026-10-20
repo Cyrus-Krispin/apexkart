@@ -8,8 +8,6 @@ import { trackArt, rotationLabel, type ArtOptions } from './trackArt';
 import { escapeHtml as esc, formatMs, timeAgo, type BoardResponse, type DailyResponse, type Dir, type FeedItem } from '../net/api';
 import { MEDALS, MEDAL_NAME, type Medal, type Targets } from '../game/medals';
 import { stripeStyle } from './pitwall';
-import type { ControlScheme } from '../game/input';
-import type { TimePref } from '../game/prefs';
 
 export { esc, formatMs };
 
@@ -108,10 +106,6 @@ export interface PitData {
   daily: boolean; // today's daily circuit: the leaderboard gets a Today tab
   challenge?: { name?: string; ms?: number };
   lapS: number; // seconds per lap for the live dots
-  // Setup: everything you can choose before a race lives here, on the circuit page.
-  time: TimePref;
-  nightNow: boolean; // at the circuit right now, for "Live"
-  controls: ControlScheme;
 }
 
 /** The next medal to chase and how far off it you are. */
@@ -124,9 +118,9 @@ const ICON_FRIENDS = `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidde
 const ICON_SHARE = `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 3.5v11M7.5 8 12 3.5 16.5 8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 12.5v6.5h14v-6.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
 /**
- * The circuit page: everything before a race on one page. The track, you (best, place, medals),
- * the leaderboard, and the setup (direction, time of day, controls). RACE takes you to the grid,
- * which only loads and starts: there's nothing to set there.
+ * The circuit page: the circuit and how you stand on it. The track (and which way round), you
+ * (best, place, medals) and the leaderboard. RACE takes you to the grid, where you set up the
+ * session (time of day, controls) while the world loads, then start.
  */
 export function pit(d: PitData): string {
   const { t, shape } = d;
@@ -157,6 +151,10 @@ export function pit(d: PitData): string {
     <div class="pit-track graph-paper">
       ${art(shape, { w: 560, h: 380, pad: 30, reverse: d.dir === 'rev', turns: true, arrows: true, road: true, sectors: true, live: d.live, lapS: d.lapS })}
     </div>
+    <div class="pit-dir pw-tabs soft" role="group" aria-label="Direction (each has its own leaderboard)">
+      <button data-dir="fwd" aria-pressed="${d.dir === 'fwd'}">${fwd.icon} ${fwd.label}</button>
+      <button data-dir="rev" aria-pressed="${d.dir === 'rev'}">${rev.icon} ${rev.label}</button>
+    </div>
     ${
       d.siblings.length
         ? `<div class="pit-sibs" role="group" aria-label="Layouts at this venue"><p class="label">${d.siblings.length + 1} LAYOUTS HERE</p><div class="pit-sib-row">${[t, ...d.siblings]
@@ -179,24 +177,6 @@ export function pit(d: PitData): string {
       <div class="pit-cls lb-all" data-el="dBoard"><p class="pit-empty">Loading times…</p></div>
       ${d.daily ? `<div class="pit-cls lb-today" data-el="dDaily"><p class="pit-empty">Loading today’s times…</p></div>` : ''}
       <p class="pit-on" data-el="dLive"></p>
-    </section>
-    <section class="pit-setup" aria-label="Setup">
-      <span class="label">SETUP</span>
-      <div class="pit-set">
-        <span class="pw-k">Direction</span>
-        <div class="pw-tabs soft" role="group" aria-label="Direction">
-          <button data-dir="fwd" aria-pressed="${d.dir === 'fwd'}">${fwd.icon} ${fwd.label}</button>
-          <button data-dir="rev" aria-pressed="${d.dir === 'rev'}">${rev.icon} ${rev.label}</button>
-        </div>
-        <span class="pw-k">Time</span>
-        <div class="pw-tabs soft" role="group" aria-label="Time of day">${(['live', 'day', 'night'] as const)
-          .map((k) => `<button data-time="${k}" aria-pressed="${d.time === k}">${k === 'live' ? `Live <small>${d.nightNow ? 'night' : 'day'}</small>` : k === 'day' ? 'Day' : 'Night'}</button>`)
-          .join('')}</div>
-        <span class="pw-k">Controls</span>
-        <div class="pw-tabs soft" role="group" aria-label="Controls">${(['simple', 'classic'] as const)
-          .map((k) => `<button data-controls="${k}" aria-pressed="${d.controls === k}">${k === 'simple' ? 'Simple <small>auto gas</small>' : 'Classic'}</button>`)
-          .join('')}</div>
-      </div>
     </section>
     ${fixable ? `<button class="pit-fix" data-act="edit">Layout looks wrong? <b>Fix it</b></button>` : ''}
     <div class="pit-go">
