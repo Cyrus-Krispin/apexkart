@@ -45,31 +45,74 @@ function asphaltTexture(aniso: number) {
   );
 }
 
-function ribbon(
-  track: TrackModel,
-  from: number,
-  to: number,
-  inner: number,
-  outer: number,
-  y: number,
-  vScale: number,
-): THREE.BufferGeometry {
-  if (inner > outer) [inner, outer] = [outer, inner]; // keep winding facing up
+/** Offsets across the road for the ribbon's vertex columns: the edge-line strips, then ~0.7 m cells. */
+function roadColumns(hw: number): number[] {
+  const edge = 0.45;
+  const cells = Math.max(2, Math.ceil((2 * (hw - edge)) / 0.75));
+  const cols = [-hw];
+  for (let c = 0; c <= cells; c++) cols.push(-hw + edge + (2 * (hw - edge) * c) / cells);
+  cols.push(hw);
+  return cols;
+}
+
+/**
+ * The road surface: one ribbon round the lap, in columns across. Where the lap runs over itself
+ * (a merge, or a bridge drawn flat) the later pass gives way to the earlier one, so one surface
+ * wins instead of two fighting: its quads under the earlier road are dropped, and those near it
+ * sit a few millimetres lower. Edge lines that would be painted across the other road are left
+ * out (both passes), so a junction reads as one piece of asphalt.
+ */
+function roadGeometry(track: TrackModel, vScale: number): THREE.BufferGeometry {
+  const hw = track.halfWidth;
+  const n = track.n;
+  const cols = roadColumns(hw);
+  const C = cols.length;
+  const tq = trackQuery(track);
+  const Y = 0.04;
+  const Y_UNDER = 0.028;
   const pos: number[] = [];
   const uv: number[] = [];
   const idx: number[] = [];
-  const count = to - from + 1;
-  for (let k = 0; k < count; k++) {
-    const i = (from + k) % track.n;
+  const covered = new Uint8Array((n + 1) * C);
+  for (let k = 0; k <= n; k++) {
+    const i = k % n;
     const [nx, nz] = track.normal(i);
-    const x = track.px[i];
-    const z = track.pz[i];
-    pos.push(x + nx * inner, y, z + nz * inner, x + nx * outer, y, z + nz * outer);
-    const v = (k * track.length) / track.n / vScale;
-    uv.push(0, v, 1, v);
-    if (k < count - 1) {
-      const a = k * 2;
-      idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+    const v = (k * track.length) / n / vScale;
+    for (let c = 0; c < C; c++) {
+      const o = cols[c];
+      const x = track.px[i] + nx * o;
+      const z = track.pz[i] + nz * o;
+      const under = tq.nearestOther(x, z, i, hw + 1, 30, true);
+      if (under && under.dist < hw - 0.05) covered[k * C + c] = 1;
+      pos.push(x, under ? Y_UNDER : Y, z);
+      uv.push((o + hw) / (2 * hw), v);
+    }
+  }
+  for (let k = 0; k < n; k++) {
+    const i = k % n;
+    for (let c = 0; c < C - 1; c++) {
+      const a = k * C + c;
+      const b = a + 1;
+      const d = a + C;
+      const e = d + 1;
+      if (covered[a] && covered[b] && covered[d] && covered[e]) continue; // under the earlier pass
+      if (c === 0 || c === C - 2) {
+        const cx = (pos[a * 3] + pos[b * 3] + pos[d * 3] + pos[e * 3]) / 4;
+        const cz = (pos[a * 3 + 2] + pos[b * 3 + 2] + pos[d * 3 + 2] + pos[e * 3 + 2]) / 4;
+        if (tq.nearestOther(cx, cz, i, hw + 0.15, 30)) {
+          // Edge-line strip lying on another section's road: shift its texture inwards, past the
+          // painted line, so it shows plain asphalt.
+          const base = pos.length / 3;
+          const shift = c === 0 ? 0.06 : -0.06;
+          for (const q of [a, b, d, e]) {
+            pos.push(pos[q * 3], pos[q * 3 + 1], pos[q * 3 + 2]);
+            uv.push(uv[q * 2] + shift, uv[q * 2 + 1]);
+          }
+          idx.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
+          continue;
+        }
+      }
+      idx.push(a, b, d, b, e, d);
     }
   }
   const g = new THREE.BufferGeometry();
@@ -95,11 +138,8 @@ export function buildTrackScene(track: TrackModel, aniso: number): TrackScene {
   const group = new THREE.Group();
   const hw = track.halfWidth;
 
-  // Road (closed loop: wrap one extra sample).
-  const road = new THREE.Mesh(
-    ribbon(track, 0, track.n, -hw, hw, 0.04, hw * 2),
-    roadMaterial(aniso),
-  );
+  // Road (closed loop: one extra row closes it).
+  const road = new THREE.Mesh(roadGeometry(track, hw * 2), roadMaterial(aniso));
   road.receiveShadow = true;
   group.add(road);
 
