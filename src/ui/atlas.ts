@@ -11,9 +11,7 @@ import { analyzeShape, type TrackShape } from '../track/shape';
 import { ProfileMenu } from './profile';
 import { openLayoutEditor } from './editorScreen';
 import { api, type BoardResponse, type CommunityLayout, type DailyResponse, type Dir, type Driver, type FeedResponse } from '../net/api';
-import { localPB, saveTimePref, timePref, type TimePref } from '../game/prefs';
-import { controlsPref, saveControlsPref, type ControlScheme } from '../game/input';
-import { isNightAt } from '../game/sun';
+import { localPB } from '../game/prefs';
 import { earnedMedal, targets } from '../game/medals';
 import { primeAudio } from '../game/audio';
 import { distM, loadWorld, localeCountry, type Venue, type WorldIndex } from './world';
@@ -903,17 +901,6 @@ export class Atlas {
       }
       return;
     }
-    // Setup: kept on this device, used by the next race (and changeable from the pause menu mid-race).
-    const time = t.closest<HTMLElement>('[data-time]')?.dataset.time as TimePref | undefined;
-    if (time) return this.setupPick('[data-time]', 'time', time, () => saveTimePref(time));
-    const ctl = t.closest<HTMLElement>('[data-controls]')?.dataset.controls as ControlScheme | undefined;
-    if (ctl) return this.setupPick('[data-controls]', 'controls', ctl, () => saveControlsPref(ctl));
-  }
-
-  /** Mark a setup choice in place (no re-render, so the page doesn't jump) and save it. */
-  private setupPick(sel: string, key: string, value: string, save: () => void) {
-    save();
-    this.el.pit.querySelectorAll<HTMLElement>(sel).forEach((b) => b.setAttribute('aria-pressed', String(b.dataset[key] === value)));
   }
 
   /** Open a tower row: a known circuit's pit board, or load a venue's layouts first. */
@@ -1055,9 +1042,6 @@ export class Atlas {
       daily,
       challenge: this.rival && this.rival.pid !== this.o.driver.pid ? { name: this.rival.name, ms: this.rival.ms } : undefined,
       lapS: (record ?? t.lengthM * 80) / 1000,
-      time: timePref(),
-      nightNow: isNightAt(t.center),
-      controls: controlsPref(),
     });
     this.el.pit.querySelectorAll<HTMLElement>('[data-el]').forEach((e) => (this.el[e.dataset.el!] = e));
     this.pitRecord = record;

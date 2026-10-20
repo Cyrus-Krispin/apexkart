@@ -171,6 +171,7 @@
 /* The track, and the direction under it */
 .pit-track { position: relative; padding: 14px 10px; border-radius: 8px; border: 1px solid var(--line); }
 .pit-track .track-art { max-height: 44vh; }
+.pit-dir > button { height: 40px; font-size: 14px; }
 
 .pit-sibs { display: grid; gap: 6px; }
 .pit-sib-row { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
@@ -239,13 +240,6 @@
 .pit-on span i { width: 4px; height: 14px; border-radius: 1px; }
 .pit-empty { margin: 0; padding: 12px 0; font-size: 14.5px; color: var(--muted); }
 
-/* Setup: the only place to choose anything before a race */
-.pit-setup { display: grid; gap: 12px; padding: 14px 16px 16px; background: var(--panel); border-radius: 8px; }
-.pit-set { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 8px 12px; align-items: center; }
-.pit-set .pw-k { font-size: 11.5px; }
-.pit-set .pw-tabs > button { height: 40px; font-size: 13.5px; background: var(--panel-2); }
-.pit-set .pw-tabs > button[aria-pressed='true'] { background: var(--panel-3); }
-.pit-set .pw-tabs small { font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; opacity: 0.65; }
 .pit-fix { justify-self: center; align-self: center; min-height: 40px; font-size: 13.5px; color: var(--muted); }
 .pit-fix b { color: var(--text-2); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
 

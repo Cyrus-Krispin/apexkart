@@ -113,8 +113,7 @@
 .io-tgt { display: flex; align-items: center; gap: 8px; margin: 0; font-family: var(--ui); font-weight: 700; font-size: 18px; letter-spacing: 0.04em; text-transform: uppercase; }
 .io-tgt .medal { width: 12px; height: 12px; }
 .io-tgt .mono { font-weight: 500; font-size: 17px; letter-spacing: -0.02em; color: var(--text-2); }
-.io-setup { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
-.io-setup span { padding: 5px 10px; border-radius: 3px; background: var(--panel); font-family: var(--ui); font-weight: 700; font-size: 14px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-2); }
+.io-tgt em { font-style: normal; font-size: 13px; color: var(--muted); text-transform: none; }
 @keyframes io-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(43, 212, 107, 0.45); } 60% { box-shadow: 0 0 0 12px rgba(43, 212, 107, 0); } }
 
 /* ---------- HUD */

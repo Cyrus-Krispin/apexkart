@@ -2,7 +2,7 @@ import { escapeHtml, formatMs, type BoardResponse, type Dir, type Driver } from 
 import type { TrackData } from '../track/osm';
 import type { TimeOfDay, TimePref } from '../game/atmosphere';
 import { SCHEME_LABEL, touchDevice, type ControlScheme } from '../game/input';
-import { earnedMedal, MEDAL_NAME, MEDALS, targets } from '../game/medals';
+import { MEDAL_NAME, MEDALS, targets } from '../game/medals';
 import type { TrackShape } from '../track/shape';
 import { circuitCode, stripeStyle } from './pitwall';
 import { rotationLabel, trackArt } from './trackArt';
@@ -54,10 +54,10 @@ interface Lap {
 }
 
 /**
- * The grid: the moment before the race. The circuit drawn large, and the world loading as a lap of
- * it: a dot leaves the line, each sector lights up as it passes, and the chequered line flashes
- * when it gets back. Around it, read-only: the times to beat, the medal you're chasing and your
- * setup (chosen on the circuit page). One green START, by tap or any key, once it's ready.
+ * The grid: set up and go. The circuit drawn large, and the world loading as a lap of it: a dot
+ * leaves the line, each sector lights up as it passes, and the chequered line flashes when it gets
+ * back. Beside it: the times to beat, the medal you're chasing, and the session setup (controls and
+ * time of day). One green START, by tap or any key, once it's ready.
  */
 export class RaceIntro {
   readonly el: HTMLDivElement;
@@ -70,7 +70,7 @@ export class RaceIntro {
   private medals: HTMLElement;
   private record: HTMLElement;
   private art: HTMLElement;
-  private setup: HTMLElement;
+  private markControls: (s: ControlScheme) => void = () => {};
   // Progress: what's loaded, where the lap is heading (loaded, or the line once START is live),
   // and where the dot is.
   private loaded = 0;
@@ -98,6 +98,8 @@ export class RaceIntro {
     const rot = rotationLabel(o.shape, o.dir === 'rev');
     const code = circuitCode(t.name);
     const where = t.location || 'OpenStreetMap circuit';
+    const tabs = (attr: string, items: [string, string, string?][]) =>
+      items.map(([v, label, small]) => `<button type="button" role="radio" ${attr}="${v}">${label}${small ? `<small>${small}</small>` : ''}</button>`).join('');
     this.el = document.createElement('div');
     this.el.className = 'intro-ov';
     this.el.innerHTML = `
@@ -131,10 +133,18 @@ export class RaceIntro {
           <span class="pw-k">Chasing</span>
           <p class="io-tgt" data-el="medals">–</p>
         </div>
-        <div class="io-block">
-          <span class="pw-k">Setup</span>
-          <p class="io-setup" data-el="setup"></p>
+        <div class="io-block io-ctl">
+          <span class="pw-k">Controls</span>
+          <div class="pw-tabs" role="radiogroup" aria-label="Controls">${tabs('data-controls', o.schemes.map((s) => [s, SCHEME_LABEL[s], s === 'simple' ? 'Auto gas' : undefined]))}</div>
           <p class="io-help" data-el="help"></p>
+        </div>
+        <div class="io-block io-tod">
+          <span class="pw-k">Time of day</span>
+          <div class="pw-tabs soft" role="radiogroup" aria-label="Time of day">${tabs('data-time', [
+            ['live', 'Live', o.liveNow === 'night' ? 'Night now' : 'Day now'],
+            ['day', 'Day'],
+            ['night', 'Night', 'Floodlit'],
+          ])}</div>
         </div>
       </section>
 
@@ -146,7 +156,6 @@ export class RaceIntro {
     this.count = $('count');
     this.pct = $('pct');
     this.go = $('go') as HTMLButtonElement;
-    this.setup = $('setup');
     this.help = $('help');
     this.medals = $('medals');
     this.record = $('rec');
@@ -160,6 +169,38 @@ export class RaceIntro {
     this.lap = this.setupLap();
     this.raf = requestAnimationFrame(this.tick);
 
+    // Setup: the session's controls and time of day. Each change applies straight away (the race
+    // saves it for next time too) and can still be changed from the pause menu mid-race.
+    const seg = [...this.el.querySelectorAll<HTMLButtonElement>('[data-time]')];
+    const mark = (t: TimePref) =>
+      seg.forEach((b) => {
+        const on = b.dataset.time === t;
+        b.classList.toggle('on', on);
+        b.setAttribute('aria-checked', String(on));
+      });
+    mark(o.time);
+    seg.forEach((b) =>
+      b.addEventListener('click', (e) => {
+        if (e.detail > 0) b.blur(); // after a pointer click, the next key press starts the race
+        const t = b.dataset.time as TimePref;
+        if (b.classList.contains('on')) return;
+        mark(t);
+        o.onTime(t);
+      }),
+    );
+    const ctl = [...this.el.querySelectorAll<HTMLButtonElement>('[data-controls]')];
+    this.markControls = (s) =>
+      ctl.forEach((b) => {
+        const on = b.dataset.controls === s;
+        b.classList.toggle('on', on);
+        b.setAttribute('aria-checked', String(on));
+      });
+    ctl.forEach((b) =>
+      b.addEventListener('click', (e) => {
+        if (e.detail > 0) b.blur();
+        if (!b.classList.contains('on')) o.onControls(b.dataset.controls as ControlScheme); // the race calls setControls back
+      }),
+    );
     this.setControls(o.controls);
     this.el.querySelector('[data-act=back]')!.addEventListener('click', () => o.onBack());
     this.go.addEventListener('click', () => this.start());
@@ -168,12 +209,9 @@ export class RaceIntro {
     setTimeout(() => this.ready(), 5000);
   }
 
-  /** The setup line (direction, time of day, controls) and the keys for the scheme. */
+  /** Show a scheme as picked, with its keys. */
   setControls(s: ControlScheme) {
-    const o = this.o;
-    const rot = rotationLabel(o.shape, o.dir === 'rev');
-    const time = o.time === 'live' ? `Live (${o.liveNow})` : o.time === 'day' ? 'Day' : 'Night';
-    this.setup.innerHTML = `<span>${rot.icon} ${rot.label}</span><span>${time}</span><span>${SCHEME_LABEL[s]} controls</span>`;
+    this.markControls(s);
     this.help.innerHTML = controlsHelp(s);
   }
 
@@ -187,16 +225,16 @@ export class RaceIntro {
     this.paintMedals(rec?.ms ?? 0);
   }
 
-  /** The medal you're chasing and its time (null = the record, and so the targets, aren't known yet). */
+  /** The medal you're chasing: the first one your best lap doesn't reach yet, as on the circuit page
+   *  (null = the record, and so the targets, aren't known yet). */
   private paintMedals(record: number | null) {
-    const have = earnedMedal(this.o.track.id, this.o.dir);
-    const next = MEDALS[(have ? MEDALS.indexOf(have) : -1) + 1];
-    if (!next) {
-      this.medals.innerHTML = '<i class="medal platinum"></i> All medals won. Platinum is record pace.';
-      return;
-    }
-    const tg = record === null ? null : targets(record, this.o.track.lengthM);
-    this.medals.innerHTML = `<i class="medal ${next}"></i> <b>${MEDAL_NAME[next]}</b> <span class="mono">${tg ? formatMs(tg[next]) : '–:––.–––'}</span>`;
+    if (record === null) return void (this.medals.textContent = '–');
+    const tg = targets(record, this.o.track.lengthM);
+    const pb = this.o.pb;
+    const next = MEDALS.find((m) => !pb || pb > tg[m]);
+    this.medals.innerHTML = next
+      ? `<i class="medal ${next}"></i> <b>${MEDAL_NAME[next]}</b> <span class="mono">${formatMs(tg[next])}</span>${pb ? ` <em class="mono">${((pb - tg[next]) / 1000).toFixed(3)}s to find</em>` : ''}`
+      : '<i class="medal platinum"></i> All medals won. Platinum is record pace.';
   }
 
   // ---------- the loading lap

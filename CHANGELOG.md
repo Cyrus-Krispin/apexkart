@@ -6,6 +6,15 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+### Changed
+- **The circuit page is just the circuit and how you stand on it**: the track, your best lap and
+  position, the medal ladder and the leaderboard. The direction stays under the track, because
+  each direction has its own leaderboard.
+- **Set up on the grid.** Controls and time of day moved to the grid, alongside your times and the
+  medal you're chasing, right before you press Start.
+- The medal the grid says you're chasing now matches the circuit page: the first one your best lap
+  doesn't reach yet.
+
 ## [0.18.0] - 2026-10-20
 
 ### Changed
