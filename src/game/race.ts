@@ -4,7 +4,7 @@ import { buildTrackScene, type TrackScene } from './trackMesh';
 import { buildKart, KartPhysics, type KartVisual } from './kart';
 import { availableSchemes, controlsPref, Input, saveControlsPref, SCHEME_LABEL, type ControlScheme } from './input';
 import { KartAudio } from './audio';
-import { KartFx } from './fx';
+import { KartFx, type FxFrame } from './fx';
 import { Haptics } from './haptics';
 import { Atmosphere, resolveTime, type TimePref } from './atmosphere';
 import { awardMedal, earnedMedal, MEDAL_NAME, MEDALS, medalFor, targets } from './medals';
@@ -123,6 +123,8 @@ export class Race {
   private camMode = 0;
   private camPos = new THREE.Vector3();
   private camLook = new THREE.Vector3();
+  /** Camera springs: impact kick offset (o, v), FOV punch, smooth shake, corner look-ahead, eased FOV. */
+  private cam = { ox: 0, oy: 0, oz: 0, vx: 0, vy: 0, vz: 0, fov: 0, fovV: 0, shake: 0, side: 0, fovBase: 62 };
   private showGhosts = localStorage.getItem('ak:ghosts') !== '0';
   private ghosts: Ghost[] = [];
   private board: BoardResponse | null = null;
@@ -869,6 +871,49 @@ export class Race {
     this.snapPrev();
     this.camPos.set(this.phys.x - Math.sin(this.phys.heading) * 6, 2.6, this.phys.z - Math.cos(this.phys.heading) * 6);
     this.camLook.set(this.phys.x, 0.6, this.phys.z);
+    Object.assign(this.cam, { ox: 0, oy: 0, oz: 0, vx: 0, vy: 0, vz: 0, fov: 0, fovV: 0, shake: 0, side: 0 });
+  }
+
+  /** A wall hit kicks the camera away from the wall, punches the FOV and starts a short shake. */
+  private kickCamera(speed: number, nx: number, nz: number) {
+    const k = Math.min(1, speed / 8);
+    const c = this.cam;
+    c.vx -= nx * 3 * k;
+    c.vz -= nz * 3 * k;
+    c.vy += 1.3 * k;
+    c.fovV += 55 * k;
+    c.shake = Math.min(1, c.shake + 0.8 * k);
+  }
+
+  /** Advance the camera springs; returns the shake offset to add this frame (deterministic in simT). */
+  private springCamera(dt: number, fb: FxFrame, out: THREE.Vector3) {
+    const c = this.cam;
+    // Damped springs: the kick at ω 18 rad/s, ζ 0.5; the FOV punch softer at ω 12, ζ 0.6.
+    for (let left = dt; left > 1e-6; ) {
+      const h = Math.min(left, 1 / 120);
+      left -= h;
+      c.vx += (-324 * c.ox - 18 * c.vx) * h;
+      c.vy += (-324 * c.oy - 18 * c.vy) * h;
+      c.vz += (-324 * c.oz - 18 * c.vz) * h;
+      c.ox += c.vx * h;
+      c.oy += c.vy * h;
+      c.oz += c.vz * h;
+      c.fovV += (-144 * c.fov - 14.4 * c.fovV) * h;
+      c.fov += c.fovV * h;
+    }
+    c.shake *= Math.exp(-dt / 0.22);
+    const t = this.simT;
+    const sh = c.shake;
+    // Two smooth octaves instead of per-frame white noise; then a few millimetres of kerb buzz at the
+    // stripe rate and a grass rumble.
+    const kerb = fb.kerb * 0.004 * (Math.sin((Math.PI * this.phys.s) / 0.8) > 0 ? 1 : -1);
+    const grass = fb.grass * 0.005 * (Math.sin(53 * t) + Math.sin(71 * t + 1));
+    out.set(
+      c.ox + sh * (0.1 * Math.sin(41 * t) + 0.04 * Math.sin(97 * t + 1.3)),
+      c.oy + sh * (0.08 * Math.sin(37 * t + 0.7) + 0.03 * Math.sin(89 * t + 2.1)) + kerb + grass,
+      c.oz,
+    );
+    return out;
   }
 
   // Scratch objects reused every frame (no per-frame allocations, so no GC hitches).
@@ -902,6 +947,7 @@ export class Race {
       if (fb.impact) {
         this.audio.impact(fb.impact);
         this.haptics.impact(fb.impact);
+        this.kickCamera(fb.impact, fb.nx, fb.nz);
       }
       this.haptics.kerb(fb.kerb, p.speed);
       const pb = this.pb?.ms ?? null;
@@ -914,6 +960,11 @@ export class Race {
     const { fwd, pos, look, tmp, up } = this.v;
     fwd.set(Math.sin(heading), 0, Math.cos(heading));
     const mode = CAMS[this.camMode].id;
+    const cam = this.cam;
+    // Portrait phones (0 at aspect 0.8 or wider, 1 at 0.48 and taller): with the wider view below, the
+    // chase camera sits higher and looks down a little more, so the road ahead fills the screen between
+    // the timing panels and the speedometer instead of sky.
+    const tall = THREE.MathUtils.clamp((0.8 - this.camera.aspect) / 0.32, 0, 1);
     let lerp = 1 - Math.exp(-dt * 7);
     if (this.state === 'intro') {
       // Slow cinematic orbit; tight so the camera stays on the circuit (real pit buildings often sit beside the grid).
@@ -936,20 +987,28 @@ export class Race {
       lerp = 1 - Math.exp(-dt * 3);
     } else {
       const far = mode === 'far';
-      pos.set(x, far ? 4.2 : 2.3, z).addScaledVector(fwd, far ? -9.5 : -5.2);
-      look.set(x, 0.7, z).addScaledVector(fwd, 3.5);
+      // Look a little into the corner, toward the apex (yawRate > 0 turns left).
+      const side = THREE.MathUtils.clamp(-p.yawRate * p.forwardSpeed * 0.04, -1, 1);
+      cam.side += (side - cam.side) * (1 - Math.exp(-dt * 3));
+      tmp.set(-fwd.z, 0, fwd.x); // right of travel
+      pos.set(x, far ? 4.2 + 0.8 * tall : 2.3 + 1.5 * tall, z).addScaledVector(fwd, far ? -9.5 : -5.2 - 0.4 * tall);
+      look.set(x, 0.7 - 0.3 * tall, z).addScaledVector(fwd, 3.5 + 0.5 * tall).addScaledVector(tmp, cam.side);
     }
     this.camPos.lerp(pos, lerp);
     this.camLook.lerp(look, Math.min(1, lerp * 1.6));
-    this.camera.position.copy(this.camPos);
-    if (p.bump > 0.02) {
-      this.camera.position.x += (Math.random() - 0.5) * p.bump * 0.4;
-      this.camera.position.y += (Math.random() - 0.5) * p.bump * 0.3;
-    }
+    const shake = this.springCamera(live ? dt : 0, fb, tmp);
+    const amount = this.state === 'intro' || mode === 'tv' ? 0 : mode === 'hood' ? 0.5 : 1;
+    this.camera.position.copy(this.camPos).addScaledVector(shake, amount);
     this.camera.lookAt(this.camLook);
-    const fov = this.state === 'intro' ? 42 : (mode === 'hood' ? 70 : 60) + p.speed * 0.38;
-    if (Math.abs(this.camera.fov - fov) > 0.05) {
-      this.camera.fov += (fov - this.camera.fov) * Math.min(1, dt * 4);
+    // FOV: wider with speed; never narrower than 44-50° across (portrait phones), at most 100° tall;
+    // plus the impact punch.
+    const base = this.state === 'intro' ? 42 : (mode === 'hood' ? 70 : 60) + p.speed * 0.38;
+    const across = this.state === 'intro' ? 0 : 44 + 6 * Math.min(1, p.speed / p.vmax);
+    const floor = THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(across / 2)) / this.camera.aspect));
+    cam.fovBase += (Math.min(100, Math.max(base, floor)) - cam.fovBase) * Math.min(1, dt * 4);
+    const fov = cam.fovBase + cam.fov * amount;
+    if (Math.abs(this.camera.fov - fov) > 0.01) {
+      this.camera.fov = fov;
       this.camera.updateProjectionMatrix();
     }
     k.root.visible = mode !== 'hood' || this.state === 'intro';
