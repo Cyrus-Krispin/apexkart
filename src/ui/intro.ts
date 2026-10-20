@@ -62,6 +62,7 @@ interface Lap {
 export class RaceIntro {
   readonly el: HTMLDivElement;
   private canStart = false;
+  private safety = 0;
   private started = false;
   private count: HTMLElement;
   private pct: HTMLElement;
@@ -193,8 +194,10 @@ export class RaceIntro {
     this.el.querySelector('[data-act=back]')!.addEventListener('click', () => o.onBack());
     this.go.addEventListener('click', () => this.start());
     addEventListener('keydown', this.onKey);
-    // Don't hold people hostage to slow tiles: allow starting after a few seconds regardless.
-    setTimeout(() => this.ready(), 5000);
+    // START waits for the race to say it's settled (world built, shaders and textures warm), or for
+    // the world build to fail. A long safety net covers a download that never finishes: starting
+    // into a scene that's still compiling beats being stuck on the grid.
+    this.safety = window.setTimeout(() => this.ready(), 20000);
   }
 
   /** Show a scheme as picked, with its keys. */
@@ -288,7 +291,7 @@ export class RaceIntro {
   }
 
   private paintText() {
-    const done = this.flagged && this.loaded >= 1;
+    const done = this.flagged && this.loaded >= 1 && this.canStart;
     const text = done ? 'Ready' : this.label;
     const pct = `${Math.round((this.flagged ? this.loaded : this.shown) * 100)}%`;
     if (this.count.textContent !== text) this.count.textContent = text;
@@ -312,7 +315,7 @@ export class RaceIntro {
     if (this.shown >= 1) {
       // Back at the line: it flashes, and the lap is done.
       this.flagged = true;
-      this.art.classList.add('flag');
+      if (this.canStart) this.art.classList.add('flag'); // held for a re-settle: ready() flashes it
       this.paintText();
       return;
     }
@@ -327,18 +330,37 @@ export class RaceIntro {
     if (frac >= 1) this.ready();
   }
 
+  /** The world couldn't be built: race on the circuit alone. */
   failed() {
     this.label = 'World unavailable';
     this.ready();
   }
 
+  /**
+   * Take START away again while the race re-settles on the grid (a new time of day, surroundings
+   * arriving late): `label` shows until the next stage reaches 1.
+   */
+  hold(label: string) {
+    this.label = label;
+    this.loaded = Math.min(this.loaded, 0.95);
+    if (this.canStart) {
+      this.canStart = false;
+      this.go.disabled = true;
+      this.el.classList.remove('ready');
+      this.art.classList.remove('flag');
+    }
+    this.paintText();
+  }
+
   ready() {
+    clearTimeout(this.safety); // only the first load needs it
     if (this.canStart) return;
     this.canStart = true;
     this.goal = 1; // the dot sprints for the line; START doesn't wait for it
     this.go.disabled = false;
     this.el.classList.add('ready');
-    if (!this.lap) this.paintText();
+    if (this.flagged) this.art.classList.add('flag'); // ready again after a hold: the line flashes
+    this.paintText();
   }
 
   private start() {
@@ -353,6 +375,7 @@ export class RaceIntro {
 
   dispose() {
     cancelAnimationFrame(this.raf);
+    clearTimeout(this.safety);
     removeEventListener('keydown', this.onKey);
     this.el.remove();
   }

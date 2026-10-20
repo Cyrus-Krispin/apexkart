@@ -35,13 +35,14 @@ interface Preset {
 }
 
 const PRESETS: Record<TimeOfDay, Preset> = {
-  // Golden-hour sun from the side for long, readable shadows.
+  // Golden-hour sun from the side for long, readable shadows. Warm key, cool sky fill and a green
+  // bounce from the grass: warm light against cool shadows is what gives the stylised look its depth.
   day: {
     dir: new THREE.Vector3(0.55, 0.5, 0.35).normalize(),
-    key: [0xffe2bd, 3.1],
-    hemi: [0xcfe0f2, 0x6a5a42, 0.8],
+    key: [0xfff0d6, 3.4],
+    hemi: [0xbcd4f0, 0x5b6b3a, 0.8],
     fog: [SKY.horizon, 340, 1800],
-    exposure: 1.05,
+    exposure: 1,
     env: 0.55,
     bloom: { strength: 0.32, radius: 0.45, threshold: 0.93 },
     lampHeads: 0.6,
@@ -52,7 +53,7 @@ const PRESETS: Record<TimeOfDay, Preset> = {
     key: [0xa8bcff, 0.32],
     hemi: [0x3a4a70, 0x15130f, 0.42],
     fog: [NIGHT_SKY.horizon, 180, 1400],
-    exposure: 1.1,
+    exposure: 1, // Neutral keeps more of the midtones than ACES did: no need to push it
     env: 0.35,
     bloom: { strength: 0.62, radius: 0.55, threshold: 1.1 },
     lampHeads: 16,
@@ -181,6 +182,46 @@ export class Atmosphere {
     this.key.position.set(x + d.x * 100, d.y * 100, z + d.z * 100);
     this.key.target.position.set(x, 0, z);
     if (this.time === 'night') this.flood.update(x, z, dt);
+  }
+
+  /** Jump straight to (x, z): shadow box and floodlights, no cross-fade (warm-up views and back). */
+  snap(x: number, z: number) {
+    this.update(x, z, 0);
+    if (this.time === 'night') this.flood.snap(x, z);
+  }
+
+  /**
+   * Open the shadow camera (the sun by day, the shadow floodlight at night) over a circle of
+   * radius r for one warm-up frame, so every kind of caster compiles its shadow shader whatever
+   * the warm-up views happen to frame. Returns the undo; the next update() re-centres it.
+   */
+  wideShadows(cx: number, cz: number, r: number): () => void {
+    if (this.time === 'night') return this.flood.wideShadow(cx, cz, r);
+    const sc = this.key.shadow.camera;
+    const was = [sc.left, sc.right, sc.top, sc.bottom, sc.near, sc.far] as const;
+    const d = this.dir;
+    const back = r + 60;
+    this.key.position.set(cx + d.x * back, d.y * back, cz + d.z * back);
+    this.key.target.position.set(cx, 0, cz);
+    sc.left = sc.bottom = -r;
+    sc.right = sc.top = r;
+    sc.near = 1;
+    sc.far = back + r + 60;
+    sc.updateProjectionMatrix();
+    return () => {
+      [sc.left, sc.right, sc.top, sc.bottom, sc.near, sc.far] = was;
+      sc.updateProjectionMatrix();
+    };
+  }
+
+  /**
+   * Night: put another tier's light rig up for a moment (to compile its shaders), and return
+   * the undo. The caller must undo before the next frame renders.
+   */
+  useRig(q: Quality): () => void {
+    if (this.time !== 'night' || q === this.quality) return () => {};
+    this.flood.setRig(RIGS[q]);
+    return () => this.flood.setRig(RIGS[this.quality]);
   }
 
   dispose() {

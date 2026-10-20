@@ -6,6 +6,20 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+### Fixed
+- **No more stutter in the first seconds of a race.** The grid screen now shows "Warming up" while
+  the game quietly prepares every shader, texture, shadow, ghost and skid mark, and START lights up
+  once that's done. Switching day or night on the grid briefly does the same for the new lighting.
+- **Auto graphics settles before you race.** It picks the graphics level once, on the grid, and
+  remembers it for your device; during a race it only adjusts sharpness. Phones that are fast
+  enough now render sharper (up to twice the resolution).
+- On tracks where buildings and trees arrive after you've started, they're added while you're on
+  the grid, paused, or crossing the line, without a stutter.
+
+### Changed
+- **New colours**: start lights that are truly red, a bluer sky, warm sunlight with cool shadows,
+  brand reds and oranges that stay true, and a night look that stays readable.
+
 ## [0.23.0] - 2026-10-21
 
 ### Changed

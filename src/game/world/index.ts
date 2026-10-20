@@ -105,10 +105,10 @@ export async function buildWorld(o: {
   const side = buildTrackside(track, painter, data.id, o.aniso);
   group.add(side.group);
 
-  o.onStage('Finishing touches', 0.9);
+  o.onStage('Finishing touches', 0.88);
   await frame();
   group.add(painter.toMesh(o.aniso));
   const groundColor = new THREE.Color(GROUND.grass);
-  o.onStage('Ready', 1);
+  // Not "Ready" yet: the race warms its shaders, textures and lights up before START unlocks.
   return { group, groundColor, emissive: side.emissive, lamps: side.lamps, stats: { buildings: b.footprints.length, trees: trees.count, env: !!env } };
 }

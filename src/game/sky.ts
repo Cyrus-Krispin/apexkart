@@ -2,8 +2,8 @@ import * as THREE from 'three';
 
 /** Gradient sky dome with a soft sun glow; horizon colour doubles as the fog colour. */
 export const SKY = {
-  zenith: new THREE.Color('#3d78c2'),
-  horizon: new THREE.Color('#e6d6bf'),
+  zenith: new THREE.Color('#2f6fd0'),
+  horizon: new THREE.Color('#cfe0ea'), // cool, so distance (fog) reads as air rather than beige haze
 };
 
 export function makeSky(sunDir: THREE.Vector3): THREE.Mesh {
