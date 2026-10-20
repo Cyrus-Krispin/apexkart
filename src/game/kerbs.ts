@@ -370,3 +370,46 @@ export function bigStops(t: TrackModel): BigStop[] {
   stopCache.set(t, big);
   return big;
 }
+
+const lineCache = new WeakMap<TrackModel, Float32Array>();
+
+/**
+ * An approximate racing line: a lateral offset per sample (+ = right of travel), from an
+ * elastic band pulled tight inside the road (1 m in from each edge), so it runs wide into a
+ * corner, clips the apex and drifts out on the exit. For drawing the rubbered line.
+ */
+export function racingLine(t: TrackModel): Float32Array {
+  const cached = lineCache.get(t);
+  if (cached) return cached;
+  const n = t.n;
+  const lim = Math.max(0, t.halfWidth - 1.0);
+  let off = new Float32Array(n);
+  const relax = (K: number, iters: number) => {
+    for (let it = 0; it < iters; it++) {
+      for (let i = 0; i < n; i++) {
+        const a = wrap(i - K, n);
+        const b = wrap(i + K, n);
+        const [ax, az] = t.normal(a);
+        const [bx, bz] = t.normal(b);
+        const mx = (t.px[a] + ax * off[a] + t.px[b] + bx * off[b]) / 2;
+        const mz = (t.pz[a] + az * off[a] + t.pz[b] + bz * off[b]) / 2;
+        const [nx, nz] = t.normal(i);
+        const target = (mx - t.px[i]) * nx + (mz - t.pz[i]) * nz;
+        off[i] = Math.max(-lim, Math.min(lim, off[i] + (target - off[i]) * 0.6));
+      }
+    }
+  };
+  relax(14, 120);
+  relax(6, 80);
+  relax(3, 40);
+  // A light smoothing so 1 m sampling noise doesn't wiggle it.
+  const sm = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    let acc = 0;
+    for (let d = -3; d <= 3; d++) acc += off[wrap(i + d, n)];
+    sm[i] = acc / 7;
+  }
+  off = sm;
+  lineCache.set(t, off);
+  return off;
+}

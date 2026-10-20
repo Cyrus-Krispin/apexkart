@@ -5,9 +5,10 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { TrackModel } from '../track';
 import type { Lamp } from '../floodlights';
-import type { GroundPainter } from './ground';
+import { GROUND, type GroundPainter } from './ground';
 import { hashString, Land, rng } from './common';
-import { bigStops, KERB_PROFILE, KERB_WIDTH, kerbRuns, kerbWidthAt } from '../kerbs';
+import { trackQuery } from '../trackQuery';
+import { APRON_WIDTH, bigStops, KERB_PROFILE, KERB_WIDTH, kerbRuns, kerbWidthAt } from '../kerbs';
 
 function canvasTex(w: number, h: number, draw: (g: CanvasRenderingContext2D) => void, repeat = true) {
   const c = document.createElement('canvas');
@@ -161,15 +162,57 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
 
   // ---------------------------------------------------------------- kerbs (raised)
   {
-    const kerbTex = canvasTex(32, 64, (g) => {
+    // Left half: the kerb's red and white stripes. Right half: the concrete apron, with a darker
+    // lip at its outer edge so it meets the grass with a crisp line.
+    const kerbTex = canvasTex(64, 64, (g) => {
       g.fillStyle = '#d8262c';
       g.fillRect(0, 0, 32, 32);
       g.fillStyle = '#f3f1ea';
       g.fillRect(0, 32, 32, 32);
+      g.fillStyle = GROUND.apron;
+      g.fillRect(32, 0, 28, 64);
+      g.fillStyle = '#8c8678';
+      g.fillRect(60, 0, 4, 64);
     });
     kerbTex.wrapT = THREE.RepeatWrapping;
+    kerbTex.wrapS = THREE.ClampToEdgeWrapping;
     const pos: number[] = [];
     const uv: number[] = [];
+    const tq = trackQuery(t);
+    // Concrete apron round the whole lap (under the kerbs where there are kerbs), a real strip
+    // with crisp edges instead of a band painted into the ground texture. Same mesh and material
+    // as the kerbs, so it costs no extra draw call.
+    for (const side of [-1, 1]) {
+      let prev: number[][] | null = null;
+      for (let k = 0; k <= t.n; k++) {
+        const q = k % t.n;
+        const [nx, nz] = t.normal(q);
+        let w = Math.min(APRON_WIDTH, kerbWidthAt(t, q, side) * (APRON_WIDTH / KERB_WIDTH));
+        // Where another section runs alongside, stop halfway so two aprons never overlap.
+        const hit = tq.nearestOther(t.px[q] + nx * side * (hw + w), t.pz[q] + nz * side * (hw + w), q, hw + APRON_WIDTH + 0.05, 30);
+        if (hit) w = Math.max(0.2, Math.min(w, (hw + w + hit.dist) / 2 - hw));
+        const v = (k * t.length) / t.n / 1.6;
+        const row = [
+          [-0.1, 36 / 64],
+          [w - 0.12, 57 / 64],
+          [w, 63 / 64],
+        ].map(([o, u]) => [t.px[q] + nx * side * (hw + o), 0.01, t.pz[q] + nz * side * (hw + o), u, v]);
+        if (prev) {
+          for (let p = 0; p < 2; p++) {
+            const A = prev[p];
+            const B = prev[p + 1];
+            const C = row[p + 1];
+            const D = row[p];
+            const tri = side > 0 ? [A, D, C, A, C, B] : [A, B, C, A, C, D];
+            for (const v3 of tri) {
+              pos.push(v3[0], v3[1], v3[2]);
+              uv.push(v3[3], v3[4]);
+            }
+          }
+        }
+        prev = row;
+      }
+    }
     // Where the kerbs go is data shared with the physics (src/game/kerbs.ts): inside kerbs
     // from turn-in to just past the apex, outside kerbs on corner exits, none on kinks or on
     // another section of the lap.
@@ -185,7 +228,7 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
         const ramp = Math.min(1, (k - run.i0 + 0.35) / 2.2, (run.i1 - k + 0.35) / 2.2);
         const row = KERB_PROFILE.map(([o, y]) => {
           const off = hw + (o < 0 ? o : o * w);
-          return [t.px[q] + nx * side * off, o < 0 ? y : Math.max(0.012, y * ramp), t.pz[q] + nz * side * off, (o + 0.05) / 1.2, v];
+          return [t.px[q] + nx * side * off, o < 0 ? y : Math.max(0.016, y * ramp), t.pz[q] + nz * side * off, ((o + 0.05) / 1.2) * 0.47, v];
         });
         if (prev) {
           for (let p = 0; p < KERB_PROFILE.length - 1; p++) {
@@ -210,8 +253,7 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
       g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
       g.computeVertexNormals();
       const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: kerbTex, roughness: 0.55, side: THREE.DoubleSide }));
-      m.receiveShadow = true;
-      m.castShadow = true;
+      m.receiveShadow = true; // 10 cm kerbs and a flat apron: their shadow pass isn't worth it
       group.add(m);
     }
   }

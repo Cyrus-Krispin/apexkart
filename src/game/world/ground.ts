@@ -207,7 +207,9 @@ export class GroundPainter {
     const pattern = g.createPattern(stripe, 'repeat')!;
     pattern.setTransform(new DOMMatrix().rotate((Math.atan2(t.tz[0], t.tx[0]) * 180) / Math.PI + 90));
     stroke(loop, 2 * (t.halfWidth + t.runoff), pattern, Land.Track, true);
-    stroke(loop, 2 * (t.halfWidth + 1.8), GROUND.apron, Land.Track, true);
+    // The concrete apron itself is a mesh with crisp edges (trackside.ts, to hw + 1.1 m); paint it
+    // only well inside that, so the ground texture's blur never shows past its edge as a smear.
+    stroke(loop, 2 * (t.halfWidth + 0.7), GROUND.apron, Land.Track, true);
     stroke(loop, 2 * t.halfWidth + 0.6, '#55534e', Land.Track, true);
 
     // Fine grain over everything so nothing reads as a flat fill.
