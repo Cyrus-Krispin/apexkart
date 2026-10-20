@@ -113,6 +113,7 @@ export class Race {
   private goTime = 0;
   private lightsLit = 0;
   private lapStart: number | null = null;
+  private lapOdo = 0; // phys.odo when this lap started
   private lapNo = 0;
   private lastS = 0;
   private sectorsHit = [false, false];
@@ -120,6 +121,8 @@ export class Race {
   private sectorColors: SectorColor[] = [];
   private invalid = false;
   private wrongWayT = 0;
+  private grassT = 0; // seconds on the grass in a row
+  private stuckShown = false; // the Reset button is up
   private ghostRec: GhostFrame[] = [];
   private splits: number[] = [];
   private sessionBest: number | null = null;
@@ -655,6 +658,7 @@ export class Race {
       this.resetToGrid();
     }
     if (a === 'exit') this.opts.onExit();
+    if (a === 'reset' && this.state === 'racing') this.recover();
     if (a === 'pause') this.togglePause();
     if (a === 'mute') this.audio.toggleMute();
     if (a === 'ghosts') this.toggleGhosts();
@@ -754,6 +758,7 @@ export class Race {
     this.hud.delta(null);
     this.hud.sectors([], [], -1, 0);
     this.hud.hint(true);
+    this.showStuck(false);
     this.snapCamera();
   }
 
@@ -936,14 +941,42 @@ export class Race {
       this.hintShown = true;
       this.hud.banner('Cross the line to start the clock', 'info', 2.6);
     }
-    if (crossedBack && this.lapStart !== null) this.invalidate('Reversed over the line');
+    // Progress is continuous; leaving for another part of the lap is reported. Forward is a cut.
+    // In a multiplayer race there's no lap to void: the kart goes back to where it left.
+    const rejoin = this.phys.rejoin;
+    if (rejoin && rejoin.gain > 0) {
+      if (this.opts.mode) {
+        this.lastS = prev;
+        this.recover(this.phys.goodS - 2, 'Cut the track');
+        this.hud.banner('Cut the track · back where you left it', 'warn', 2.2);
+        return;
+      }
+      this.invalidate('Cut the track', true);
+    }
+    if (crossedBack && this.lapStart !== null) {
+      // Back over the line: this lap never happened. The next forward crossing starts it again
+      // (no lap card, no lap counted).
+      this.invalidate('Reversed over the line');
+      this.lapStart = null;
+      this.lapNo = Math.max(0, this.lapNo - 1);
+      this.hud.lap(null);
+      this.hud.lapTime(0, false);
+      this.hud.delta(null);
+      this.hud.sectors([], [], -1, 0);
+    }
     if (crossedFwd) {
       // Interpolate the exact crossing moment inside this step.
       const before = L - prev;
       const frac = before / Math.max(1e-6, before + s);
       const tCross = this.simT - dt + dt * frac;
+      // Every sector gate passed (by driving through it, not jumping), and no lap shorter than the
+      // shortest line inside the limits (a backstop).
+      if (this.lapStart !== null && !(this.sectorsHit[0] && this.sectorsHit[1])) this.invalidate('Missed a sector');
+      if (this.lapStart !== null && this.phys.odo - this.lapOdo < this.track.minLapLength) this.invalidate('Cut the track', true);
       if (this.lapStart !== null) this.finishLap(tCross);
       this.lapStart = tCross;
+      this.lapOdo = this.phys.odo;
+      void this.track.minLapLength; // computed once, here (a few ms), rather than at the end of the lap
       this.lapNo++;
       this.sectorsHit = [false, false];
       this.sectorTimes = [];
@@ -953,12 +986,30 @@ export class Race {
       this.splits = [];
       this.hud.lap(this.lapNo);
     }
+    // Wrong way: moving backwards along the part of the lap the kart is on. The continuous progress
+    // index keeps that the leg being driven, never a neighbouring one. The out-lap counts too.
+    const tr = this.track;
+    const i = this.phys.hint;
+    const along = this.phys.vx * tr.tx[i] + this.phys.vz * tr.tz[i];
+    this.wrongWayT = along < -3 && !rejoin ? this.wrongWayT + dt : 0;
+    if (this.wrongWayT > 1.2) this.hud.banner('Wrong way', 'warn', 0.4);
+
+    // Stuck (wedged with the pedals pressed), lost on the grass, or facing the wrong way: offer
+    // Reset (R on a keyboard) until the kart is properly under way again. In a multiplayer race a
+    // kart wedged for 5 s is reset for you.
+    const p = this.phys;
+    this.grassT = p.surface === 'grass' ? this.grassT + dt : 0;
+    if (!this.autopilot && (p.stuckT > 1.2 || this.grassT > 4 || this.wrongWayT > 2.5)) this.showStuck(true);
+    else if (this.stuckShown && (this.autopilot || (p.speed > 6 && p.surface !== 'grass' && this.wrongWayT === 0))) this.showStuck(false);
+    if (this.opts.mode && !this.autopilot && p.stuckT > 5) this.recover();
+
     if (this.lapStart === null) return;
 
     const lapT = (this.simT - this.lapStart) * 1000;
     for (let k = 0; k < 2; k++) {
       const b = (L * (k + 1)) / 3;
-      if (!this.sectorsHit[k] && prev < b && s >= b && s - prev < 30) {
+      // Progress is continuous (clean laps step < 3.1 m), so a gate only counts when driven through.
+      if (!this.sectorsHit[k] && prev < b && s >= b && s - prev < 10 && !rejoin) {
         if (k === 1 && !this.sectorsHit[0]) this.invalidate('Missed a sector');
         this.sectorsHit[k] = true;
         const total = this.sectorTimes.reduce((a, x) => a + x, 0);
@@ -967,13 +1018,7 @@ export class Race {
         this.sectorColors.push(this.sectorColor(k, t));
       }
     }
-    if (!this.invalid && Math.abs(this.phys.offset) > this.track.halfWidth + 2.4) this.invalidate('Track limits');
-
-    const t = this.track;
-    const i = this.phys.hint;
-    const along = this.phys.vx * t.tx[i] + this.phys.vz * t.tz[i];
-    this.wrongWayT = along < -3 ? this.wrongWayT + dt : 0;
-    if (this.wrongWayT > 1.2) this.hud.banner('Wrong way', 'warn', 0.4);
+    if (!this.invalid && Math.abs(this.phys.offset) > this.track.limit) this.invalidate('Track limits'); // four wheels off
 
     while (this.ghostRec.length * GHOST_DT * 1000 <= lapT) this.ghostRec.push({ x: this.phys.x, z: this.phys.z, h: this.phys.heading });
     const si = Math.floor(s / SPLIT);
@@ -988,16 +1033,25 @@ export class Race {
     return 'yellow';
   }
 
-  private invalidate(reason: string) {
-    if (this.invalid || this.lapStart === null) return;
+  /** `again`: say so even if the lap is already invalid (a cut usually crosses the limits first). */
+  private invalidate(reason: string, again = false) {
+    if ((this.invalid && !again) || this.lapStart === null) return;
     this.invalid = true;
     this.hud.banner(`Lap invalid · ${reason}`, 'warn', 2);
   }
 
-  private recover() {
-    this.phys.place(this.phys.s);
-    this.invalidate('Reset');
+  /** Back on the track: a little behind the last place the kart was on its own asphalt. */
+  private recover(at = this.phys.goodS - 2, reason = 'Reset') {
+    this.phys.place(at);
+    this.invalidate(reason, true);
+    this.grassT = this.wrongWayT = 0;
+    this.showStuck(false);
     this.snapCamera();
+  }
+
+  private showStuck(show: boolean) {
+    this.stuckShown = show;
+    this.hud.stuck(show);
   }
 
   private finishLap(tCross: number) {

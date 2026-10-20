@@ -6,6 +6,49 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-10-21
+
+### Changed
+- **Kerbs sit where a real kart track has them**: on the inside of each corner from turn-in to just
+  past the apex, on the outside of corner exits, and round the outside of hairpins. Kinks and
+  straights no longer get kerbs, fast corners do, and each direction gets its own.
+- **A crisp concrete strip lines the track edge** instead of a blurry painted band.
+- **The road has more to read**: grid boxes with slot numbers at the start, a subtle rubbered racing
+  line, and braking marks into the big corners.
+- **3-2-1 braking boards** stand before the biggest stops.
+
+### Fixed
+- Where the track crosses or merges with itself, the road is one clean surface: no flickering
+  speckle, and no edge lines painted across the other road.
+- Kerbs, start-gantry posts and tyre walls no longer stand on another part of the track where the
+  layout runs close to itself.
+- Sponsor names on the tyre walls read the right way round, and stray bits of wall in infields and
+  at tight corners are gone.
+
+## [0.22.0] - 2026-10-21
+
+### Fixed
+- **Cutting across a hairpin no longer counts.** Lap progress now follows the road you're actually
+  on, so driving across an infield (KF1's hairpin, for one) voids the lap with "Cut the track", and
+  a lap shorter than the track allows is never valid.
+- **Track limits are "four wheels off"**: the lap is invalid once the whole kart is past the kerb.
+- **Sectors only count when you drive through them**; a lap that skips one says "Missed a sector".
+- **Reversing back over the line cancels the lap** instead of logging a short invalid one.
+- **No more invisible walls** after spinning onto another part of the circuit: you carry on from
+  where you are.
+- **Wrong way** no longer fires when you're going the right way on a neighbouring stretch, and it
+  now works before your first lap too.
+- **Where two parts of a circuit merge or cross**, the other road grips like road, not grass.
+- In multiplayer, cutting the track puts you back where you left it, and the chequered flag always
+  falls at the line.
+- **The leaderboard checks every lap's ghost** and turns away laps that cut the track.
+
+### Changed
+- **Walls don't stop you dead.** Brush one and you keep most of your speed and slide along it; a
+  head-on crash still costs you.
+- **Stuck? Press Reset.** If you're wedged, lost on the grass or facing the wrong way, a Reset
+  button appears (`R` on a keyboard) and puts you back on the track just behind where you left it.
+
 ## [0.21.0] - 2026-10-20
 
 ### Changed
@@ -364,7 +407,9 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 ### Fixed
 - Leaderboard and lap submission on the live site.
 
-[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.22.0...v0.23.0
+[0.22.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.18.0...v0.19.0

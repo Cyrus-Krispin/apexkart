@@ -5,8 +5,10 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { TrackModel } from '../track';
 import type { Lamp } from '../floodlights';
-import type { GroundPainter } from './ground';
+import { GROUND, type GroundPainter } from './ground';
 import { hashString, Land, rng } from './common';
+import { trackQuery } from '../trackQuery';
+import { APRON_WIDTH, bigStops, KERB_PROFILE, KERB_WIDTH, kerbRuns, kerbWidthAt } from '../kerbs';
 
 function canvasTex(w: number, h: number, draw: (g: CanvasRenderingContext2D) => void, repeat = true) {
   const c = document.createElement('canvas');
@@ -50,6 +52,94 @@ export interface Trackside {
   lamps: Lamp[]; // floodlight heads, aimed at the track
 }
 
+/**
+ * The tyre wall's polylines, per side, ordered so that walking along a run the track is on the
+ * right: points every 2 samples at the barrier, kept where no part of the circuit is near and the
+ * land is buildable. A run is split wherever the piece between two points would cross road or
+ * reach where a kart can drive (another section's, or its own where the offset line folds into a
+ * chord at a tight corner), and where the offset line doubles back or kinks. Pieces shorter
+ * than 12 m (orphan stubs in infields) are dropped.
+ */
+export function wallRuns(t: TrackModel, ground: GroundPainter | null): { side: number; pts: [number, number][] }[] {
+  const hw = t.halfWidth;
+  const wallOff = hw + t.runoff + 0.65;
+  const reach = hw + t.runoff + 0.3; // a kart's body can get this close to a centreline
+  const out: { side: number; pts: [number, number][] }[] = [];
+  const landOk = (x: number, z: number) => {
+    if (!ground) return true;
+    const c = ground.classAt(x, z);
+    return c !== Land.Building && c !== Land.Water;
+  };
+  const badPiece = (ax: number, az: number, bx: number, bz: number) => {
+    const L = Math.hypot(bx - ax, bz - az);
+    const steps = Math.max(1, Math.ceil(L));
+    for (let k = 1; k < steps; k++) {
+      const f = k / steps;
+      if (!t.clearOfTrack(ax + (bx - ax) * f, az + (bz - az) * f, reach)) return true;
+    }
+    return false;
+  };
+  const length = (pts: [number, number][]) => {
+    let L = 0;
+    for (let k = 1; k < pts.length; k++) L += Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]);
+    return L;
+  };
+  for (const side of [-1, 1]) {
+    const runs: [number, number][][] = [];
+    let run: [number, number][] = [];
+    const flush = () => {
+      if (run.length > 1) runs.push(run);
+      run = [];
+    };
+    let lastI = -1;
+    for (let i = 0; i <= t.n; i += 2) {
+      const q = i % t.n;
+      const [nx, nz] = t.normal(q);
+      const x = t.px[q] + nx * side * wallOff;
+      const z = t.pz[q] + nz * side * wallOff;
+      if (!t.clearOfTrack(x, z, wallOff - 0.3) || !landOk(x, z)) {
+        flush();
+        continue;
+      }
+      const last = run[run.length - 1];
+      if (last) {
+        // Doubling back against the direction of travel, or a sharp kink: the offset line has
+        // folded round the inside of a tight corner.
+        const dx = x - last[0];
+        const dz = z - last[1];
+        const back = dx * t.tx[lastI] + dz * t.tz[lastI] < 0;
+        let kink = false;
+        if (run.length > 1) {
+          const [px, pz] = run[run.length - 2];
+          const ex = last[0] - px;
+          const ez = last[1] - pz;
+          kink = dx * ex + dz * ez < 0.5 * Math.hypot(dx, dz) * Math.hypot(ex, ez); // > 60°
+        }
+        if (back || kink || badPiece(last[0], last[1], x, z)) flush();
+      }
+      run.push([x, z]);
+      lastI = q;
+    }
+    flush();
+    // The lap closes: a run ending at the line carries on into the one starting there.
+    if (runs.length > 1) {
+      const first = runs[0];
+      const last = runs[runs.length - 1];
+      const [lx, lz] = last[last.length - 1];
+      if (Math.hypot(lx - first[0][0], lz - first[0][1]) < 0.01) {
+        runs[runs.length - 1] = last.concat(first.slice(1));
+        runs.shift();
+      }
+    }
+    for (const r of runs) {
+      if (length(r) < 12) continue;
+      // Right-hand walls are walked against the lap so the track is always on the run's right.
+      out.push({ side, pts: side > 0 ? r.slice().reverse() : r });
+    }
+  }
+  return out;
+}
+
 export function buildTrackside(track: TrackModel, ground: GroundPainter | null, seed: string, aniso: number): Trackside {
   const group = new THREE.Group();
   const rand = rng(hashString(seed + ':side'));
@@ -72,54 +162,89 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
 
   // ---------------------------------------------------------------- kerbs (raised)
   {
-    const kerbTex = canvasTex(32, 64, (g) => {
+    // Left half: the kerb's red and white stripes. Right half: the concrete apron, with a darker
+    // lip at its outer edge so it meets the grass with a crisp line.
+    const kerbTex = canvasTex(64, 64, (g) => {
       g.fillStyle = '#d8262c';
       g.fillRect(0, 0, 32, 32);
       g.fillStyle = '#f3f1ea';
       g.fillRect(0, 32, 32, 32);
+      g.fillStyle = GROUND.apron;
+      g.fillRect(32, 0, 28, 64);
+      g.fillStyle = '#8c8678';
+      g.fillRect(60, 0, 4, 64);
     });
     kerbTex.wrapT = THREE.RepeatWrapping;
+    kerbTex.wrapS = THREE.ClampToEdgeWrapping;
     const pos: number[] = [];
     const uv: number[] = [];
-    const isCorner = (i: number) => Math.abs(t.curv[((i % t.n) + t.n) % t.n]) > 0.028;
-    const seen = new Uint8Array(t.n);
-    // Profile across the kerb: offset from edge (m) and height (m).
-    const prof: [number, number][] = [
-      [-0.05, 0.035],
-      [0.35, 0.1],
-      [1.0, 0.08],
-      [1.15, 0.02],
-    ];
-    for (let i = 0; i < t.n; i++) {
-      if (seen[i] || !isCorner(i)) continue;
-      let a = i;
-      while (isCorner(a - 1) && a > i - t.n) a--;
-      let b = i;
-      while (isCorner(b + 1) && b < a + t.n) b++;
-      for (let k = a; k <= b; k++) seen[((k % t.n) + t.n) % t.n] = 1;
-      for (const side of [-1, 1]) {
-        let prev: number[][] | null = null;
-        for (let k = a - 5; k <= b + 6; k++) {
-          const q = ((k % t.n) + t.n) % t.n;
-          const [nx, nz] = t.normal(q);
-          const v = (k * t.length) / t.n / 1.6;
-          const row = prof.map(([o, y]) => [t.px[q] + nx * side * (hw + o), y, t.pz[q] + nz * side * (hw + o), (o + 0.05) / 1.2, v]);
-          if (prev) {
-            for (let p = 0; p < prof.length - 1; p++) {
-              const A = prev[p];
-              const B = prev[p + 1];
-              const C = row[p + 1];
-              const D = row[p];
-              // Winding so the top faces up on either side of the track.
-              const tri = side > 0 ? [A, D, C, A, C, B] : [A, B, C, A, C, D];
-              for (const v3 of tri) {
-                pos.push(v3[0], v3[1], v3[2]);
-                uv.push(v3[3], v3[4]);
-              }
+    const tq = trackQuery(t);
+    // Concrete apron round the whole lap (under the kerbs where there are kerbs), a real strip
+    // with crisp edges instead of a band painted into the ground texture. Same mesh and material
+    // as the kerbs, so it costs no extra draw call.
+    for (const side of [-1, 1]) {
+      let prev: number[][] | null = null;
+      for (let k = 0; k <= t.n; k++) {
+        const q = k % t.n;
+        const [nx, nz] = t.normal(q);
+        let w = Math.min(APRON_WIDTH, kerbWidthAt(t, q, side) * (APRON_WIDTH / KERB_WIDTH));
+        // Where another section runs alongside, stop halfway so two aprons never overlap.
+        const hit = tq.nearestOther(t.px[q] + nx * side * (hw + w), t.pz[q] + nz * side * (hw + w), q, hw + APRON_WIDTH + 0.05, 30);
+        if (hit) w = Math.max(0.2, Math.min(w, (hw + w + hit.dist) / 2 - hw));
+        const v = (k * t.length) / t.n / 1.6;
+        const row = [
+          [-0.1, 36 / 64],
+          [w - 0.12, 57 / 64],
+          [w, 63 / 64],
+        ].map(([o, u]) => [t.px[q] + nx * side * (hw + o), 0.01, t.pz[q] + nz * side * (hw + o), u, v]);
+        if (prev) {
+          for (let p = 0; p < 2; p++) {
+            const A = prev[p];
+            const B = prev[p + 1];
+            const C = row[p + 1];
+            const D = row[p];
+            const tri = side > 0 ? [A, D, C, A, C, B] : [A, B, C, A, C, D];
+            for (const v3 of tri) {
+              pos.push(v3[0], v3[1], v3[2]);
+              uv.push(v3[3], v3[4]);
             }
           }
-          prev = row;
         }
+        prev = row;
+      }
+    }
+    // Where the kerbs go is data shared with the physics (src/game/kerbs.ts): inside kerbs
+    // from turn-in to just past the apex, outside kerbs on corner exits, none on kinks or on
+    // another section of the lap.
+    for (const run of kerbRuns(t)) {
+      const side = run.side;
+      let prev: number[][] | null = null;
+      for (let k = run.i0; k <= run.i1; k++) {
+        const q = k % t.n;
+        const [nx, nz] = t.normal(q);
+        const v = (k * t.length) / t.n / 1.6;
+        const w = kerbWidthAt(t, q, side) / KERB_WIDTH;
+        // Ramp the ends down so a strip starts and stops flush with the ground (no open ends).
+        const ramp = Math.min(1, (k - run.i0 + 0.35) / 2.2, (run.i1 - k + 0.35) / 2.2);
+        const row = KERB_PROFILE.map(([o, y]) => {
+          const off = hw + (o < 0 ? o : o * w);
+          return [t.px[q] + nx * side * off, o < 0 ? y : Math.max(0.016, y * ramp), t.pz[q] + nz * side * off, ((o + 0.05) / 1.2) * 0.47, v];
+        });
+        if (prev) {
+          for (let p = 0; p < KERB_PROFILE.length - 1; p++) {
+            const A = prev[p];
+            const B = prev[p + 1];
+            const C = row[p + 1];
+            const D = row[p];
+            // Winding so the top faces up on either side of the track.
+            const tri = side > 0 ? [A, D, C, A, C, B] : [A, B, C, A, C, D];
+            for (const v3 of tri) {
+              pos.push(v3[0], v3[1], v3[2]);
+              uv.push(v3[3], v3[4]);
+            }
+          }
+        }
+        prev = row;
       }
     }
     if (pos.length) {
@@ -128,8 +253,7 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
       g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
       g.computeVertexNormals();
       const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: kerbTex, roughness: 0.55, side: THREE.DoubleSide }));
-      m.receiveShadow = true;
-      m.castShadow = true;
+      m.receiveShadow = true; // 10 cm kerbs and a flat apron: their shadow pass isn't worth it
       group.add(m);
     }
   }
@@ -170,64 +294,45 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
       pos.push(p[0], p[1], p[2]);
       uv.push(u, v);
     };
-    for (const side of [-1, 1]) {
-      let run: [number, number, number][] = []; // x, z, u
-      const flush = () => {
-        for (let k = 0; k + 1 < run.length; k++) {
-          const [ax, az, au] = run[k];
-          const [bx, bz, bu] = run[k + 1];
-          // Outward direction for the back face.
-          const dx = bx - ax;
-          const dz = bz - az;
-          const L = Math.hypot(dx, dz) || 1;
-          let ox = -dz / L;
-          let oz = dx / L;
-          // Make o point away from the track (same as side * normal).
-          const q = run[k];
-          const near = t.nearest(q[0], q[1]);
-          const [nx, nz] = t.normal(near.i);
-          if (ox * nx * side + oz * nz * side < 0) {
-            ox = -ox;
-            oz = -oz;
-          }
-          const a0 = [ax, 0, az];
-          const b0 = [bx, 0, bz];
-          const a1 = [ax, H, az];
-          const b1 = [bx, H, bz];
-          const a2 = [ax + ox * T, H, az + oz * T];
-          const b2 = [bx + ox * T, H, bz + oz * T];
-          const a3 = [ax + ox * T, 0, az + oz * T];
-          const b3 = [bx + ox * T, 0, bz + oz * T];
-          const faces: [number[], number[], number[], number[], number, number][] = [
-            [a0, b0, b1, a1, 0.25, 1], // front (belt)
-            [a1, b1, b2, a2, 0.12, 0.12], // top
-            [a2, b2, b3, a3, 0.1, 0.1], // back
-          ];
-          for (const [A, B, C, D, v0, v1] of faces) {
-            const tri = [A, B, C, A, C, D];
-            const vs = [v0, v0, v1, v0, v1, v1];
-            const us = [au, bu, bu, au, bu, au];
-            for (let m = 0; m < 6; m++) push(tri[m], us[m], vs[m]);
-          }
-        }
-        run = [];
-      };
+    const quad = (A: number[], B: number[], C: number[], D: number[], us: number[], v0: number, v1: number) => {
+      // A-B along the bottom edge, D-C along the top; faces the side where A->B->C turns anticlockwise.
+      const vs = [v0, v0, v1, v0, v1, v1];
+      const uu = [us[0], us[1], us[1], us[0], us[1], us[0]];
+      [A, B, C, A, C, D].forEach((P, m) => push(P, uu[m], vs[m]));
+    };
+    // Each run is walked with the track on its right, so the belt's front face (A->B->C) faces
+    // the track and its texture runs left to right as seen from the kart: no mirrored text.
+    for (const { pts } of wallRuns(t, ground)) {
       let u = 0;
-      for (let i = 0; i <= t.n; i += 2) {
-        const [x, z] = at(i, side, wallOff);
-        if (clearAt(x, z, wallOff - 0.3) && landOk(x, z)) {
-          if (run.length) u += Math.hypot(x - run[run.length - 1][0], z - run[run.length - 1][1]) / 12.5;
-          run.push([x, z, u]);
-        } else if (run.length) flush();
+      const corner = (k: number, ox: number, oz: number) => {
+        const [x, z] = pts[k];
+        return { p0: [x, 0, z], p1: [x, H, z], p2: [x + ox * T, H, z + oz * T], p3: [x + ox * T, 0, z + oz * T] };
+      };
+      for (let k = 0; k + 1 < pts.length; k++) {
+        const [ax, az] = pts[k];
+        const [bx, bz] = pts[k + 1];
+        const L = Math.hypot(bx - ax, bz - az) || 1;
+        // To the left of the run, away from the track (TrackModel.normal is (-tz, tx) = right).
+        const ox = (bz - az) / L;
+        const oz = -(bx - ax) / L;
+        const a = corner(k, ox, oz);
+        const b = corner(k + 1, ox, oz);
+        const u0 = u;
+        u += L / 12.5;
+        quad(a.p0, b.p0, b.p1, a.p1, [u0, u], 0.25, 1); // front (belt)
+        quad(a.p1, b.p1, b.p2, a.p2, [u0, u], 0.12, 0.12); // top
+        quad(a.p2, b.p2, b.p3, a.p3, [u0, u], 0.1, 0.1); // back
+        // End caps so an open end doesn't show the hollow inside.
+        if (k === 0) quad(a.p3, a.p0, a.p1, a.p2, [0, 0.05], 0.1, 0.1);
+        if (k + 2 === pts.length) quad(b.p0, b.p3, b.p2, b.p1, [0, 0.05], 0.1, 0.1);
       }
-      flush();
     }
     if (pos.length) {
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
       g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
       g.computeVertexNormals();
-      const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: belt, roughness: 0.7, side: THREE.DoubleSide }));
+      const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ map: belt, roughness: 0.7 }));
       m.castShadow = true;
       m.receiveShadow = true;
       group.add(m);
@@ -290,6 +395,74 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
     }
   }
 
+  const boardSpots: [number, number][] = []; // braking boards; hoardings keep clear of them
+  // ---------------------------------------------------------------- braking boards (3-2-1)
+  {
+    // Before the biggest stops of the lap: three boards counting down to the turn-in, behind the
+    // tyre wall on the outside of the corner, turned to face the karts coming down the straight.
+    const atlas = canvasTex(
+      384,
+      128,
+      (g) => {
+        for (let k = 0; k < 3; k++) {
+          const x = k * 128;
+          g.fillStyle = '#141414';
+          g.fillRect(x, 0, 128, 128);
+          g.fillStyle = '#f2eee5';
+          g.fillRect(x + 8, 8, 112, 112);
+          g.fillStyle = '#ff4d00';
+          g.fillRect(x + 8, 8, 112, 16);
+          g.fillStyle = '#141414';
+          g.font = '800 88px Archivo, Arial, sans-serif';
+          g.textAlign = 'center';
+          g.textBaseline = 'middle';
+          g.fillText(String(3 - k), x + 64, 76);
+        }
+      },
+      false,
+    );
+    const faces: THREE.BufferGeometry[] = [];
+    const frames: THREE.BufferGeometry[] = [];
+    const ds = t.length / t.n;
+    const off = wallOff + 1.4;
+    for (const stop of bigStops(t)) {
+      const d = Math.max(8, Math.round((stop.turnIn - stop.brakeFrom) * ds / 2.5));
+      const spots: { x: number; z: number; yaw: number; num: number }[] = [];
+      for (const sd of [stop.side, -stop.side]) {
+        spots.length = 0;
+        for (let num = 3; num >= 1; num--) {
+          const i = (((stop.turnIn - Math.round((num * d) / ds)) % t.n) + t.n) % t.n;
+          const [x, z] = at(i, sd, off);
+          if (!clearAt(x, z, off - 0.4) || !landOk(x, z)) break;
+          // Face back down the straight, turned 25° towards the track.
+          const [nx, nz] = t.normal(i);
+          const fx = -t.tx[i] - nx * sd * 0.47;
+          const fz = -t.tz[i] - nz * sd * 0.47;
+          spots.push({ x, z, yaw: Math.atan2(fx, fz), num });
+        }
+        if (spots.length === 3) break;
+      }
+      if (spots.length !== 3) continue;
+      for (const sp of spots) {
+        boardSpots.push([sp.x, sp.z]);
+        const k = 3 - sp.num; // atlas cell
+        const face = new THREE.PlaneGeometry(1.1, 1.1);
+        const uvA = face.attributes.uv as THREE.BufferAttribute;
+        for (let q = 0; q < uvA.count; q++) uvA.setX(q, (k + uvA.getX(q)) / 3);
+        const m = new THREE.Matrix4().compose(new THREE.Vector3(sp.x, 0, sp.z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), sp.yaw), new THREE.Vector3(1, 1, 1));
+        faces.push(face.translate(0, 1.75, 0.03).applyMatrix4(m));
+        frames.push(tint(new THREE.BoxGeometry(1.2, 1.2, 0.05).translate(0, 1.75, 0), '#2a2a2c').applyMatrix4(m));
+        for (const lx of [-0.4, 0.4]) frames.push(tint(new THREE.BoxGeometry(0.07, 1.2, 0.07).translate(lx, 0.6, -0.04), '#55565a').applyMatrix4(m));
+      }
+    }
+    if (faces.length) {
+      const fm = new THREE.Mesh(mergeGeometries(faces)!, new THREE.MeshStandardMaterial({ map: atlas, roughness: 0.5 }));
+      const bm = new THREE.Mesh(mergeGeometries(frames)!, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7 }));
+      fm.castShadow = bm.castShadow = true;
+      group.add(fm, bm);
+    }
+  }
+
   // ---------------------------------------------------------------- hoardings on straights
   {
     const atlas = canvasTex(
@@ -322,6 +495,7 @@ export function buildTrackside(track: TrackModel, ground: GroundPainter | null, 
         const off = wallOff + 1.1;
         const [x, z] = at(i, side, off);
         if (!clearAt(x, z, off - 0.4) || !landOk(x, z)) continue;
+        if (boardSpots.some(([bx, bz]) => (bx - x) ** 2 + (bz - z) ** 2 < 5 ** 2)) continue;
         const [nx, nz] = t.normal(i);
         const yaw = Math.atan2(-nx * side, -nz * side);
         const row = k++ % SPONSORS.length;
