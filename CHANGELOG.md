@@ -6,6 +6,12 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+### Changed
+- **Every race starts at Live**, the real time of day at the circuit. Pick Day or Night on the grid,
+  or in the pause menu, for that race only; the next race starts at Live again.
+- **Controls aren't on the grid any more.** It shows which ones you're using and their keys. Switch
+  them from the pause menu any time; your choice is remembered on this device.
+
 ## [0.19.0] - 2026-10-20
 
 ### Changed

@@ -61,8 +61,10 @@ spec is [docs/pit-wall.md](docs/pit-wall.md); tokens and shared components live 
   with you on it, and the leaderboard with a ghost to race on every lap (and a Today tab on the
   daily circuit). **Race** takes you to the grid, with racing friends and challenge links beside it.
 - **Grid**: set up and go. A dot laps the circuit as the world loads, lighting each sector. Beside
-  it are your times, the medal you're chasing, and the session setup: controls and time of day.
-  **Start** (or any key) goes green when it's ready and runs the five red lights.
+  it are your times, the medal you're chasing, your controls and the time of day. Every race starts
+  at **Live**, the real time there, and Day or Night is for that race only. Controls are switched
+  from the pause menu and remembered on the device. **Start** (or any key) goes green when it's
+  ready and runs the five red lights.
 - Two control schemes (Simple and Classic) on keyboard, gamepad and touch;
   synthesized engine and tyre audio; skid marks; four cameras.
 

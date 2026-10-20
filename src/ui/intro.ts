@@ -56,8 +56,8 @@ interface Lap {
 /**
  * The grid: set up and go. The circuit drawn large, and the world loading as a lap of it: a dot
  * leaves the line, each sector lights up as it passes, and the chequered line flashes when it gets
- * back. Beside it: the times to beat, the medal you're chasing, and the session setup (controls and
- * time of day). One green START, by tap or any key, once it's ready.
+ * back. Beside it: the times to beat, the medal you're chasing, the time of day (Live unless you
+ * pick otherwise) and your controls. One green START, by tap or any key, once it's ready.
  */
 export class RaceIntro {
   readonly el: HTMLDivElement;
@@ -134,8 +134,7 @@ export class RaceIntro {
           <p class="io-tgt" data-el="medals">–</p>
         </div>
         <div class="io-block io-ctl">
-          <span class="pw-k">Controls</span>
-          <div class="pw-tabs" role="radiogroup" aria-label="Controls">${tabs('data-controls', o.schemes.map((s) => [s, SCHEME_LABEL[s], s === 'simple' ? 'Auto gas' : undefined]))}</div>
+          <span class="pw-k">Controls · <span data-el="scheme"></span><em>switch any time in the pause menu</em></span>
           <p class="io-help" data-el="help"></p>
         </div>
         <div class="io-block io-tod">
@@ -169,8 +168,8 @@ export class RaceIntro {
     this.lap = this.setupLap();
     this.raf = requestAnimationFrame(this.tick);
 
-    // Setup: the session's controls and time of day. Each change applies straight away (the race
-    // saves it for next time too) and can still be changed from the pause menu mid-race.
+    // Time of day: Live (the real time there) unless you pick Day or Night for this race. Controls
+    // are shown, not chosen here: they're switched from the pause menu and remembered.
     const seg = [...this.el.querySelectorAll<HTMLButtonElement>('[data-time]')];
     const mark = (t: TimePref) =>
       seg.forEach((b) => {
@@ -188,19 +187,8 @@ export class RaceIntro {
         o.onTime(t);
       }),
     );
-    const ctl = [...this.el.querySelectorAll<HTMLButtonElement>('[data-controls]')];
-    this.markControls = (s) =>
-      ctl.forEach((b) => {
-        const on = b.dataset.controls === s;
-        b.classList.toggle('on', on);
-        b.setAttribute('aria-checked', String(on));
-      });
-    ctl.forEach((b) =>
-      b.addEventListener('click', (e) => {
-        if (e.detail > 0) b.blur();
-        if (!b.classList.contains('on')) o.onControls(b.dataset.controls as ControlScheme); // the race calls setControls back
-      }),
-    );
+    const scheme = this.el.querySelector<HTMLElement>('[data-el=scheme]')!;
+    this.markControls = (s) => (scheme.textContent = SCHEME_LABEL[s]);
     this.setControls(o.controls);
     this.el.querySelector('[data-act=back]')!.addEventListener('click', () => o.onBack());
     this.go.addEventListener('click', () => this.start());

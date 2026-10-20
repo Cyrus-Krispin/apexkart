@@ -4,7 +4,7 @@ import { buildTrackScene, type TrackScene } from './trackMesh';
 import { buildKart, KartPhysics, type KartVisual } from './kart';
 import { availableSchemes, controlsPref, Input, saveControlsPref, SCHEME_LABEL, type ControlScheme } from './input';
 import { KartAudio } from './audio';
-import { Atmosphere, resolveTime, saveTimePref, timePref, type TimePref } from './atmosphere';
+import { Atmosphere, resolveTime, type TimePref } from './atmosphere';
 import { awardMedal, earnedMedal, MEDAL_NAME, MEDALS, medalFor, targets } from './medals';
 import { recordDailyLap } from '../shared/daily';
 import { floodlit } from './floodlights';
@@ -159,7 +159,7 @@ export class Race {
     this.kart = buildKart(opts.driver.color, { number: 7 });
     this.scene.add(this.kart.root);
 
-    this.timeSetting = opts.mode?.time ?? timePref();
+    this.timeSetting = opts.mode?.time ?? 'live'; // every race starts at the real time of day there
     this.intro = new RaceIntro({
       container: this.root,
       track: opts.track,
@@ -406,8 +406,7 @@ export class Race {
 
   private setTime(t: TimePref, toast = false) {
     if (t === this.timeSetting || this.opts.mode?.time) return; // a shared session's time is fixed
-    this.timeSetting = t;
-    saveTimePref(t);
+    this.timeSetting = t; // for this race only: the next one starts at Live again
     const look = resolveTime(t, this.opts.track.center);
     const flip = look.time !== this.atmos.time;
     this.atmos.set(look.time, look.sun); // every material recompiles
