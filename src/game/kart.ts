@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
-import type { TrackModel } from './track';
+import { KERB, type Nearest, type Rejoin, type TrackModel } from './track';
 
 export interface KartVisual {
   root: THREE.Group;
@@ -172,6 +172,20 @@ export interface Controls {
 
 export type Surface = 'track' | 'kerb' | 'grass';
 
+/** A wall contact starting (KartPhysics.impact): for sparks, sound, haptics and the camera. */
+export interface Impact {
+  speed: number; // closing speed into the wall, m/s (the normal component)
+  x: number; // contact point, on the kart's side against the wall
+  z: number;
+  nx: number; // wall surface normal, unit, pointing back towards the track
+  nz: number;
+}
+
+// Wall response: friction from the normal impulse, restitution, and a little extra loss on hard hits.
+const WALL_MU = 0.5;
+const WALL_E = 0.2;
+const WALL_LOSS = 0.15;
+
 /** Arcade kart dynamics on a flat plane, constrained by the track's barriers. */
 export class KartPhysics {
   x = 0;
@@ -188,6 +202,21 @@ export class KartPhysics {
   s = 0;
   wheelSpin = 0;
   bump = 0; // impact intensity for camera shake / sound
+  /** Set for the one step in which the kart left its part of the lap for another (null otherwise). */
+  rejoin: Rejoin | null = null;
+  /** Metres driven in total (place() doesn't count): a lap shorter than the track allows is a cut. */
+  odo = 0;
+  /** How many times place() has run: lets progress consumers tell a reset from a jump. */
+  placed = 0;
+  /** Set for the one step in which a wall contact starts (null otherwise). */
+  impact: Impact | null = null;
+  /** Touching a wall this step. */
+  onWall = false;
+  /** Seconds spent below walking pace with the pedals pressed (wedged, or beached). */
+  stuckT = 0;
+  /** The last lap position on this part of the lap's own asphalt: where a reset puts the kart. */
+  goodS = 0;
+  private gripLossT = 0; // after a hard wall hit: the tyres take a moment to bite again
 
   readonly vmax = 27; // ~97 km/h
   readonly wheelbase = 1.05;
@@ -201,6 +230,39 @@ export class KartPhysics {
     this.heading = p.heading;
     this.vx = this.vz = this.yawRate = this.steerAngle = 0;
     this.hint = p.i;
+    this.locate(); // s and offset right away, not at the next step
+    this.rejoin = null;
+    this.impact = null;
+    this.onWall = false;
+    this.gripLossT = 0;
+    this.stuckT = 0;
+    this.goodS = this.s;
+    this.placed++;
+  }
+
+  /**
+   * Where the kart is in the lap (hint, s, offset; rejoin), from x/z. Progress follows the lap
+   * continuously, so it never jumps to another part of it however close (hairpin infields,
+   * crossings). step() calls this after moving.
+   */
+  locate(): Nearest {
+    const t = this.track;
+    const hw = t.halfWidth;
+    let near = this.hint < 0 ? t.closest(this.x, this.z) : t.follow(this.x, this.z, this.hint);
+    this.rejoin = null;
+    if (near.dist > hw + t.runoff) {
+      // Past this part's barrier but on another part's asphalt or kerb: carry on from there, and
+      // say so (Race: a forward rejoin is a cut).
+      const other = t.closest(this.x, this.z, near.i);
+      if (other.dist <= hw + KERB) {
+        this.rejoin = { from: near.i, to: other.i, gain: t.gain(near.i, other.i) };
+        near = other;
+      }
+    }
+    this.hint = near.i;
+    this.s = near.s;
+    this.offset = near.offset;
+    return near;
   }
 
   get speed() {
@@ -238,7 +300,9 @@ export class KartPhysics {
 
     // Yaw: bicycle model, clamped by available lateral grip.
     const gripG = grass ? 0.75 : c.drift ? 1.3 : kerb ? 2.0 : 2.35;
-    const maxLat = gripG * 9.81;
+    const hit = this.gripLossT > 0; // only ever after a wall hit: clean laps are untouched
+    this.gripLossT = Math.max(0, this.gripLossT - dt);
+    const maxLat = gripG * 9.81 * (hit ? 0.6 : 1);
     // Positive heading change turns left, so steering right means negative yaw.
     let desiredYaw = -(vf * Math.tan(this.steerAngle)) / this.wheelbase;
     const yawLimit = maxLat / Math.max(Math.abs(vf), 2) + (c.drift ? 0.9 : 0);
@@ -247,7 +311,7 @@ export class KartPhysics {
     this.heading += this.yawRate * dt;
 
     // Lateral velocity bleeds off according to grip; drifting keeps more slide.
-    const lateralGrip = grass ? 2.2 : c.drift ? 1.6 : kerb ? 7 : 11;
+    const lateralGrip = (grass ? 2.2 : c.drift ? 1.6 : kerb ? 7 : 11) * (hit ? 0.35 : 1);
     vl *= Math.exp(-lateralGrip * dt);
     if (c.drift && Math.abs(vf) > 8) vf -= 1.2 * dt * Math.sign(vf); // drifting scrubs a little speed
     this.slip = Math.abs(vl) + (c.drift ? Math.abs(this.yawRate) * 1.5 : 0);
@@ -259,32 +323,68 @@ export class KartPhysics {
     this.vz = nfz * vf + nfx * vl;
     this.x += this.vx * dt;
     this.z += this.vz * dt;
+    this.odo += Math.hypot(this.vx, this.vz) * dt;
     this.wheelSpin += (vf / 0.135) * dt;
 
     // Track surface + barriers.
-    const near = this.track.nearest(this.x, this.z, this.hint);
-    this.hint = near.i;
-    this.s = near.s;
-    this.offset = near.offset;
+    const prevS = this.s;
+    const near = this.locate();
     const hw = this.track.halfWidth;
-    this.surface = near.dist <= hw ? 'track' : near.dist <= hw + 1.1 ? 'kerb' : 'grass';
-    this.bump *= Math.exp(-dt * 6);
     const wall = hw + this.track.runoff;
-    if (near.dist > wall) {
-      const [nx, nz] = this.track.normal(near.i);
+    let ds = Math.abs(near.s - prevS);
+    ds = Math.min(ds, this.track.length - ds);
+    if (near.dist <= hw && !this.rejoin && ds < 3) this.goodS = near.s;
+    this.surface = near.dist <= hw ? 'track' : near.dist <= hw + KERB ? 'kerb' : 'grass';
+    // Asphalt is asphalt: another part of the lap's road grips like the road (where sections merge
+    // or cross). Limits and the reset point still go by this part's own road.
+    if (near.dist > hw && this.track.nearestOther(this.x, this.z, near.i, hw) >= 0) this.surface = 'track';
+    this.bump *= Math.exp(-dt * 6);
+    this.impact = null;
+    const touching = near.dist > wall;
+    if (touching) {
+      // n: unit normal pointing into the wall. Push the kart back out to the barrier line.
+      const [nx0, nz0] = this.track.normal(near.i);
       const side = Math.sign(near.offset);
+      const nx = nx0 * side;
+      const nz = nz0 * side;
       const push = near.dist - wall;
-      this.x -= nx * side * push;
-      this.z -= nz * side * push;
-      // Remove velocity into the wall with a small bounce, plus scrub.
-      const vn = (this.vx * nx + this.vz * nz) * side;
+      this.x -= nx * push;
+      this.z -= nz * push;
+      const vn = this.vx * nx + this.vz * nz;
       if (vn > 0) {
-        this.vx -= nx * side * vn * 1.35;
-        this.vz -= nz * side * vn * 1.35;
-        this.vx *= 0.82;
-        this.vz *= 0.82;
+        // Impulse: the speed into the wall bounces back at WALL_E; the speed along it is kept, less
+        // Coulomb friction from that impulse and a little more on a hard hit. Per contact step, but
+        // after the first one the kart runs along the wall and vn is ~0, so it never pins.
+        const tx = this.vx - nx * vn;
+        const tz = this.vz - nz * vn;
+        const vt = Math.hypot(tx, tz);
+        const keep = vt > 1e-3 ? Math.max(0, 1 - (WALL_MU * (1 + WALL_E) * vn) / vt) * (1 - WALL_LOSS * Math.min(1, vn / 6)) : 0;
+        this.vx = tx * keep - nx * vn * WALL_E;
+        this.vz = tz * keep - nz * vn * WALL_E;
+        // Turn the nose along the wall, the way it already points (along the race direction when
+        // square on), so the throttle drives it along the wall rather than back into it.
+        const fx = Math.sin(this.heading);
+        const fz = Math.cos(this.heading);
+        let ax = -nz;
+        let az = nx;
+        const facing = ax * fx + az * fz;
+        if ((Math.abs(facing) < 0.05 ? ax * this.track.tx[near.i] + az * this.track.tz[near.i] : facing) < 0) {
+          ax = -ax;
+          az = -az;
+        }
+        // Moving along the wall the way the nose points: follow the velocity (it leans slightly off
+        // the wall after the bounce); otherwise the wall line itself.
+        const along = this.vx * ax + this.vz * az;
+        const target = along > 1 ? Math.atan2(this.vx, this.vz) : Math.atan2(ax, az);
+        const dh = Math.atan2(Math.sin(target - this.heading), Math.cos(target - this.heading));
+        this.heading += dh * 0.7;
+        this.yawRate = 0;
+        if (vn > 1.5) this.gripLossT = Math.min(0.35, 0.1 + 0.03 * vn);
         this.bump = Math.min(1, this.bump + vn / 10);
+        if (!this.onWall && vn > 0.5) this.impact = { speed: vn, x: this.x + nx * 0.65, z: this.z + nz * 0.65, nx: -nx, nz: -nz };
       }
     }
+    this.onWall = touching;
+    this.stuckT = this.speed < 2 && (c.throttle > 0 || c.brake > 0) ? this.stuckT + dt : 0;
   }
 }

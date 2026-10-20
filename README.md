@@ -22,7 +22,8 @@ spec is [docs/pit-wall.md](docs/pit-wall.md); tokens and shared components live 
   metre (`src/game/track.ts`). The start/finish line is auto-placed on the longest straight.
 - **The real place in 3D** (`src/game/world/`): OpenStreetMap buildings are extruded to their
   real height, land use is painted into a crisp stylised ground, and trees fill the mapped woods
-  and parks. The circuit gets raised kerbs, a branded tyre wall on the physics barrier,
+  and parks. The circuit gets raised kerbs where a real track has them (corner apexes and
+  exits), a concrete apron, grid boxes, braking marks and boards, a branded tyre wall on the physics barrier,
   floodlights, hoardings, a grandstand, a pit building and marshal posts. Featured circuits ship
   with baked surroundings in `public/tracks/env/`.
 - **Renderer** (`src/game/render.ts`): golden-hour light, GTAO ambient occlusion, bloom, sky
@@ -40,7 +41,8 @@ spec is [docs/pit-wall.md](docs/pit-wall.md); tokens and shared components live 
 - **Both directions**: every track can be raced in reverse (KF1 really is a dual-direction
   circuit), with separate leaderboards.
 - **Timing like TV**: flying laps, three sectors with purple/green/yellow colours, a live delta
-  to your PB, track limits and wrong-way detection, and five red lights before the start.
+  to your PB, track limits (four wheels off), cut detection that follows the road you're on,
+  wrong-way detection, and five red lights before the start.
 - **Ghosts**: race against your own PB and the top three drivers on the leaderboard, with
   name tags.
 - **Multiplayer**: create a room, share the link or code, and race friends live (up to 8, N laps,
@@ -89,7 +91,7 @@ In every scheme:
 
 | Action | Keys |
 | --- | --- |
-| Reset onto track | `R` (invalidates the lap), gamepad Y |
+| Reset onto track | `R` or the Reset button that appears when you're stuck (invalidates the lap), gamepad Y |
 | Camera | `C` |
 | Ghosts on/off | `G` |
 | Mute | `M` |
