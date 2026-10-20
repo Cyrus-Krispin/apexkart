@@ -149,7 +149,7 @@
 .h-sectors .sec[data-flash='purple'] { --fl: var(--purple); --fl-ink: #fff; }
 .h-sectors .sec[data-flash='green'] { --fl: var(--green); --fl-ink: #05170b; }
 .h-sectors .sec[data-flash='yellow'] { --fl: var(--yellow); --fl-ink: var(--carbon); }
-@keyframes h-sec { 0%, 30% { filter: brightness(1.6); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.9); } 100% { filter: none; box-shadow: inset 0 0 0 2px transparent; } }
+@keyframes h-sec { 0%, 30% { filter: brightness(1.2); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.9); } 100% { filter: none; box-shadow: inset 0 0 0 2px transparent; } }
 .h-timing footer { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--line); }
 .h-timing footer div { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 7px 12px; }
 .h-timing footer div + div { border-left: 1px solid var(--line); }
