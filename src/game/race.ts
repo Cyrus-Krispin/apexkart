@@ -600,8 +600,17 @@ export class Race {
       this.hud.banner('Cross the line to start the clock', 'info', 2.6);
     }
     // Progress is continuous; leaving for another part of the lap is reported. Forward is a cut.
+    // In a multiplayer race there's no lap to void: the kart goes back to where it left.
     const rejoin = this.phys.rejoin;
-    if (rejoin && rejoin.gain > 0) this.invalidate('Cut the track', true);
+    if (rejoin && rejoin.gain > 0) {
+      if (this.opts.mode) {
+        this.lastS = prev;
+        this.recover(rejoin.from * (L / this.track.n) - 2, 'Cut the track');
+        this.hud.banner('Cut the track · back where you left it', 'warn', 2.2);
+        return;
+      }
+      this.invalidate('Cut the track', true);
+    }
     if (crossedBack && this.lapStart !== null) this.invalidate('Reversed over the line');
     if (crossedFwd) {
       // Interpolate the exact crossing moment inside this step.
@@ -668,9 +677,9 @@ export class Race {
     this.hud.banner(`Lap invalid · ${reason}`, 'warn', 2);
   }
 
-  private recover() {
-    this.phys.place(this.phys.s);
-    this.invalidate('Reset');
+  private recover(at = this.phys.s, reason = 'Reset') {
+    this.phys.place(at);
+    this.invalidate(reason, true);
     this.snapCamera();
   }
 

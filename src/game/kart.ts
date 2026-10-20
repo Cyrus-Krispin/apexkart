@@ -192,6 +192,8 @@ export class KartPhysics {
   rejoin: Rejoin | null = null;
   /** Metres driven in total (place() doesn't count): a lap shorter than the track allows is a cut. */
   odo = 0;
+  /** How many times place() has run: lets progress consumers tell a reset from a jump. */
+  placed = 0;
 
   readonly vmax = 27; // ~97 km/h
   readonly wheelbase = 1.05;
@@ -205,7 +207,9 @@ export class KartPhysics {
     this.heading = p.heading;
     this.vx = this.vz = this.yawRate = this.steerAngle = 0;
     this.hint = p.i;
+    this.locate(); // s and offset right away, not at the next step
     this.rejoin = null;
+    this.placed++;
   }
 
   /**
