@@ -1,4 +1,4 @@
-// Bakes public/tracks/world.json: every kart venue on OpenStreetMap, grouped into venues and
+// Bakes scripts/data/venues-all.json: every kart venue on OpenStreetMap, grouped into venues and
 // tagged with its country, for the atlas's world map and country filter.
 //
 // Two sources: anything tagged sport=karting, plus kart-sized clusters of other raceways
@@ -277,7 +277,8 @@ const out = {
   source: 'OpenStreetMap contributors (ODbL)',
   built: new Date().toISOString().slice(0, 10),
 };
-writeFileSync('public/tracks/world.json', JSON.stringify(out));
+// The map shows the subset with baked layouts: scripts/build-venues.ts --merge-only --baked-only.
+writeFileSync('scripts/data/venues-all.json', JSON.stringify(out));
 const per = new Map<string, number>();
 for (const v of venues) per.set(v[2], (per.get(v[2]) ?? 0) + 1);
 const top = [...per.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);

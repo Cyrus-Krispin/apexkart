@@ -6,6 +6,15 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+### Changed
+- **Every track on the world map is ready to race.** The map now shows only tracks whose layouts
+  are already built (4,894 of them), so every dot opens instantly. Venues that couldn't be built
+  are left off for now and come back as they're added.
+- Searching for a place flies the map there and lists the tracks around it.
+
+### Removed
+- **Scan this area for tracks.** Every raceable venue is already on the map.
+
 ## [0.11.0] - 2026-10-20
 
 ### Changed
