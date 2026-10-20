@@ -7,7 +7,7 @@ import { FINISH_GRACE_MS, type GridSlot, type PoseTuple, type RoomState } from '
 import type { RoomClient } from '../net/room';
 import { gridPose, type RaceAddon, type RaceContext, type RaceMode } from './raceMode';
 import type { KartPhysics } from './kart';
-import { TowIndicator } from './hud';
+import { LaunchHint, TowIndicator } from './hud';
 
 const SEND_MS = 50; // 20 Hz
 const RELAY_CHECK_MS = 500; // how often to ask which links are relayed (their karts are ghosts)
@@ -74,6 +74,7 @@ export class MultiplayerRace implements RaceAddon {
   private lastRelayCheck = 0;
   private towNow = 0; // slipstream strength this step, 0..1
   private towChip!: TowIndicator;
+  private launchHint!: LaunchHint;
   private lastLap = 1;
   private offs: (() => void)[] = [];
 
@@ -94,6 +95,7 @@ export class MultiplayerRace implements RaceAddon {
     this.o.grid.forEach((g, i) => g.mid !== this.o.room.mid && this.karts.add(g.mid, g.name, g.color, gridPose(ctx.track, i)));
     this.overlay = new RaceOverlay(ctx.hud, { lobby: () => this.o.onLobby() });
     this.towChip = new TowIndicator(ctx.hud);
+    this.launchHint = new LaunchHint(ctx.hud);
     const room = this.o.room;
     this.offs.push(
       room.on('pose', (mid, p) => p[9] === this.o.race && this.karts.push(mid, p)),
@@ -187,6 +189,7 @@ export class MultiplayerRace implements RaceAddon {
     }
     this.karts.update(dt, now, ctx.viewW, ctx.viewH);
     this.towChip.set(this.towNow, dt);
+    this.launchHint.update(ctx.state === 'grid');
 
     const lap = this.currentLap();
     if (lap > this.lastLap && this.finishMs === undefined) {

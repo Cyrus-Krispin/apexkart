@@ -479,3 +479,30 @@ export class TowIndicator {
     this.el?.remove();
   }
 }
+
+// ---------- Launch hint (Lane D, multiplayer only)
+
+/**
+ * Classic controls on a multiplayer grid: the kart only launches at lights out if you're already
+ * holding Gas (Simple players launch by themselves), so the grid's controls reminder says so.
+ * Once the lights go out the usual reminder is back.
+ */
+export class LaunchHint {
+  private el: HTMLElement | null;
+  private on = false;
+  private html = touchDevice() ? 'Hold Gas: you launch at lights out' : 'Hold Gas <kbd>W</kbd> · you launch at lights out';
+
+  constructor(private root: HTMLElement) {
+    this.el = root.querySelector<HTMLElement>('[data-el="hint"]');
+  }
+
+  /** Every frame: `grid` while waiting for the lights. */
+  update(grid: boolean) {
+    if (!this.el) return;
+    const scheme = this.root.dataset.controls as ControlScheme | undefined;
+    const want = grid && scheme === 'classic';
+    if (want && this.el.innerHTML !== this.html) this.el.innerHTML = this.html; // (again, if the controls changed)
+    else if (!want && this.on && scheme) this.el.innerHTML = hintHtml(scheme);
+    this.on = want;
+  }
+}

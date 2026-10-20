@@ -186,6 +186,9 @@ Everything else lives in its own modules.
      multiplayer. At ≤640 px the HUD's tools and attribution move to the top right, so the
      standings drop to 96 px from the top.
    - Name tags have their own `.mp-tags` layer.
+   - On the grid, Classic-controls players see "Hold Gas: you launch at lights out" in the controls
+     reminder above the speed (`hud.ts` `LaunchHint`); the usual reminder is back at lights out.
+   - In a slipstream, a small Tow chip sits beside the speed (`hud.ts` `TowIndicator`).
    - The results card is centred. The time-trial lap card still appears on the right.
 4. **Styles**: `src/ui/multiplayer.css` uses the Paddock Paper tokens and the `.btn`, `.label`, `.display`,
    `.mono` and `.graph-paper` primitives. The lobby is paper; the race overlay is night.
