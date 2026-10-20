@@ -6,6 +6,28 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+### Fixed
+- **Cutting across a hairpin no longer counts.** Lap progress now follows the road you're actually
+  on, so driving across an infield (KF1's hairpin, for one) voids the lap with "Cut the track", and
+  a lap shorter than the track allows is never valid.
+- **Track limits are "four wheels off"**: the lap is invalid once the whole kart is past the kerb.
+- **Sectors only count when you drive through them**; a lap that skips one says "Missed a sector".
+- **Reversing back over the line cancels the lap** instead of logging a short invalid one.
+- **No more invisible walls** after spinning onto another part of the circuit: you carry on from
+  where you are.
+- **Wrong way** no longer fires when you're going the right way on a neighbouring stretch, and it
+  now works before your first lap too.
+- **Where two parts of a circuit merge or cross**, the other road grips like road, not grass.
+- In multiplayer, cutting the track puts you back where you left it, and the chequered flag always
+  falls at the line.
+- **The leaderboard checks every lap's ghost** and turns away laps that cut the track.
+
+### Changed
+- **Walls don't stop you dead.** Brush one and you keep most of your speed and slide along it; a
+  head-on crash still costs you.
+- **Stuck? Press Reset.** If you're wedged, lost on the grass or facing the wrong way, a Reset
+  button appears (`R` on a keyboard) and puts you back on the track just behind where you left it.
+
 ## [0.21.0] - 2026-10-20
 
 ### Changed

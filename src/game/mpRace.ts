@@ -6,9 +6,42 @@ import { RaceOverlay, type OverlayView, type StandingRow } from '../ui/raceOverl
 import { FINISH_GRACE_MS, type GridSlot, type PoseTuple, type RoomState } from '../shared/room';
 import type { RoomClient } from '../net/room';
 import { gridPose, type RaceAddon, type RaceContext, type RaceMode } from './raceMode';
+import type { KartPhysics } from './kart';
 
 const SEND_MS = 50; // 20 Hz
 const LIGHTS_LEAD = 3.5; // s before lights out that the first red light comes on (Race: SYNC_GO - 0.9)
+
+/**
+ * Race distance from the kart's lap progress: metres covered, 0 = the start line. Progress is
+ * continuous (KartPhysics), so the distance follows the kart exactly, back over a backward rejoin
+ * and through resets; a forward rejoin that wasn't reset earns nothing, nor does any other
+ * unexplained forward jump (a backstop).
+ */
+export class RaceDistance {
+  private prevS: number;
+  private placed: number;
+  constructor(
+    private L: number,
+    phys: Pick<KartPhysics, 's' | 'placed'>,
+    public dist = phys.s - L, // the grid is just behind the line
+  ) {
+    this.prevS = phys.s;
+    this.placed = phys.placed;
+  }
+
+  /** After each physics step; returns the metres added (negative going backwards). */
+  update(phys: Pick<KartPhysics, 's' | 'placed' | 'rejoin'>): number {
+    let d = phys.s - this.prevS;
+    if (d > this.L / 2) d -= this.L;
+    else if (d < -this.L / 2) d += this.L;
+    const reset = phys.placed !== this.placed;
+    if (!reset && d > 0 && (phys.rejoin ? phys.rejoin.gain > 0 : d > 12)) d = 0;
+    this.prevS = phys.s;
+    this.placed = phys.placed;
+    this.dist += d;
+    return d;
+  }
+}
 
 export interface MpRaceOptions {
   room: RoomClient;
@@ -26,8 +59,7 @@ export class MultiplayerRace implements RaceAddon {
   private karts!: RemoteKarts;
   private overlay!: RaceOverlay;
   private L = 1;
-  private dist = 0; // metres of race distance covered; 0 = start line, laps * L = flag
-  private prevS = 0;
+  private race!: RaceDistance; // laps * L = flag
   private crossSimT: number | null = null;
   /** ms from lights out to the flag; null = retired; undefined = still racing. */
   finishMs: number | null | undefined = undefined;
@@ -50,8 +82,7 @@ export class MultiplayerRace implements RaceAddon {
   attach(ctx: RaceContext) {
     this.ctx = ctx;
     this.L = ctx.track.length;
-    this.prevS = ctx.phys.s;
-    this.dist = ctx.phys.s - this.L; // grid is just behind the line
+    this.race = new RaceDistance(this.L, ctx.phys);
     this.karts = new RemoteKarts(ctx.scene, ctx.camera, ctx.hud, this.L);
     // Everyone waits on their grid slot until their first pose arrives.
     this.o.grid.forEach((g, i) => g.mid !== this.o.room.mid && this.karts.add(g.mid, g.name, g.color, gridPose(ctx.track, i)));
@@ -91,19 +122,12 @@ export class MultiplayerRace implements RaceAddon {
 
   tick(dt: number) {
     const { phys } = this.ctx;
-    // Race distance from the centreline position. Wrap at the line; ignore jumps no kart
-    // could make in one step (snapping between nearby sections), so cuts earn nothing.
-    let d = phys.s - this.prevS;
-    if (d > this.L / 2) d -= this.L;
-    else if (d < -this.L / 2) d += this.L;
-    if (Math.abs(d) > 12) d = 0;
-    this.prevS = phys.s;
     if (this.finishMs === undefined && this.crossSimT === null) {
-      const before = this.dist;
-      this.dist += d;
+      const before = this.race.dist;
+      this.race.update(phys);
       const flag = this.o.laps * this.L;
-      if (this.dist >= flag && this.ctx.state === 'racing') {
-        const frac = (flag - before) / Math.max(1e-6, this.dist - before);
+      if (this.race.dist >= flag && this.ctx.state === 'racing') {
+        const frac = (flag - before) / Math.max(1e-6, this.race.dist - before);
         this.crossSimT = this.ctx.simT - dt * (1 - frac);
       }
     }
@@ -162,11 +186,11 @@ export class MultiplayerRace implements RaceAddon {
 
   /** Laps completed + fraction of the current lap (negative on the grid). */
   private progress() {
-    return this.dist / this.L;
+    return this.race.dist / this.L;
   }
 
   private currentLap() {
-    return Math.max(1, Math.floor(this.dist / this.L) + 1);
+    return Math.max(1, Math.floor(this.race.dist / this.L) + 1);
   }
 
   /** Mark the local player as retired (left the race before the flag). */

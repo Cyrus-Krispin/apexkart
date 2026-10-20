@@ -4,10 +4,25 @@ import { getStore, K, json, bad, TRACK_RE, isDir, cleanName, cleanColor, publicI
 import { osmGeometry, sameCircuit, storedGeometry } from './_lib/osmRef.js';
 import { FEATURED_IDS } from './_lib/featured.js';
 import { dailyTrack, dayOf } from '../src/shared/daily.js';
-import { decodeGhost, ghostPathLength, GHOST_DT } from '../src/shared/ghost.js';
-import { centroid, distM, loopLength, type LatLon } from '../src/track/osm.js';
+import { decodeGhost, ghostPathLength, GHOST_DT, type GhostFrame } from '../src/shared/ghost.js';
+import { centroid, distM, loopLength, type LatLon, type TrackData } from '../src/track/osm.js';
 
 const KART_TOP_SPEED = 30; // m/s, a bit above the game's real top speed
+
+/**
+ * src/game/track.ts's judgeLap() on the lap's ghost. Loaded on demand (it brings in three for the
+ * centreline spline); if it can't load or throws, the lap is judged by the checks above alone
+ * rather than every lap failing.
+ */
+async function replay(data: TrackData, reverse: boolean, frames: GhostFrame[], sectors: number[]): Promise<string | null> {
+  try {
+    const { TrackModel, judgeLap } = await import('../src/game/track.js');
+    return judgeLap(new TrackModel(data, reverse), frames, GHOST_DT, sectors);
+  } catch (e) {
+    console.error('lap replay unavailable', e);
+    return null;
+  }
+}
 
 export async function POST(req: Request) {
   const raw = await req.text();
@@ -70,6 +85,10 @@ export async function POST(req: Request) {
   if (Math.abs(frames.length * GHOST_DT * 1000 - ms) > 1500) return bad('ghost does not match lap time', 422);
   const path = ghostPathLength(frames);
   if (path < shortest * 0.85 || path > longest * 1.4 + 60) return bad('ghost does not match track', 422);
+  // Replay the ghost on the circuit it was driven on, under the game's own rules (continuous lap
+  // progress, track limits, the whole lap, matching sectors), so a cut lap doesn't reach the board.
+  const verdict = await replay({ id: track, name: trackName, location: '', center, points: b.points, width: Number(b.width) || 8, lengthM, osmWays: [], source: '' }, dir === 'rev', frames, sectors);
+  if (verdict) return bad(`ghost leaves the track (${verdict})`, 422);
 
   const name = cleanName(b.name);
   const color = cleanColor(b.color);
