@@ -158,7 +158,7 @@ kbd {
 
 /* Tabs: segmented, the picked one is a white block. */
 .pw-tabs { display: flex; gap: 4px; }
-.pw-tabs > * { flex: 1; min-width: 0; height: 34px; display: grid; place-items: center; padding: 0 8px; font-family: var(--ui); font-weight: 700; font-size: 14.5px; letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; background: var(--panel); color: var(--muted); border-radius: 3px; }
+.pw-tabs > * { flex: 1; min-width: 0; height: 34px; display: flex; align-items: center; justify-content: center; gap: 4px; padding: 0 8px; font-family: var(--ui); font-weight: 700; font-size: 14.5px; letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; background: var(--panel); color: var(--muted); border-radius: 3px; }
 .pw-tabs > *:hover { color: var(--text); }
 .pw-tabs > .on, .pw-tabs > [aria-pressed='true'], .pw-tabs > [aria-selected='true'] { background: var(--text); color: var(--carbon); }
 /* A quieter variant for settings rows (time of day, controls): underline instead of a block. */
