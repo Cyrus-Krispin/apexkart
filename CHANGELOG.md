@@ -6,6 +6,24 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+### Added
+- **Choose how you drive**, in the pre-race briefing or the pause menu:
+  - **Simple**: the kart accelerates by itself, so you only brake and steer. No drifting. Hold
+    brake once you've stopped to back away from a wall.
+  - **Classic**: the controls so far, with throttle, brake and drift.
+  - **Tilt**, on phones and tablets: hold the phone sideways and steer by tilting it like a steering
+    wheel. Hold the right side of the screen to brake. **Recentre** sets straight ahead.
+
+### Changed
+- Simple is the new default (Tilt on phones that support it). Pick Classic to keep throttle and drift.
+- On phones, Simple has bigger steer buttons and a single brake button for your right thumb.
+- The control hints no longer cover the track. The briefing lists them in its side panel, and in the
+  race a small hint at the bottom fades after a few seconds.
+
+### Fixed
+- On phones, pressing just beside an on-screen button no longer highlights it and stops the other
+  buttons responding. A thumb can also slide from one button to the next.
+
 ## [0.11.0] - 2026-10-20
 
 ### Changed

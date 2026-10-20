@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { TrackModel } from './track';
 import { buildTrackScene, type TrackScene } from './trackMesh';
 import { buildKart, KartPhysics, type KartVisual } from './kart';
-import { Input } from './input';
+import { availableSchemes, controlsPref, Input, saveControlsPref, SCHEME_LABEL, type ControlScheme } from './input';
+import type { TiltFailure } from './tilt';
 import { KartAudio } from './audio';
 import { Atmosphere, resolveTime, saveTimePref, timePref, type TimePref } from './atmosphere';
 import { awardMedal, earnedMedal, MEDAL_NAME, MEDALS, medalFor, targets } from './medals';
@@ -125,6 +126,8 @@ export class Race {
   private board: BoardResponse | null = null;
   private boardTimer = 0;
   private hintShown = false;
+  private hintPending = false; // controls changed in the pause menu: show the hint again on resume
+  private portrait = matchMedia('(orientation: portrait)');
   private throttle = 0;
   private nextSyncAt = 0;
   private minimap!: { bg: HTMLCanvasElement; map: (x: number, z: number) => [number, number] };
@@ -150,9 +153,10 @@ export class Race {
     this.hud = new Hud(this.root, { trackName: opts.track.name, dirLabel: rot.label, dirIcon: rot.icon, color: opts.driver.color }, (a) => this.action(a));
     this.hud.setVisible(false);
     this.hud.best(this.pb?.ms ?? null);
+    this.input = new Input(this.hud.touch, controlsPref(), (why) => this.tiltFailed(why));
+    this.hud.setControls(this.input.scheme);
     this.syncToggles();
 
-    this.input = new Input(this.hud.touch);
     this.phys = new KartPhysics(this.track);
     this.kart = buildKart(opts.driver.color, { number: 7 });
     this.scene.add(this.kart.root);
@@ -167,7 +171,10 @@ export class Race {
       pb: this.pb?.ms ?? null,
       time: this.timeSetting,
       liveNow: resolveTime('live', opts.track.center).time,
+      controls: this.input.scheme,
+      schemes: availableSchemes(),
       onTime: (t) => this.setTime(t),
+      onControls: (s) => this.setControls(s),
       onStart: () => this.begin(),
       onBack: () => opts.onExit(),
     });
@@ -347,6 +354,7 @@ export class Race {
   private begin() {
     this.audio.start();
     this.hud.setVisible(true);
+    if (this.input.scheme === 'tilt') this.goSideways();
     this.resetToGrid();
     if (this.rival) this.hud.banner(`Chasing ${this.rival.name} · ${formatMs(this.rival.ms)}`, 'info', 3);
   }
@@ -387,7 +395,55 @@ export class Race {
       this.rebuildWorld();
     }
     if (a === 'time') this.setTime(({ live: 'day', day: 'night', night: 'live' } as const)[this.timeSetting], true);
+    if (a === 'controls') {
+      const all = availableSchemes();
+      this.setControls(all[(all.indexOf(this.input.scheme) + 1) % all.length]);
+    }
+    if (a === 'recentre') {
+      this.input.tilt.recentre();
+      this.hud.toast('Steering recentred');
+    }
     this.syncToggles();
+  }
+
+  /** From the briefing or the pause menu, so inside a tap: picking Tilt can ask for motion access. */
+  private setControls(s: ControlScheme, save = true, note?: string) {
+    if (s === this.input.scheme) return;
+    this.input.setScheme(s);
+    if (save) saveControlsPref(s);
+    if (s === 'tilt' && this.state !== 'intro') this.goSideways();
+    this.hud.setControls(s);
+    this.intro.setControls(s, note);
+    if (this.state === 'paused') this.hintPending = true;
+    else if (this.state !== 'intro') this.hud.hint(true, 4000);
+    this.syncToggles();
+  }
+
+  /** Tilt couldn't start: drive with Simple's buttons instead, and say why. */
+  private tiltFailed(why: TiltFailure) {
+    const msg =
+      why === 'gesture'
+        ? 'Tilt needs a tap to switch on: pick it in the pause menu'
+        : why === 'denied'
+          ? 'No motion access, so tilt steering is off'
+          : "This device doesn't report tilt";
+    // Only a missing tap is worth retrying next time; otherwise Simple becomes the default here.
+    this.setControls('simple', why !== 'gesture', `${msg}. Using Simple.`);
+    this.hud.toast(`${msg} · using Simple controls`, 'warn');
+  }
+
+  /** Tilt: start the sensor and go full screen in landscape where the browser allows it (Android). */
+  private goSideways() {
+    this.input.tilt.start();
+    document.documentElement
+      .requestFullscreen?.()
+      .then(() => (screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> }).lock?.('landscape'))
+      .catch(() => {}); // no luck (iOS, or no tap to ask from): the "turn your phone" card covers it
+  }
+
+  /** Tilt plays sideways; in portrait the race waits under a "turn your phone" card. */
+  private needsTurn() {
+    return this.input.scheme === 'tilt' && this.state !== 'intro' && this.portrait.matches;
   }
 
   private setTime(t: TimePref, toast = false) {
@@ -416,7 +472,7 @@ export class Race {
     const q = this.qualitySetting === 'auto' ? `Auto · ${this.pipeline.quality}` : this.qualitySetting;
     const night = this.atmos?.time === 'night';
     const time = this.timeSetting === 'live' ? `Live · ${night ? 'Night' : 'Day'}` : night ? 'Night' : 'Day';
-    this.hud.toggles({ muted: this.audio.muted, ghosts: this.showGhosts, cam: CAMS[this.camMode].label, quality: q, style: this.style === 'stylised' ? 'Stylised' : 'Satellite', night, time });
+    this.hud.toggles({ controls: SCHEME_LABEL[this.input.scheme], muted: this.audio.muted, ghosts: this.showGhosts, cam: CAMS[this.camMode].label, quality: q, style: this.style === 'stylised' ? 'Stylised' : 'Satellite', night, time });
   }
 
   private resetToGrid() {
@@ -433,13 +489,14 @@ export class Race {
     this.lapNo = 0;
     this.invalid = false;
     this.hintShown = false;
+    this.hintPending = false;
     this.trackScene.lights.forEach((m) => (m.emissiveIntensity = 0));
     this.hud.lights(0);
     this.hud.lap(null);
     this.hud.lapTime(0, false);
     this.hud.delta(null);
     this.hud.sectors([], [], -1, 0);
-    this.hud.coach(true);
+    this.hud.hint(true);
     this.snapCamera();
   }
 
@@ -459,9 +516,12 @@ export class Race {
         rank: mine?.rank ?? null,
         total: this.board?.total ?? 0,
       });
-    } else if (!pause && this.state === 'paused') {
+    } else if (!pause && this.state === 'paused' && !this.needsTurn()) {
       this.state = this.prevState;
       this.hud.pause(false);
+      this.input.tilt.recentre(); // Tilt: however the phone is held when you resume is straight ahead
+      if (this.hintPending) this.hud.hint(true, 4000);
+      this.hintPending = false;
     }
   }
 
@@ -489,7 +549,11 @@ export class Race {
       ['Escape', 'p', 'c', 'm', 'g', 'r'].forEach((k) => this.input.consume(k));
     }
 
-    if (this.state === 'grid' || this.state === 'racing') {
+    const turn = this.needsTurn();
+    this.hud.turnPhone(turn);
+    if (turn && this.state === 'racing') this.togglePause(true);
+
+    if ((this.state === 'grid' || this.state === 'racing') && !turn) {
       this.acc += dt;
       while (this.acc >= STEP) {
         this.prev.x = this.phys.x;
@@ -543,8 +607,10 @@ export class Race {
         this.hud.lights(null);
         this.audio.beep(true);
         this.hud.banner('Go', 'go', 1.1);
-        this.hud.coach(true, 6000);
+        this.hud.hint(true, 4000);
+        this.input.tilt.recentre(); // Tilt: straight ahead is how the phone is held at lights out
       }
+      // Held on the grid: no throttle (Simple and Tilt would otherwise drive off) and no brake (reverse).
       c.throttle = c.brake = 0;
     }
     this.simT += dt;
@@ -1129,6 +1195,7 @@ export class Race {
     this.intro.dispose();
     this.hud.dispose();
     this.input.dispose();
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); // Tilt went full screen; the map shouldn't stay locked sideways
     this.audio.dispose();
     this.atmos.dispose();
     disposeTree(this.scene);
