@@ -184,6 +184,12 @@ export function floodlit(root: THREE.Object3D) {
   });
 }
 
+/** The textures the floodlight patch samples (the baked pools), for uploading before they're needed. */
+export function floodTextures(): THREE.Texture[] {
+  const t = state.uniforms.akFloodMap.value;
+  return t ? [t] : [];
+}
+
 function glowTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = 64;
@@ -350,6 +356,38 @@ export class Floodlights {
         if (l) u.akFloodDir.value[k].copy(l.dir);
       }
     });
+  }
+
+  /** Hand the real lights straight to the poles nearest (x, z), with no cross-fade (warm-up views). */
+  snap(x: number, z: number) {
+    // The first pass releases slots, the second assigns and lights them.
+    this.update(x, z, 1);
+    this.update(x, z, 1);
+  }
+
+  /**
+   * Open the shadow-casting floodlight over a circle of radius r around (cx, cz) for one warm-up
+   * frame, so every kind of shadow caster compiles its depth shader. Returns the undo.
+   */
+  wideShadow(cx: number, cz: number, r: number): () => void {
+    const l = this.shadow?.light;
+    if (!l) return () => {};
+    const cam = l.shadow.camera;
+    const was = { angle: l.angle, distance: l.distance, far: cam.far, pos: l.position.clone(), aim: l.target.position.clone() };
+    const h = Math.max(40, r * 0.25);
+    l.position.set(cx, h, cz);
+    l.target.position.set(cx, 0, cz);
+    l.target.updateMatrixWorld();
+    l.angle = Math.min(1.45, Math.atan2(r, h));
+    l.distance = 0; // the shadow camera keeps its own far plane
+    cam.far = Math.hypot(r, h) + 20;
+    return () => {
+      l.angle = was.angle;
+      l.distance = was.distance;
+      cam.far = was.far;
+      l.position.copy(was.pos);
+      l.target.position.copy(was.aim);
+    };
   }
 
   dispose() {

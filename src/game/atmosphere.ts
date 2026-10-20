@@ -183,6 +183,46 @@ export class Atmosphere {
     if (this.time === 'night') this.flood.update(x, z, dt);
   }
 
+  /** Jump straight to (x, z): shadow box and floodlights, no cross-fade (warm-up views and back). */
+  snap(x: number, z: number) {
+    this.update(x, z, 0);
+    if (this.time === 'night') this.flood.snap(x, z);
+  }
+
+  /**
+   * Open the shadow camera (the sun by day, the shadow floodlight at night) over a circle of
+   * radius r for one warm-up frame, so every kind of caster compiles its shadow shader whatever
+   * the warm-up views happen to frame. Returns the undo; the next update() re-centres it.
+   */
+  wideShadows(cx: number, cz: number, r: number): () => void {
+    if (this.time === 'night') return this.flood.wideShadow(cx, cz, r);
+    const sc = this.key.shadow.camera;
+    const was = [sc.left, sc.right, sc.top, sc.bottom, sc.near, sc.far] as const;
+    const d = this.dir;
+    const back = r + 60;
+    this.key.position.set(cx + d.x * back, d.y * back, cz + d.z * back);
+    this.key.target.position.set(cx, 0, cz);
+    sc.left = sc.bottom = -r;
+    sc.right = sc.top = r;
+    sc.near = 1;
+    sc.far = back + r + 60;
+    sc.updateProjectionMatrix();
+    return () => {
+      [sc.left, sc.right, sc.top, sc.bottom, sc.near, sc.far] = was;
+      sc.updateProjectionMatrix();
+    };
+  }
+
+  /**
+   * Night: put another tier's light rig up for a moment (to compile its shaders), and return
+   * the undo. The caller must undo before the next frame renders.
+   */
+  useRig(q: Quality): () => void {
+    if (this.time !== 'night' || q === this.quality) return () => {};
+    this.flood.setRig(RIGS[q]);
+    return () => this.flood.setRig(RIGS[this.quality]);
+  }
+
   dispose() {
     this.flood.dispose();
     this.headlight.dispose();

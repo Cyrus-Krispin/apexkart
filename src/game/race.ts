@@ -7,8 +7,8 @@ import { KartAudio } from './audio';
 import { Atmosphere, resolveTime, type TimePref } from './atmosphere';
 import { awardMedal, earnedMedal, MEDAL_NAME, MEDALS, medalFor, targets } from './medals';
 import { recordDailyLap } from '../shared/daily';
-import { floodlit } from './floodlights';
-import { RenderPipeline, autoQuality, initialQuality, type Quality, type QualitySetting } from './render';
+import { floodlit, floodTextures } from './floodlights';
+import { RenderPipeline, autoQuality, initialQuality, texturesUnder, type Quality, type QualitySetting } from './render';
 import { buildWorld, fetchLiveEnv, type World } from './world';
 import { Hud, type SectorColor } from './hud';
 import { RaceIntro } from '../ui/intro';
@@ -75,6 +75,10 @@ export class Race {
   private rival: { name: string; ms: number; beaten: boolean } | null = null;
   private liveEnvAsked = false;
   private frameTimes: number[] = [];
+  /** Work to run inside the next frame, just before its own render (warm-up views). */
+  private frameJobs: (() => void)[] = [];
+  private warmGen = 0; // a newer warm-up (time of day, quality, a rebuilt world) supersedes an older one
+  private warming = false;
   private camera = new THREE.PerspectiveCamera(62, 1, 0.1, 5000);
   private track: TrackModel;
   private trackScene!: TrackScene;
@@ -248,20 +252,178 @@ export class Race {
     }
     this.atmos.setWorld([world.group], world.lamps, world.emissive);
     (this.ground.material as THREE.MeshLambertMaterial).color.copy(world.groundColor);
-    await this.warmShaders();
+    await this.warmUp();
   }
 
-  /** Compile every shader now (including a ghost kart's) so nothing compiles mid-lap. */
-  private async warmShaders() {
-    const warm = this.ghostVisual(this.opts.driver.color).root;
-    warm.position.set(this.phys.x, -50, this.phys.z);
-    this.scene.add(warm);
+  // ------------------------------------------------------------------ warm-up
+
+  /**
+   * Settle everything before START, behind the grid screen: compile every shader for the real render
+   * target (and, at night, the next tier down's light rig), upload every texture, then render a view
+   * from above with the shadow cameras opened over the whole world and a dozen chase views round the
+   * lap, so shadow shaders, buffers, ghosts and the skid mesh are all on the GPU before lights out.
+   * START unlocks when it's done. A newer warm-up (new time of day, quality or world) replaces it.
+   */
+  private async warmUp() {
+    const gen = ++this.warmGen;
+    const live = () => !this.disposed && gen === this.warmGen;
+    this.warming = true;
+    // Your best lap's ghost (same template as any ghost of your colour) rides along for the warm-up.
+    const ghost = this.ghostVisual(this.opts.driver.color).root;
+    ghost.visible = false;
+    this.scene.add(ghost);
     try {
-      await this.pipeline.compile(this.scene);
-    } catch {
-      /* best effort */
+      this.intro.stage('Warming up', 0.9);
+      await this.compileScene();
+      if (!live()) return;
+      await this.warmLowerRig();
+      if (!live()) return;
+      this.intro.stage('Warming up', 0.93);
+      await this.uploadTextures(texturesUnder(this.scene).concat(floodTextures()), live);
+      if (!live()) return;
+      await this.inFrame(() => this.renderOverview());
+      const n = 12;
+      for (let k = 0; k < n && live(); k++) {
+        await this.inFrame(() => this.renderPose(((k + 0.5) / n) * this.track.length, ghost));
+        this.intro.stage('Warming up', 0.94 + (0.05 * (k + 1)) / n);
+      }
+    } catch (e) {
+      console.warn('warm-up', e); // best effort: anything missed compiles on first sight, as before
+    } finally {
+      this.scene.remove(ghost);
+      if (gen === this.warmGen && !this.disposed) {
+        this.warming = false;
+        this.intro.stage('Ready', 1);
+      }
     }
-    this.scene.remove(warm);
+  }
+
+  /** Compile every material in the scene for the target it renders into (bounded, in case the driver never answers). */
+  private compileScene(q?: Quality) {
+    return Promise.race([this.pipeline.compile(this.scene, this.scene, q).catch(() => {}), new Promise((r) => setTimeout(r, 15000))]);
+  }
+
+  /** Night: compile the next tier down's light rig too (it has fewer lights, so different shaders). */
+  private async warmLowerRig() {
+    const q = this.pipeline.quality;
+    const lower: Quality | null = q === 'high' ? 'medium' : q === 'medium' ? 'low' : null;
+    if (this.atmos.time !== 'night' || !lower) return;
+    const undo = this.atmos.useRig(lower);
+    let done: Promise<unknown>;
+    try {
+      done = this.compileScene(lower); // the programs are created synchronously in here
+    } finally {
+      undo(); // before any frame renders with the wrong rig
+      this.atmos.snap(this.phys.x, this.phys.z);
+    }
+    await done;
+  }
+
+  /** Upload textures a few milliseconds' worth per frame (the ground canvas alone is tens of MB with mipmaps). */
+  private async uploadTextures(list: THREE.Texture[], live: () => boolean) {
+    let i = 0;
+    while (i < list.length && live())
+      await this.inFrame(() => {
+        const t0 = performance.now();
+        do this.pipeline.renderer.initTexture(list[i++]);
+        while (i < list.length && performance.now() - t0 < 8);
+      });
+  }
+
+  /** Run `fn` inside the next frame, just before that frame's own render, so the screen never shows what it drew. */
+  private inFrame<T>(fn: () => T): Promise<T> {
+    return new Promise((resolve, reject) =>
+      this.frameJobs.push(() => {
+        try {
+          resolve(fn());
+        } catch (e) {
+          reject(e);
+        }
+      }),
+    );
+  }
+
+  private runFrameJobs() {
+    if (!this.frameJobs.length) return;
+    const jobs = this.frameJobs;
+    this.frameJobs = [];
+    for (const j of jobs) j();
+  }
+
+  /** Swap the camera for a warm-up view, run `draw`, and put the camera back. */
+  private withCamera<T>(set: (cam: THREE.PerspectiveCamera) => void, draw: () => T): T {
+    const cam = this.camera;
+    const pos = cam.position.clone();
+    const rot = cam.quaternion.clone();
+    const { fov, far } = cam;
+    try {
+      set(cam);
+      cam.updateProjectionMatrix();
+      cam.updateMatrixWorld();
+      return draw();
+    } finally {
+      cam.position.copy(pos);
+      cam.quaternion.copy(rot);
+      cam.fov = fov;
+      cam.far = far;
+      cam.updateProjectionMatrix();
+      cam.updateMatrixWorld();
+    }
+  }
+
+  /** One frame from high above with the shadow cameras opened over everything: every mesh and every
+   *  kind of shadow caster draws once, whatever the chase views happen to frame. */
+  private renderOverview() {
+    const box = new THREE.Box3().setFromObject(this.trackScene.group);
+    if (this.world) box.union(new THREE.Box3().setFromObject(this.world.group));
+    const c = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const r = Math.max(size.x, size.z) / 2 + 10;
+    const undo = this.atmos.wideShadows(c.x, c.z, r);
+    try {
+      this.withCamera(
+        (cam) => {
+          cam.fov = 70;
+          const h = r / Math.tan(THREE.MathUtils.degToRad(35)) + 20;
+          cam.far = Math.max(cam.far, h + 100);
+          cam.position.set(c.x, h, c.z + h * 0.02);
+          cam.lookAt(c.x, 0, c.z);
+        },
+        () => this.pipeline.render(),
+      );
+    } finally {
+      undo();
+      this.atmos.snap(this.phys.x, this.phys.z);
+    }
+  }
+
+  /** One chase view s metres round the lap, with every ghost in shot so their buffers upload too. */
+  private renderPose(s: number, ghost: THREE.Object3D) {
+    const t = this.track;
+    const a = t.at(s);
+    const fx = Math.sin(a.heading);
+    const fz = Math.cos(a.heading);
+    const shown = [ghost, ...this.ghosts.map((g) => g.visual?.root).filter((o): o is THREE.Group => !!o)];
+    shown.forEach((o, k) => {
+      o.visible = true;
+      o.position.set(a.x + fx * (5 + k * 2.5), 0, a.z + fz * (5 + k * 2.5));
+      o.rotation.y = a.heading;
+    });
+    this.atmos.snap(a.x, a.z);
+    try {
+      return this.withCamera(
+        (cam) => {
+          cam.fov = 64;
+          cam.position.set(a.x - fx * 5.2, 2.3, a.z - fz * 5.2);
+          cam.lookAt(a.x + fx * 3.5, 0.7, a.z + fz * 3.5);
+        },
+        () => this.pipeline.render(),
+      );
+    } finally {
+      // The frame's own render follows straight after: back to where the kart really is.
+      shown.forEach((o) => (o.visible = false));
+      this.atmos.snap(this.phys.x, this.phys.z);
+    }
   }
 
   private buildMinimap() {
@@ -410,7 +572,11 @@ export class Race {
     const look = resolveTime(t, this.opts.track.center);
     const flip = look.time !== this.atmos.time;
     this.atmos.set(look.time, look.sun); // every material recompiles
-    if (this.world && flip) this.warmShaders(); // light counts changed
+    if (this.world && flip) {
+      // Light counts changed: new shaders. On the grid, START waits for them.
+      if (this.state === 'intro') this.intro.hold(look.time === 'night' ? 'Switching on the floodlights' : 'Bringing the daylight');
+      this.warmUp();
+    }
     if (toast) {
       const night = look.time === 'night';
       this.hud.toast(t === 'live' ? `Live · ${night ? 'night at the circuit, floodlights on' : 'the sun where it is right now'}` : night ? 'Night session · floodlights on' : 'Day session');
@@ -422,7 +588,8 @@ export class Race {
     if (q === this.pipeline.quality) return;
     this.pipeline.setQuality(q);
     this.atmos.setQuality(q);
-    if (this.world && this.atmos.time === 'night') this.warmShaders();
+    // Each tier renders into a different target (and at night has its own lights): new shaders.
+    if (this.world) this.warmUp();
   }
 
   private syncToggles() {
@@ -520,13 +687,14 @@ export class Race {
     }
     this.boardTimer -= dt;
     if (this.boardTimer <= 0) this.refreshBoard();
+    this.runFrameJobs(); // warm-up views: drawn before the frame's own render, so never on screen
     this.render(dt);
     this.adaptQuality(dt);
   };
 
   /** In auto mode, step quality down if the frame rate can't keep up. */
   private adaptQuality(dt: number) {
-    if (this.qualitySetting !== 'auto' || this.state !== 'racing' || document.hidden) return;
+    if (this.qualitySetting !== 'auto' || this.state !== 'racing' || document.hidden || this.warming) return; // warm-up frames draw twice
     this.frameTimes.push(dt);
     if (this.frameTimes.length < 120) return;
     const sorted = [...this.frameTimes].sort((a, b) => a - b);

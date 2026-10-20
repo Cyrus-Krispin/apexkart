@@ -21,6 +21,21 @@ export function autoQuality(): Quality {
   return coarse || innerWidth < 700 ? 'low' : 'medium';
 }
 
+/** Every texture the materials under `root` sample, for uploading before anything draws them. */
+export function texturesUnder(root: THREE.Object3D): THREE.Texture[] {
+  const out = new Set<THREE.Texture>();
+  root.traverse((o) => {
+    const m = (o as THREE.Mesh).material;
+    if (!m) return;
+    for (const mat of Array.isArray(m) ? m : [m]) {
+      for (const v of Object.values(mat)) if ((v as THREE.Texture | null)?.isTexture) out.add(v as THREE.Texture);
+      const u = (mat as THREE.ShaderMaterial).uniforms;
+      if (u) for (const x of Object.values(u)) if ((x?.value as THREE.Texture | null)?.isTexture) out.add(x.value as THREE.Texture);
+    }
+  });
+  return [...out].filter((t) => !(t as THREE.Texture & { isRenderTargetTexture?: boolean }).isRenderTargetTexture);
+}
+
 export interface BloomSettings {
   strength: number;
   radius: number;
@@ -43,7 +58,9 @@ export class RenderPipeline {
   ) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', stencil: false });
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // r186 dropped PCFSoft and swaps in PCF at the first shadow render. Shaders compiled before that
+    // carry the old type in their cache key and compile again later, so name PCF from the start.
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
     this.quality = quality;
