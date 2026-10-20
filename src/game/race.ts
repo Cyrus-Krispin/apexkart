@@ -109,6 +109,8 @@ export class Race {
   private sectorColors: SectorColor[] = [];
   private invalid = false;
   private wrongWayT = 0;
+  private grassT = 0; // seconds on the grass in a row
+  private stuckShown = false; // the Reset button is up
   private ghostRec: GhostFrame[] = [];
   private splits: number[] = [];
   private sessionBest: number | null = null;
@@ -375,6 +377,7 @@ export class Race {
       this.resetToGrid();
     }
     if (a === 'exit') this.opts.onExit();
+    if (a === 'reset' && this.state === 'racing') this.recover();
     if (a === 'pause') this.togglePause();
     if (a === 'mute') this.audio.toggleMute();
     if (a === 'ghosts') this.toggleGhosts();
@@ -455,6 +458,7 @@ export class Race {
     this.hud.delta(null);
     this.hud.sectors([], [], -1, 0);
     this.hud.hint(true);
+    this.showStuck(false);
     this.snapCamera();
   }
 
@@ -605,7 +609,7 @@ export class Race {
     if (rejoin && rejoin.gain > 0) {
       if (this.opts.mode) {
         this.lastS = prev;
-        this.recover(rejoin.from * (L / this.track.n) - 2, 'Cut the track');
+        this.recover(this.phys.goodS - 2, 'Cut the track');
         this.hud.banner('Cut the track · back where you left it', 'warn', 2.2);
         return;
       }
@@ -652,6 +656,15 @@ export class Race {
     this.wrongWayT = along < -3 && !rejoin ? this.wrongWayT + dt : 0;
     if (this.wrongWayT > 1.2) this.hud.banner('Wrong way', 'warn', 0.4);
 
+    // Stuck (wedged with the pedals pressed), lost on the grass, or facing the wrong way: offer
+    // Reset (R on a keyboard) until the kart is properly under way again. In a multiplayer race a
+    // kart wedged for 5 s is reset for you.
+    const p = this.phys;
+    this.grassT = p.surface === 'grass' ? this.grassT + dt : 0;
+    if (!this.autopilot && (p.stuckT > 1.2 || this.grassT > 4 || this.wrongWayT > 2.5)) this.showStuck(true);
+    else if (this.stuckShown && (this.autopilot || (p.speed > 6 && p.surface !== 'grass' && this.wrongWayT === 0))) this.showStuck(false);
+    if (this.opts.mode && !this.autopilot && p.stuckT > 5) this.recover();
+
     if (this.lapStart === null) return;
 
     const lapT = (this.simT - this.lapStart) * 1000;
@@ -689,10 +702,18 @@ export class Race {
     this.hud.banner(`Lap invalid · ${reason}`, 'warn', 2);
   }
 
-  private recover(at = this.phys.s, reason = 'Reset') {
+  /** Back on the track: a little behind the last place the kart was on its own asphalt. */
+  private recover(at = this.phys.goodS - 2, reason = 'Reset') {
     this.phys.place(at);
     this.invalidate(reason, true);
+    this.grassT = this.wrongWayT = 0;
+    this.showStuck(false);
     this.snapCamera();
+  }
+
+  private showStuck(show: boolean) {
+    this.stuckShown = show;
+    this.hud.stuck(show);
   }
 
   private finishLap(tCross: number) {

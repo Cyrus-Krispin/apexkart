@@ -212,6 +212,10 @@ export class KartPhysics {
   impact: Impact | null = null;
   /** Touching a wall this step. */
   onWall = false;
+  /** Seconds spent below walking pace with the pedals pressed (wedged, or beached). */
+  stuckT = 0;
+  /** The last lap position on this part of the lap's own asphalt: where a reset puts the kart. */
+  goodS = 0;
   private gripLossT = 0; // after a hard wall hit: the tyres take a moment to bite again
 
   readonly vmax = 27; // ~97 km/h
@@ -231,6 +235,8 @@ export class KartPhysics {
     this.impact = null;
     this.onWall = false;
     this.gripLossT = 0;
+    this.stuckT = 0;
+    this.goodS = this.s;
     this.placed++;
   }
 
@@ -321,9 +327,13 @@ export class KartPhysics {
     this.wheelSpin += (vf / 0.135) * dt;
 
     // Track surface + barriers.
+    const prevS = this.s;
     const near = this.locate();
     const hw = this.track.halfWidth;
     const wall = hw + this.track.runoff;
+    let ds = Math.abs(near.s - prevS);
+    ds = Math.min(ds, this.track.length - ds);
+    if (near.dist <= hw && !this.rejoin && ds < 3) this.goodS = near.s;
     this.surface = near.dist <= hw ? 'track' : near.dist <= hw + KERB ? 'kerb' : 'grass';
     this.bump *= Math.exp(-dt * 6);
     this.impact = null;
@@ -372,5 +382,6 @@ export class KartPhysics {
       }
     }
     this.onWall = touching;
+    this.stuckT = this.speed < 2 && (c.throttle > 0 || c.brake > 0) ? this.stuckT + dt : 0;
   }
 }
