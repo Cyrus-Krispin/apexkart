@@ -2,17 +2,16 @@
 // "Race now", country filters and a rail of circuits, and a sheet for the selected track.
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { centroid, discoverTracks, layoutsNear, loopToTrack, trackFromId, waysFromId, type LatLon, type TrackData } from '../track/osm';
+import { centroid, trackFromId, waysFromId, type LatLon, type TrackData } from '../track/osm';
 import { cellOf, unpackPoints, venueKey, type VenueCell } from '../shared/venues';
 import { dailyStreak, dailyTrack, dayOf, msLeftToday } from '../shared/daily';
 import { analyzeShape, type TrackShape } from '../track/shape';
 import { ProfileMenu } from './profile';
 import { LayoutEditor } from './layoutEditor';
 import { api, type BoardResponse, type CommunityLayout, type DailyResponse, type Dir, type Driver, type FeedResponse } from '../net/api';
-import { localPB } from '../game/race';
+import { localPB, timePref } from '../game/prefs';
 import { earnedMedal, targets } from '../game/medals';
 import { isNightAt } from '../game/sun';
-import { timePref } from '../game/atmosphere';
 import { coreBounds, distM, loadWorld, localeCountry, type Venue, type WorldIndex } from './world';
 import * as V from './atlasViews';
 
@@ -98,7 +97,6 @@ export class Atlas {
   private feed: FeedResponse | null = null;
   private board: BoardResponse | null = null;
   private el: Record<string, HTMLElement> = {};
-  private scanning: AbortController | null = null;
   private profile: ProfileMenu;
   private toastTimer = 0;
   private aliases = new Map<string, string>(); // OSM id -> community layout id
@@ -122,6 +120,8 @@ export class Atlas {
   private hits: V.SearchHit[] = [];
   private hitSel = 0;
   private cells = new Map<string, Promise<VenueCell | null>>(); // pre-stitched layouts per 5° cell
+  private hiddenSig = ''; // the known tracks hiddenVenues was worked out for
+  private dotStyle: ('on' | 'dim' | 'off')[] = []; // what each venue dot currently shows
   private sheetRecord: number | undefined; // the record the open sheet's medal targets use
   private daily: DailyResponse | null = null;
   private feedFails = 0;
@@ -180,7 +180,7 @@ export class Atlas {
     this.drawOutlines();
   }
 
-  /** "List tracks here" once you've zoomed into a region; "Scan" where the index has nothing. */
+  /** "List tracks here" once you've zoomed into a region that has some. */
   private updateHere() {
     const z = this.map.getZoom();
     const btn = this.el.here;
@@ -188,9 +188,8 @@ export class Atlas {
     const b = this.map.getBounds();
     const n = this.inBounds(b).length;
     const viewing = this.filter.kind === 'view' && this.filter.bounds.pad(0.05).contains(b);
-    btn.dataset.mode = n ? 'list' : 'scan';
-    btn.querySelector('span')!.textContent = n ? `List ${n} track${n > 1 ? 's' : ''} here` : 'Scan this area for tracks';
-    btn.classList.toggle('show', (n > 0 && !viewing) || (!n && z >= 11 && !this.scanning));
+    btn.querySelector('span')!.textContent = `List ${n} track${n > 1 ? 's' : ''} here`;
+    btn.classList.toggle('show', n > 0 && !viewing);
   }
 
   private drawOutlines() {
@@ -242,6 +241,8 @@ export class Atlas {
 
   private drawDots() {
     const w = this.world!;
+    this.dotStyle = [];
+    this.hiddenSig = '';
     this.dots = w.venues.map((v) => {
       const m = L.circleMarker(v.at, { renderer: this.dotRenderer, radius: 3, stroke: true, weight: 1, color: '#0b0b0a', fillColor: '#ff4d00', fillOpacity: 0.9, bubblingMouseEvents: false });
       m.on('click', () => this.openVenue(v));
@@ -261,19 +262,29 @@ export class Atlas {
   private refreshVenues() {
     if (!this.world) return;
     const known = [...this.tracks.values()];
-    this.hiddenVenues.clear();
-    for (const v of this.world.venues) if (known.some((t) => Math.abs(t.center[0] - v.at[0]) < 0.02 && distM(t.center, v.at) < SAME_VENUE_M)) this.hiddenVenues.add(v.i);
+    // Which dots a known track covers only changes when tracks do (phones feel this loop).
+    const sig = known.map((t) => t.id).join();
+    if (sig !== this.hiddenSig) {
+      this.hiddenSig = sig;
+      this.hiddenVenues.clear();
+      for (const v of this.world.venues) if (known.some((t) => Math.abs(t.center[0] - v.at[0]) < 0.02 && distM(t.center, v.at) < SAME_VENUE_M)) this.hiddenVenues.add(v.i);
+    }
     const cc = this.filter.kind === 'country' ? this.filter.cc : null;
     for (const v of this.world.venues) {
       const m = this.dots[v.i];
-      if (this.hiddenVenues.has(v.i)) {
-        m.remove();
+      if (this.hiddenVenues.has(v.i) || this.emptyVenues.has(v.i)) {
+        if (this.dotStyle[v.i] !== 'off') m.remove();
+        this.dotStyle[v.i] = 'off';
         continue;
       }
+      // Restyle only the dots whose look changes (a country filter dims the rest).
       const dim = cc !== null && v.cc !== cc;
-      const empty = this.emptyVenues.has(v.i);
-      m.setStyle({ fillColor: empty ? '#75716a' : '#ff4d00', fillOpacity: dim ? 0.16 : empty ? 0.6 : 0.9, opacity: dim ? 0.2 : 1 });
-      if (!this.map.hasLayer(m)) m.addTo(this.map);
+      const style = dim ? 'dim' : 'on';
+      const was = this.dotStyle[v.i];
+      if (was === style) continue;
+      if (was !== 'on' && was !== 'dim') m.addTo(this.map);
+      m.setStyle(dim ? { fillOpacity: 0.16, opacity: 0.2 } : { fillOpacity: 0.9, opacity: 1 });
+      this.dotStyle[v.i] = style;
     }
     // Known tracks pick up their country from the venue they replaced.
     for (const t of known) if (!t.country) t.country = this.nearestVenue(t.center, 3000)?.cc || undefined;
@@ -338,9 +349,10 @@ export class Atlas {
     return p;
   }
 
-  /** A venue's layouts: pre-stitched from the CDN, or (if it isn't baked yet) live from Overpass. */
+  /** A venue's layouts, pre-stitched and served from the CDN. Only baked venues are on the map. */
   private async venueLayouts(v: Venue): Promise<TrackData[]> {
     const cell = await this.venueCell(v);
+    if (!cell) throw new Error('offline');
     // The baker keys each venue by its dot; fall back to the nearest baked venue in the cell, so a
     // map index from an older bake still finds its layouts.
     let packed = cell?.[venueKey(v.at[0], v.at[1])];
@@ -361,9 +373,7 @@ export class Atlas {
         return { id, name, location: '', center: centroid(points), points, width, lengthM, osmWays: waysFromId(id) ?? [], source: 'OpenStreetMap', country: v.cc || undefined };
       });
     }
-    this.toast(`Loading ${v.name || 'this track'} from OpenStreetMap…`, 'busy');
-    const { loops, elements } = await layoutsNear(v.at, 500);
-    return loops.map((l) => ({ ...loopToTrack(l, elements, v.name || 'Unnamed kart track'), country: v.cc || undefined }));
+    return [];
   }
 
   /** A venue dot becomes a track: get its layouts and open the longest. */
@@ -381,7 +391,7 @@ export class Atlas {
         this.emptyVenues.add(v.i);
         this.refreshVenues();
         this.renderRail(true);
-        this.toast('No racing line is mapped at this venue yet. Try another dot.', 'warn');
+        this.toast('This track isn’t ready yet, so it’s off the map for now.', 'warn');
         return;
       }
       const fresh = found.filter((t) => !this.tracks.has(t.id));
@@ -392,7 +402,7 @@ export class Atlas {
       this.toast(found.length > 1 ? `${found.length} layouts at this venue` : '');
       this.open(found.sort((a, b) => b.lengthM - a.lengthM)[0].id);
     } catch {
-      this.toast('OpenStreetMap is busy. Try again in a few seconds.', 'warn');
+      this.toast('Couldn’t load this track. Check your connection and try again.', 'warn');
     } finally {
       if (this.loadingVenue === v.i) this.loadingVenue = null;
       this.focusVenue(null);
@@ -403,7 +413,7 @@ export class Atlas {
 
   private countryCounts(): Map<string, number> {
     const n = new Map<string, number>();
-    for (const v of this.world?.venues ?? []) if (v.cc && !this.hiddenVenues.has(v.i)) n.set(v.cc, (n.get(v.cc) ?? 0) + 1);
+    for (const v of this.world?.venues ?? []) if (v.cc && !this.hiddenVenues.has(v.i) && !this.emptyVenues.has(v.i)) n.set(v.cc, (n.get(v.cc) ?? 0) + 1);
     for (const t of this.tracks.values()) if (t.country) n.set(t.country, (n.get(t.country) ?? 0) + 1);
     return n;
   }
@@ -433,7 +443,7 @@ export class Atlas {
   /** What the rail lists for a filter. */
   private railFor(f: Filter): RailItem[] {
     const tracks = [...this.tracks.values()];
-    const venues = (this.world?.venues ?? []).filter((v) => !this.hiddenVenues.has(v.i));
+    const venues = (this.world?.venues ?? []).filter((v) => !this.hiddenVenues.has(v.i) && !this.emptyVenues.has(v.i));
     const byName = (a: Venue, b: Venue) => (a.name ? 0 : 1) - (b.name ? 0 : 1) || a.name.localeCompare(b.name);
     const T = (t: TrackData): RailItem => ({ kind: 'track', t });
     const Vn = (v: Venue): RailItem => ({ kind: 'venue', v });
@@ -774,7 +784,6 @@ export class Atlas {
     });
 
     this.el.here.addEventListener('click', () => {
-      if (this.el.here.dataset.mode === 'scan') return this.scan();
       if (location.hash.startsWith('#/c/')) history.replaceState(null, '', location.pathname + location.search);
       this.applyFilter({ kind: 'view', bounds: this.map.getBounds() }, false);
     });
@@ -831,11 +840,11 @@ export class Atlas {
       q.length < 2
         ? []
         : (this.world?.venues ?? [])
-            .filter((v) => v.name && !this.hiddenVenues.has(v.i) && has(v.name))
+            .filter((v) => v.name && !this.hiddenVenues.has(v.i) && !this.emptyVenues.has(v.i) && has(v.name))
             .sort((a, b) => rank(a.name) - rank(b.name))
             .slice(0, 5)
             .map((v) => ({ key: `v:${v.i}`, title: v.name, sub: `${this.countryName(v.cc)} · ${V.coords(v.at)}`, tag: v.cc || '—' }));
-    const place = [{ key: 'place', title: `Find “${q}” on the map`, sub: 'Any city or region · scans it for tracks', tag: '↵' }];
+    const place = [{ key: 'place', title: `Find “${q}” on the map`, sub: 'Any city or region', tag: '↵' }];
     this.hits = [...trackHits, ...countryHits, ...venueHits, ...place];
     this.hitSel = 0;
     this.el.searchPop.innerHTML = V.searchResults(
@@ -882,14 +891,9 @@ export class Atlas {
       const bounds = L.latLngBounds([bb[0], bb[2]], [bb[1], bb[3]]);
       this.map.flyToBounds(bounds, { maxZoom: 11, duration: 1.4, ...this.mapPadding() });
       this.map.once('moveend', () => {
-        const here = this.inBounds(this.map.getBounds().pad(0.3));
-        if (here.length) {
-          if (location.hash.startsWith('#/c/')) history.replaceState(null, '', location.pathname + location.search);
-          this.applyFilter({ kind: 'view', bounds: this.map.getBounds().pad(0.3) }, false);
-        } else {
-          if (this.map.getZoom() < 10) this.map.setZoom(10, { animate: false });
-          this.scan(hit.display_name.split(',')[0]);
-        }
+        if (!this.inBounds(this.map.getBounds().pad(0.3)).length) return this.toast(`No kart tracks near ${hit.display_name.split(',')[0]} yet.`, 'warn');
+        if (location.hash.startsWith('#/c/')) history.replaceState(null, '', location.pathname + location.search);
+        this.applyFilter({ kind: 'view', bounds: this.map.getBounds().pad(0.3) }, false);
       });
     } catch {
       this.toast('Search is unavailable right now', 'warn');
@@ -1020,37 +1024,6 @@ export class Atlas {
       this.renderBoard();
     } catch {
       if (this.el.dBoard) this.el.dBoard.innerHTML = '<p class="empty">Leaderboard is offline. You can still race; laps are saved on this device.</p>';
-    }
-  }
-
-  private async scan(placeName?: string) {
-    const b = this.map.getBounds();
-    this.scanning?.abort();
-    this.scanning = new AbortController();
-    this.el.here.classList.remove('show');
-    this.toast(placeName ? `Scanning ${placeName} for kart tracks…` : 'Scanning this area for kart tracks…', 'busy');
-    try {
-      const found = await discoverTracks([b.getSouth(), b.getWest(), b.getNorth(), b.getEast()], this.scanning.signal);
-      const fresh = found.filter((t) => !this.tracks.has(t.id));
-      fresh.forEach((t) => this.addTrack(t));
-      this.persist();
-      this.refreshVenues();
-      this.nameTracks(fresh);
-      this.drawOutlines();
-      if (!found.length) this.toast('No kart tracks mapped here yet. Try another area.', 'warn');
-      else {
-        this.toast(`Found ${found.length} track${found.length > 1 ? 's' : ''}${fresh.length && fresh.length < found.length ? `, ${fresh.length} new` : ''}`);
-        if (found.length === 1) this.open(found[0].id);
-        else {
-          this.map.flyToBounds(L.latLngBounds(found.map((t) => t.center)).pad(0.3), { maxZoom: 13, ...this.mapPadding() });
-          this.applyFilter({ kind: 'view', bounds: L.latLngBounds(found.map((t) => t.center)).pad(0.3) }, false);
-        }
-      }
-    } catch (e) {
-      if ((e as Error).name !== 'AbortError') this.toast('OpenStreetMap is busy. Try again in a few seconds.', 'warn');
-    } finally {
-      this.scanning = null;
-      this.onView();
     }
   }
 

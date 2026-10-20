@@ -24,6 +24,31 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 - On phones, pressing just beside an on-screen button no longer highlights it and stops the other
   buttons responding. A thumb can also slide from one button to the next.
 
+## [0.13.1] - 2026-10-20
+
+### Added
+- **7 more tracks on the world map**, in Togo, Venezuela, South Africa, Zambia and the USA. Every
+  venue in the world has now been checked: the map shows all 4,901 that have a layout you can race.
+
+## [0.13.0] - 2026-10-20
+
+### Changed
+- **The home screen opens much faster, especially on phones.** It now downloads about a quarter of
+  what it used to. The 3D race engine loads quietly in the background while you browse the map, so
+  races still start straight away.
+- Switching country filters and scrolling the circuit rail are several times quicker on a busy map.
+
+## [0.12.0] - 2026-10-20
+
+### Changed
+- **Every track on the world map is ready to race.** The map now shows only tracks whose layouts
+  are already built (4,894 of them), so every dot opens instantly. Venues that couldn't be built
+  are left off for now and come back as they're added.
+- Searching for a place flies the map there and lists the tracks around it.
+
+### Removed
+- **Scan this area for tracks.** Every raceable venue is already on the map.
+
 ## [0.11.0] - 2026-10-20
 
 ### Changed
@@ -228,7 +253,10 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 ### Fixed
 - Leaderboard and lap submission on the live site.
 
-[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.13.1...HEAD
+[0.13.1]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.13.0...v0.13.1
+[0.13.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.12.0...v0.13.0
+[0.12.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.9.0...v0.10.0

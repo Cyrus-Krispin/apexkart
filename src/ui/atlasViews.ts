@@ -2,12 +2,23 @@
 // the country list and the live panel. Pure functions of their inputs; atlas.ts wires them up.
 import type { LatLon, TrackData } from '../track/osm';
 import type { TrackShape } from '../track/shape';
-import { trackArt, rotationLabel } from './trackArt';
+import { trackArt, rotationLabel, type ArtOptions } from './trackArt';
 import { escapeHtml as esc, formatMs, timeAgo, type BoardResponse, type DailyResponse, type Dir, type FeedItem } from '../net/api';
 import type { Venue } from './world';
 import { MEDALS, MEDAL_NAME, type Medal, type Targets } from '../game/medals';
 
 export { esc, formatMs };
+
+/** Track drawings are pure functions of the shape and options, and the rail redraws often: cache them. */
+const artCache = new WeakMap<TrackShape, Map<string, string>>();
+function art(shape: TrackShape, o: ArtOptions): string {
+  let byOpts = artCache.get(shape);
+  if (!byOpts) artCache.set(shape, (byOpts = new Map()));
+  const key = JSON.stringify(o);
+  let svg = byOpts.get(key);
+  if (!svg) byOpts.set(key, (svg = trackArt(shape, o)));
+  return svg;
+}
 
 export const SEARCH_ICON = `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.5 15.5L21 21" stroke="currentColor" stroke-width="2" stroke-linecap="square"/></svg>`;
 const PLAY = `<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 2.5v11L13.5 8z" fill="currentColor"/></svg>`;
@@ -32,7 +43,7 @@ export function nowTile(p: { t: TrackData; shape: TrackShape; dir: Dir; why: str
   if (!p) return `<button class="now" data-now disabled><span class="now-top"><span class="label">Race now</span></span><span class="now-name display">Loading…</span></button>`;
   const rot = rotationLabel(p.shape, p.dir === 'rev');
   return `<button class="now" data-now title="Race ${esc(p.t.name)} (Enter)">
-    <span class="now-art" aria-hidden="true">${trackArt(p.shape, { w: 220, h: 150, pad: 12, reverse: p.dir === 'rev', arrows: false })}</span>
+    <span class="now-art" aria-hidden="true">${art(p.shape, { w: 220, h: 150, pad: 12, reverse: p.dir === 'rev', arrows: false })}</span>
     <span class="now-top"><span class="label">Race now</span><kbd>↵</kbd></span>
     <span class="now-name display">${esc(p.t.name)}</span>
     <span class="now-why">${esc(p.why)}<span class="now-rot"> · ${rot.icon} ${rot.label.toLowerCase()}</span>${p.pb ? ` · PB <b class="mono">${formatMs(p.pb)}</b>` : ''}</span>
@@ -81,7 +92,7 @@ export function trackCard(d: TrackCard): string {
       : '';
   return `<article class="card" data-card="t:${esc(t.id)}">
     <button class="card-hit" data-track="${esc(t.id)}" aria-label="${esc(t.name)}, ${km(t.lengthM)} km"></button>
-    <div class="card-art graph-paper">${trackArt(shape, { w: 228, h: 64, pad: 8, arrows: false })}</div>
+    <div class="card-art graph-paper">${art(shape, { w: 228, h: 64, pad: 8, arrows: false })}</div>
     <div class="card-body">
       <div class="card-top">${t.country ? `<span class="cc mono">${esc(t.country)}</span>` : ''}<span class="label">${tag}</span>${d.medal ? medalDot(d.medal) : ''}${badge}</div>
       <h3 class="display">${esc(t.name)}</h3>
@@ -126,7 +137,7 @@ export function dailyCard(d: DailyCard): string {
   const you = mine ? `You P${mine.rank}` : 'No lap yet';
   return `<article class="card daily" data-card="t:${esc(t.id)}">
     <button class="card-hit" data-track="${esc(t.id)}" aria-label="Daily circuit: ${esc(t.name)}"></button>
-    <div class="card-art daily-art">${trackArt(d.shape, { w: 248, h: 64, pad: 9, arrows: false })}
+    <div class="card-art daily-art">${art(d.shape, { w: 248, h: 64, pad: 9, arrows: false })}
       <span class="daily-tag label">Daily circuit</span><span class="daily-left mono">${left(d.msLeft)}</span></div>
     <div class="card-body">
       <h3 class="display">${esc(t.name)}</h3>
@@ -223,7 +234,7 @@ export function sheet(d: SheetData): string {
     </div>
     <h1 class="display d-name">${esc(t.name)}</h1>
     <p class="d-loc">${t.country ? `<span class="cc mono">${esc(t.country)}</span>` : ''}<span>${esc(t.location || d.countryName || coords(t.center))}</span><span class="d-now${d.nightNow ? ' night' : ''}" title="Race on Live time of day to match it">${d.nightNow ? MOON : SUN}${d.nightNow ? 'Night' : 'Day'} there now</span></p>
-    <div class="d-art graph-paper">${trackArt(shape, { w: 400, h: 200, pad: 24, reverse: rev, turns: true, arrows: true, road: true })}</div>
+    <div class="d-art graph-paper">${art(shape, { w: 400, h: 200, pad: 24, reverse: rev, turns: true, arrows: true, road: true })}</div>
     <dl class="d-stats">
       <div><dt class="label">Length</dt><dd class="mono">${km(t.lengthM)}<small>km</small></dd></div>
       <div><dt class="label">Turns</dt><dd class="mono">${shape.corners.length}</dd></div>
@@ -235,7 +246,7 @@ export function sheet(d: SheetData): string {
             .sort((a, b) => b.lengthM - a.lengthM)
             .map(
               (s) =>
-                `<button class="sib${s.id === t.id ? ' on' : ''}" data-track="${esc(s.id)}" aria-pressed="${s.id === t.id}" aria-label="${esc(s.name)}, ${km(s.lengthM)} km">${trackArt(d.shapeOf(s), { w: 72, h: 44, pad: 5, arrows: false })}<span class="mono">${km(s.lengthM)}</span></button>`,
+                `<button class="sib${s.id === t.id ? ' on' : ''}" data-track="${esc(s.id)}" aria-pressed="${s.id === t.id}" aria-label="${esc(s.name)}, ${km(s.lengthM)} km">${art(d.shapeOf(s), { w: 72, h: 44, pad: 5, arrows: false })}<span class="mono">${km(s.lengthM)}</span></button>`,
             )
             .join('')}</div></div>`
         : ''

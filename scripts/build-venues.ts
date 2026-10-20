@@ -1,18 +1,18 @@
 // Bakes public/tracks/venues/<cell>.json: every world-map venue's kart layouts, pre-stitched from
 // OpenStreetMap, so the home screen opens any track from the CDN instead of querying Overpass at
-// click time. It also rewrites public/tracks/world.json to keep only venues with a raceable loop,
+// click time. It also writes public/tracks/world.json (from scripts/data/venues-all.json) with only venues that have a raceable loop,
 // each dot moved onto its longest layout.
 //
 // A few hundred Overpass queries (one per 5° cell that has venues, covering only the ground around
 // each venue), so it runs on CI: .github/workflows/bake-venues.yml. Partial runs (--cells, or a run
 // that times out) add cell files; `npm run venues -- --merge-only` then rebuilds world.json from
-// every cell file present, offline.
+// every cell file present, offline (add --baked-only to leave out venues in cells not baked yet).
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { findLoops, loopToTrack, centroid } from '../src/track/osm.ts';
 import { cellOf, packPoints, unpackPoints, venueKey, type PackedLayout, type VenueCell } from '../src/shared/venues.ts';
 
 const UA = 'ApexKart venue baker (github.com/Cyrus-Krispin/apexkart)';
-const MIRRORS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
+const MIRRORS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
 const KART_M: [number, number] = [150, 2100]; // a loop outside this is a pit lane or the big circuit next door
 const KARTISH = /kart|go.?kart|carting/i;
 const NEAR_DEG = 0.008; // raceways within ~900 m of a venue belong to it
@@ -20,7 +20,9 @@ const MAX_LAYOUTS = 3;
 const WORKERS = 2; // Overpass gives each address two slots
 
 type Venue = [number, number, string, string];
-const world: { venues: Venue[]; countries: Record<string, unknown>; source: string; built: string } = JSON.parse(readFileSync('public/tracks/world.json', 'utf8'));
+// Every venue (scripts/build-world.ts writes it); the public world.json is derived from it plus the cells.
+const ALL = 'scripts/data/venues-all.json';
+const world: { venues: Venue[]; countries: Record<string, unknown>; source: string; built: string } = JSON.parse(readFileSync(ALL, 'utf8'));
 const onlyCells = process.argv.includes('--cells') ? new Set(process.argv[process.argv.indexOf('--cells') + 1].split(',')) : null;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -107,6 +109,7 @@ function layoutsAt(v: Venue, ways: { el: any; bb: [number, number, number, numbe
  * dropped. Cells not baked yet keep their venues as they are.
  */
 if (process.argv.includes('--merge-only')) {
+  const bakedOnly = process.argv.includes('--baked-only');
   const files = new Map<string, VenueCell>();
   for (const f of readdirSync('public/tracks/venues')) if (f.endsWith('.json')) files.set(f.slice(0, -5), JSON.parse(readFileSync(`public/tracks/venues/${f}`, 'utf8')));
   const out: Venue[] = [];
@@ -119,7 +122,9 @@ if (process.argv.includes('--merge-only')) {
   for (const [c, venues] of byCellAll) {
     const file = files.get(c);
     if (!file) {
-      out.push(...venues);
+      // --baked-only: the map shows only venues whose layouts are ready.
+      if (bakedOnly) dropped += venues.length;
+      else out.push(...venues);
       continue;
     }
     const used = new Set<Venue>();
@@ -142,7 +147,7 @@ if (process.argv.includes('--merge-only')) {
   }
   out.sort((a, b) => a[2].localeCompare(b[2]) || a[0] - b[0]);
   writeFileSync('public/tracks/world.json', JSON.stringify({ ...world, venues: out, built: new Date().toISOString().slice(0, 10) }));
-  console.log(`${out.length} venues (${dropped} without a raceable loop dropped); ${files.size} baked cells, ${byCellAll.size - files.size} not baked yet`);
+  console.log(`${out.length} venues (${dropped} dropped: no raceable loop${bakedOnly ? ', or not baked yet' : ''}); ${files.size} baked cells, ${byCellAll.size - files.size} not baked yet`);
   process.exit(0);
 }
 
