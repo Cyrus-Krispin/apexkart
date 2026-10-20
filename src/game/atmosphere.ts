@@ -1,6 +1,6 @@
 // Time of day: sky, fog, sun or moon, fill light and, at night, the circuit floodlights.
 import * as THREE from 'three';
-import { driftSky, makeNightSky, makeSky, NIGHT_SKY, SKY } from './sky';
+import { driftSky, makeNightSky, makeSky, NIGHT_SKY, setHillsLook, SKY } from './sky';
 import { Floodlights, floodlit, type Lamp, type RigOptions } from './floodlights';
 import type { Quality, RenderPipeline } from './render';
 import { sunPosition } from './sun';
@@ -124,6 +124,7 @@ export class Atmosphere {
     }
     this.sky = night ? makeNightSky(this.dir) : makeSky(this.dir);
     this.scene.add(this.sky);
+    setHillsLook(night, this.dir);
     this.scene.fog = new THREE.Fog(p.fog[0], p.fog[1], p.fog[2]);
     this.hemi.color.set(p.hemi[0]);
     this.hemi.groundColor.set(p.hemi[1]);

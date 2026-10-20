@@ -8,6 +8,7 @@ import { GroundPainter, GROUND } from './ground';
 import { buildBuildings } from './buildings';
 import { buildTrees } from './trees';
 import { buildTrackside } from './trackside';
+import { buildHorizon } from './horizon';
 import { trackExtent, type Extent } from './common';
 import type { Lamp } from '../floodlights';
 
@@ -108,6 +109,7 @@ export async function buildWorld(o: {
   o.onStage('Finishing touches', 0.88);
   await frame();
   group.add(painter.toMesh(o.aniso));
+  group.add(buildHorizon(track, data.id));
   const groundColor = new THREE.Color(GROUND.grass);
   // Not "Ready" yet: the race warms its shaders, textures and lights up before START unlocks.
   return { group, groundColor, emissive: side.emissive, lamps: side.lamps, stats: { buildings: b.footprints.length, trees: trees.count, env: !!env } };

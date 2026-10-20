@@ -266,3 +266,22 @@ export function driftSky(sky: THREE.Mesh, dt: number) {
   const u = (sky.material as THREE.ShaderMaterial).uniforms.time;
   u.value = (u.value + dt) % 100000;
 }
+
+// ---------------------------------------------------------------- distant hills (world/horizon.ts)
+
+/** The far hills' and tree lines' colours, shared uniforms set with the time of day (no recompile). */
+export const HILLS = {
+  hillNear: { value: new THREE.Color() }, // the tree line
+  hillFar: { value: new THREE.Color() }, // the hills behind it
+  hillHaze: { value: new THREE.Color() }, // what both melt into: the horizon (fog) colour
+  hillSun: { value: new THREE.Vector3(0, 1, 0) },
+  hillLit: { value: 0 }, // how much the sun shades their facets (none at night)
+};
+
+export function setHillsLook(night: boolean, sunDir: THREE.Vector3) {
+  HILLS.hillNear.value.set(night ? '#05070a' : '#3f6339');
+  HILLS.hillFar.value.set(night ? '#0a0d15' : '#668a80');
+  HILLS.hillHaze.value.copy(night ? NIGHT_SKY.horizon : SKY.horizon);
+  HILLS.hillSun.value.copy(sunDir).normalize();
+  HILLS.hillLit.value = night ? 0 : 1;
+}
