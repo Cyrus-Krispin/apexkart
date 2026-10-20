@@ -145,7 +145,8 @@ export class Hud {
       <div class="h-turn" data-el="turn" hidden>
         <svg viewBox="0 0 48 48" width="60" height="60"><rect x="15" y="5" width="18" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M21 38h6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
         <h2 class="display">Turn your phone sideways</h2>
-        <p>Tilt steering works with the phone held like a steering wheel. The race waits.</p>
+        <p>Races run in landscape, and this one waits for you. If the screen doesn't turn, switch off rotation lock.</p>
+        <button class="btn ghost-btn" data-act="exit">Back to circuits</button>
       </div>`;
     container.appendChild(this.root);
     this.root.querySelectorAll<HTMLElement>('[data-el]').forEach((e) => (this.$[e.dataset.el!] = e));

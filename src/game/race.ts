@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { TrackModel } from './track';
 import { buildTrackScene, type TrackScene } from './trackMesh';
 import { buildKart, KartPhysics, type KartVisual } from './kart';
-import { availableSchemes, controlsPref, Input, saveControlsPref, SCHEME_LABEL, type ControlScheme } from './input';
+import { availableSchemes, controlsPref, Input, phone, saveControlsPref, SCHEME_LABEL, type ControlScheme } from './input';
 import type { TiltFailure } from './tilt';
 import { KartAudio } from './audio';
 import { Atmosphere, resolveTime, saveTimePref, timePref, type TimePref } from './atmosphere';
@@ -354,7 +354,7 @@ export class Race {
   private begin() {
     this.audio.start();
     this.hud.setVisible(true);
-    if (this.input.scheme === 'tilt') this.goSideways();
+    this.goSideways();
     this.resetToGrid();
     if (this.rival) this.hud.banner(`Chasing ${this.rival.name} · ${formatMs(this.rival.ms)}`, 'info', 3);
   }
@@ -432,18 +432,24 @@ export class Race {
     this.hud.toast(`${msg} · using Simple controls`, 'warn');
   }
 
-  /** Tilt: start the sensor and go full screen in landscape where the browser allows it (Android). */
+  /** Phones race sideways (and Tilt always does): full screen in landscape where the browser allows it (Android). Call it inside a tap. */
   private goSideways() {
-    this.input.tilt.start();
+    if (this.input.scheme === 'tilt') this.input.tilt.start();
+    if (!this.sideways()) return;
     document.documentElement
       .requestFullscreen?.()
       .then(() => (screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> }).lock?.('landscape'))
       .catch(() => {}); // no luck (iOS, or no tap to ask from): the "turn your phone" card covers it
   }
 
-  /** Tilt plays sideways; in portrait the race waits under a "turn your phone" card. */
+  /** Races on a phone, and Tilt on any device, are played in landscape. */
+  private sideways() {
+    return this.input.scheme === 'tilt' || phone();
+  }
+
+  /** Held upright where the race must be sideways: it waits under a "turn your phone" card. */
   private needsTurn() {
-    return this.input.scheme === 'tilt' && this.state !== 'intro' && this.portrait.matches;
+    return this.state !== 'intro' && this.portrait.matches && this.sideways();
   }
 
   private setTime(t: TimePref, toast = false) {
@@ -1195,7 +1201,7 @@ export class Race {
     this.intro.dispose();
     this.hud.dispose();
     this.input.dispose();
-    if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); // Tilt went full screen; the map shouldn't stay locked sideways
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); // the race went full screen; the map shouldn't stay locked sideways
     this.audio.dispose();
     this.atmos.dispose();
     disposeTree(this.scene);

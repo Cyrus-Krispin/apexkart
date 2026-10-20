@@ -15,7 +15,9 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
     wheel. Hold the right side of the screen to brake. **Recentre** sets straight ahead.
 
 ### Changed
-- Simple is the new default (Tilt on phones that support it). Pick Classic to keep throttle and drift.
+- Simple is the new default. Pick Classic to keep throttle and drift.
+- On phones, races are played sideways. The game goes full screen in landscape when you start (on
+  Android), or asks you to turn the phone and waits until you do.
 - On phones, Simple has bigger steer buttons and a single brake button for your right thumb.
 - The control hints no longer cover the track. The briefing lists them in its side panel, and in the
   race a small hint at the bottom fades after a few seconds.

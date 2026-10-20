@@ -13,16 +13,20 @@ export function touchDevice(): boolean {
   return matchMedia('(hover: none) and (pointer: coarse)').matches;
 }
 
+/** A phone rather than a tablet: a touch screen whose short side is phone-sized. Phones race in landscape. */
+export function phone(): boolean {
+  return touchDevice() && Math.min(screen.width, screen.height) < 600;
+}
+
 /** Schemes this device offers, in toggle order. Tilt needs a touch screen with a motion sensor API. */
 export function availableSchemes(): ControlScheme[] {
   return touchDevice() && 'DeviceOrientationEvent' in window ? ['tilt', 'simple', 'classic'] : ['simple', 'classic'];
 }
 
-/** The player's scheme; first time, Tilt where the device has it, otherwise Simple. */
+/** The player's scheme; Simple until they pick another (Tilt is opt-in: it asks for motion access and turns the phone sideways). */
 export function controlsPref(): ControlScheme {
-  const all = availableSchemes();
   const v = localStorage.getItem('ak:controls') as ControlScheme | null;
-  return v && all.includes(v) ? v : all[0];
+  return v && availableSchemes().includes(v) ? v : 'simple';
 }
 
 export function saveControlsPref(s: ControlScheme) {

@@ -216,6 +216,7 @@
 .h-turn svg { color: var(--signal); animation: turnphone 2s var(--ease) infinite; }
 .h-turn h2 { margin: 6px 0 0; font-size: 28px; color: var(--night-text); }
 .h-turn p { margin: 0; max-width: 300px; font-size: 14px; color: var(--night-muted); }
+.h-turn .btn { margin-top: 10px; }
 @keyframes turnphone { 0%, 25% { transform: rotate(0); } 60%, 100% { transform: rotate(-90deg); } }
 
 .h-touch { display: none; }
@@ -256,7 +257,7 @@
   .h-banner.go span { font-size: 42px; padding: 4px 40px; }
   .h-banner.info span { font-size: 16px; }
 }
-/* Phones: narrow in portrait, short when held sideways (Tilt) */
+/* Phones: narrow in portrait, short when held sideways (every race on a phone) */
 @media (max-width: 640px), (pointer: coarse) and (max-height: 520px) {
   .h-timing { transform: scale(0.66); transform-origin: top left; top: 10px; left: 10px; }
   .h-tower { display: none; }
@@ -275,6 +276,22 @@
   .hp-stats { grid-template-columns: 1fr 1fr; }
   .hp-stats div:nth-child(3) { border-left: 0; padding-left: 0; }
   .hp-toggles { grid-template-columns: 1fr; }
+}
+/* A phone held sideways: the speed sits low in the middle, on the road between the thumbs, clear of the kart */
+@media (pointer: coarse) and (max-height: 520px) {
+  .h-speed, .hud[data-controls='tilt'] .h-speed { bottom: 10px; }
+  /* Briefing in two columns: the circuit and controls on the left, start on the right */
+  .intro-ov { grid-template-columns: minmax(0, 1fr) minmax(250px, 38%); grid-template-rows: minmax(0, 1fr); background: rgba(17, 17, 16, 0.94); }
+  .io-panel { padding: 12px 18px; }
+  .io-back { margin-bottom: 8px; }
+  .io-name { font-size: 26px; margin: 4px 0 6px; }
+  .io-meta { margin-bottom: 12px; }
+  .io-art, .io-rules, .io-driver { order: 1; } /* controls first, under the name */
+  .io-art { max-width: 320px; }
+  .io-foot { grid-column: 2; grid-row: 1; flex-direction: column; justify-content: flex-end; align-items: stretch; gap: 14px; padding: 14px 16px; border-top: 0; border-left: 1px solid var(--night-rule); }
+  .io-foot-r { flex-direction: column; align-items: stretch; gap: 12px; }
+  .io-time { flex-wrap: wrap; justify-content: space-between; gap: 6px; }
+  .io-go { justify-content: center; }
 }
 @media (max-height: 520px) {
   .h-pause { overflow-y: auto; place-items: start center; padding: 14px 0; }
