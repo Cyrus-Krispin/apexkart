@@ -247,7 +247,13 @@ export class Floodlights {
   }
 
   setLamps(lamps: Lamp[]) {
+    // A rebuilt world (surroundings arriving late) usually has the same poles: keep the bake.
+    const same =
+      lamps.length > 0 &&
+      lamps.length === this.lamps.length &&
+      lamps.every((l, i) => l.pos.distanceToSquared(this.lamps[i].pos) < 1e-4 && l.dir.distanceToSquared(this.lamps[i].dir) < 1e-6);
     this.lamps = lamps;
+    if (same) return;
     this.d2 = new Float32Array(lamps.length);
     this.order = lamps.map((_, i) => i);
     this.baked?.dispose();

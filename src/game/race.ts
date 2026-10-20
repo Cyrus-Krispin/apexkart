@@ -84,6 +84,9 @@ export class Race {
   private frameJobs: (() => void)[] = [];
   private warmGen = 0; // a newer warm-up (time of day, quality, a rebuilt world) supersedes an older one
   private warming = false;
+  /** Surroundings that arrived mid-race, waiting for a calm moment to go in (the lap count then). */
+  private envPending: { lap: number } | null = null;
+  private rebuilding = false;
   private camera = new THREE.PerspectiveCamera(62, 1, 0.1, 5000);
   private track: TrackModel;
   private trackScene!: TrackScene;
@@ -227,39 +230,94 @@ export class Race {
     this.rebuildWorld();
   }
 
-  private async rebuildWorld() {
+  /**
+   * Build the world around the circuit. The first build goes straight in. A later one (surroundings
+   * arriving from Overpass once the race is under way, on circuits without baked ones) waits for a
+   * calm moment: at once on the grid screen (START waits for it) or while paused, otherwise the next
+   * time you complete a lap, under the lap card. Never mid-corner.
+   */
+  rebuildWorld() {
+    if (!this.world) return void this.buildAndSwap();
+    this.envPending = { lap: this.lapNo };
+    this.maybeRebuild();
+  }
+
+  /** Each frame: start a waiting rebuild if now is a calm moment. */
+  private maybeRebuild() {
+    const p = this.envPending;
+    if (!p || this.rebuilding) return;
+    p.lap = Math.min(p.lap, this.lapNo); // a restart reset the lap count
+    if (this.state === 'intro' || this.state === 'paused' || (this.state === 'racing' && this.lapNo > Math.max(1, p.lap))) {
+      this.envPending = null;
+      this.buildAndSwap();
+    }
+  }
+
+  private async buildAndSwap() {
     const build = ++this.worldBuild;
-    if (this.world) {
-      this.scene.remove(this.world.group);
-      disposeTree(this.world.group);
-      this.world = null;
+    const first = !this.world;
+    const onGrid = this.state === 'intro';
+    const hold = !first && onGrid;
+    let warmed = false;
+    if (hold) {
+      this.intro.hold('Adding the surroundings');
+      this.warmGen++; // a warm-up still running must not unlock START under the rebuild
+      this.warming = true;
     }
-    const world = await buildWorld({
-      track: this.track,
-      data: this.opts.track,
-      quality: this.pipeline.quality,
-      aniso: this.pipeline.renderer.capabilities.getMaxAnisotropy(),
-      onStage: (label, f) => this.intro.stage(label, f),
-      isDisposed: () => this.disposed,
-    }).catch((e) => {
-      console.error(e);
-      this.intro.failed();
-      return null;
-    });
-    if (world && (this.disposed || build !== this.worldBuild)) disposeTree(world.group); // a newer build replaced it
-    if (!world || this.disposed || build !== this.worldBuild) return;
-    this.world = world;
-    this.scene.add(world.group);
-    // No baked surroundings: race now, and add the buildings and trees when Overpass delivers them.
-    if (!world.stats.env && !this.liveEnvAsked) {
-      this.liveEnvAsked = true;
-      fetchLiveEnv(this.opts.track).then((got) => {
-        if (got && !this.disposed) this.rebuildWorld();
+    this.rebuilding = true;
+    const stale = () => this.disposed || build !== this.worldBuild;
+    try {
+      const world = await buildWorld({
+        track: this.track,
+        data: this.opts.track,
+        quality: this.pipeline.quality,
+        aniso: this.pipeline.renderer.capabilities.getMaxAnisotropy(),
+        onStage: (label, f) => (first || onGrid) && this.intro.stage(label, f),
+        isDisposed: () => this.disposed,
+      }).catch((e) => {
+        console.error(e);
+        if (first) this.intro.failed();
+        return null;
       });
+      if (!world) return;
+      if (stale()) return disposeTree(world.group); // a newer build replaced it
+      floodlit(world.group);
+      if (!first) {
+        // Compile it against the live scene while the old world still holds its shaders: every program
+        // the two share (nearly all) is reused rather than rebuilt. Then upload its textures (the
+        // ground canvas alone is tens of MB with mipmaps) before anything draws it.
+        await Promise.race([this.pipeline.compile(world.group).catch(() => {}), new Promise((r) => setTimeout(r, 15000))]);
+        if (stale()) return disposeTree(world.group);
+        for (const t of texturesUnder(world.group)) this.pipeline.renderer.initTexture(t);
+      }
+      const old = this.world;
+      if (old) this.scene.remove(old.group);
+      this.world = world;
+      this.scene.add(world.group);
+      this.atmos.setWorld([world.group], world.lamps, world.emissive);
+      for (const t of floodTextures()) this.pipeline.renderer.initTexture(t);
+      (this.ground.material as THREE.MeshLambertMaterial).color.copy(world.groundColor);
+      if (old) disposeTree(old.group); // only now: the shaders the new world shares stay alive
+      this.perf.quietUntil = performance.now() + 1500;
+      // No baked surroundings: race now, and add the buildings and trees when Overpass delivers them.
+      if (!world.stats.env && !this.liveEnvAsked) {
+        this.liveEnvAsked = true;
+        fetchLiveEnv(this.opts.track).then((got) => {
+          if (got && !this.disposed) this.rebuildWorld();
+        });
+      }
+      // On the grid screen, settle everything (again) before START.
+      if (first || this.state === 'intro') {
+        warmed = true;
+        await this.warmUp(hold ? 'Adding the surroundings' : undefined);
+      }
+    } finally {
+      this.rebuilding = false;
+      if (hold && !warmed && !stale()) {
+        this.warming = false;
+        this.intro.stage('Ready', 1); // the rebuild fell through: give START back
+      }
     }
-    this.atmos.setWorld([world.group], world.lamps, world.emissive);
-    (this.ground.material as THREE.MeshLambertMaterial).color.copy(world.groundColor);
-    await this.warmUp();
   }
 
   // ------------------------------------------------------------------ warm-up
@@ -271,7 +329,7 @@ export class Race {
    * lap, so shadow shaders, buffers, ghosts and the skid mesh are all on the GPU before lights out.
    * START unlocks when it's done. A newer warm-up (new time of day, quality or world) replaces it.
    */
-  private async warmUp() {
+  private async warmUp(label = 'Warming up') {
     const gen = ++this.warmGen;
     const live = () => !this.disposed && gen === this.warmGen;
     this.warming = true;
@@ -280,16 +338,16 @@ export class Race {
     ghost.visible = false;
     this.scene.add(ghost);
     try {
-      this.intro.stage('Warming up', 0.9);
+      this.intro.stage(label, 0.9);
       await this.compileScene();
       if (!live()) return;
       await this.warmLowerRig();
       if (!live()) return;
-      this.intro.stage('Warming up', 0.93);
+      this.intro.stage(label, 0.93);
       await this.uploadTextures(texturesUnder(this.scene).concat(floodTextures()), live);
       if (!live()) return;
       await this.inFrame(() => this.renderOverview());
-      const times = await this.tour(12, ghost, live, (f) => this.intro.stage('Warming up', 0.94 + 0.04 * f));
+      const times = await this.tour(12, ghost, live, (f) => this.intro.stage(label, 0.94 + 0.04 * f));
       if (!live()) return;
       await this.calibrate(times.slice(4), ghost, live); // the first views still pay first-draw costs
     } catch (e) {
@@ -323,6 +381,9 @@ export class Race {
     if (this.qualitySetting !== 'auto' || this.autoRec || !times.length || (this.state !== 'intro' && this.state !== 'grid')) return;
     let ms = median(times);
     let q = this.pipeline.quality;
+    // A second look before demoting, in case something else had the machine busy for a moment.
+    if (q === 'medium' && ms > 9) ms = Math.min(ms, median((await this.tour(6, ghost, live)).slice(1)));
+    if (!live()) return;
     if (q === 'medium' && ms > 9) {
       this.intro.stage('Tuning the graphics', 0.985);
       q = 'low';
@@ -630,8 +691,9 @@ export class Race {
     this.atmos.set(look.time, look.sun); // every material recompiles
     if (this.world && flip) {
       // Light counts changed: new shaders. On the grid, START waits for them.
-      if (this.state === 'intro') this.intro.hold(look.time === 'night' ? 'Switching on the floodlights' : 'Bringing the daylight');
-      this.warmUp();
+      const label = look.time === 'night' ? 'Switching on the floodlights' : 'Bringing the daylight';
+      if (this.state === 'intro') this.intro.hold(label);
+      this.warmUp(label);
     }
     if (toast) {
       const night = look.time === 'night';
@@ -759,6 +821,7 @@ export class Race {
     this.runFrameJobs(); // warm-up views: drawn before the frame's own render, so never on screen
     this.render(dt);
     this.adaptQuality(dt);
+    this.maybeRebuild();
   };
 
   /**
