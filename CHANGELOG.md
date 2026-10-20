@@ -6,6 +6,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-10-21
+
 ### Changed
 - **Kerbs sit where a real kart track has them**: on the inside of each corner from turn-in to just
   past the apex, on the outside of corner exits, and round the outside of hairpins. Kinks and
@@ -405,7 +407,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 ### Fixed
 - Leaderboard and lap submission on the live site.
 
-[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.19.0...v0.20.0
