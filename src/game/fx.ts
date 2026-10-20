@@ -461,7 +461,7 @@ export class KartFx {
       this.emit(6 + w, (rear ? 0.38 : 0.15) * speed, dt, SPECS.dust, x, 0.15, z, p.vx * 0.55, 0.5, p.vz * 0.55, 1.2);
     }
     g.grass = Math.max(g.grass, (grassWheels / 4) * clamp01(speed / 15));
-    g.kerb = Math.max(g.kerb, p.surface === 'kerb' ? clamp01(speed / 10) : 0);
+    g.kerb = Math.max(g.kerb, p.onKerb ? clamp01(speed / 10) : 0);
 
     // ---- the tyres: at the grip limit (read from the same bicycle model the physics uses), locked
     // under hard braking, spinning at the launch, or sliding after a hit.

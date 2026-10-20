@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { KERB, type Nearest, type Rejoin, type TrackModel } from './track';
+import { hasKerb } from './kerbs';
 
 export interface KartVisual {
   root: THREE.Group;
@@ -212,6 +213,8 @@ export class KartPhysics {
   impact: Impact | null = null;
   /** Touching a wall this step. */
   onWall = false;
+  /** On a painted kerb, not just the concrete apron's kerb-grip band: rumble, sound and buzz follow it. */
+  onKerb = false;
   /** Seconds spent below walking pace with the pedals pressed (wedged, or beached). */
   stuckT = 0;
   /** The last lap position on this part of the lap's own asphalt: where a reset puts the kart. */
@@ -233,7 +236,7 @@ export class KartPhysics {
     this.locate(); // s and offset right away, not at the next step
     this.rejoin = null;
     this.impact = null;
-    this.onWall = false;
+    this.onWall = this.onKerb = false;
     this.gripLossT = 0;
     this.stuckT = 0;
     this.goodS = this.s;
@@ -338,6 +341,7 @@ export class KartPhysics {
     // Asphalt is asphalt: another part of the lap's road grips like the road (where sections merge
     // or cross). Limits and the reset point still go by this part's own road.
     if (near.dist > hw && this.track.nearestOther(this.x, this.z, near.i, hw) >= 0) this.surface = 'track';
+    this.onKerb = this.surface === 'kerb' && hasKerb(this.track, near.i, near.offset > 0 ? 1 : -1);
     this.bump *= Math.exp(-dt * 6);
     this.impact = null;
     const touching = near.dist > wall;

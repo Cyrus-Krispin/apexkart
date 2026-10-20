@@ -1373,7 +1373,7 @@ export class Race {
     k.body.rotation.z += (THREE.MathUtils.clamp(p.yawRate * vf * 0.0028, -0.08, 0.08) - k.body.rotation.z) * Math.min(1, dt * 8);
     k.body.rotation.x += (THREE.MathUtils.clamp(-0.0035 * this.body.acc, -0.025, 0.04) - k.body.rotation.x) * Math.min(1, dt * 8);
     const stripe = Math.sin((Math.PI * p.s) / 0.8) > 0 ? 1 : -1;
-    k.body.position.y = p.surface === 'grass' ? Math.sin(this.simT * 40) * 0.012 : p.surface === 'kerb' ? stripe * 0.014 * Math.min(1, p.speed / 10) : 0;
+    k.body.position.y = p.surface === 'grass' ? Math.sin(this.simT * 40) * 0.012 : p.onKerb ? stripe * 0.014 * Math.min(1, p.speed / 10) : 0;
     for (const f of k.frontPivots) f.rotation.y = -p.steerAngle * 1.2;
     for (const w of k.wheels) w.rotation.x = p.wheelSpin;
     const live = this.state === 'grid' || this.state === 'racing';
