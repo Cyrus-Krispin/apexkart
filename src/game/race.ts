@@ -4,6 +4,8 @@ import { buildTrackScene, type TrackScene } from './trackMesh';
 import { buildKart, KartPhysics, type KartVisual } from './kart';
 import { availableSchemes, controlsPref, Input, saveControlsPref, SCHEME_LABEL, type ControlScheme } from './input';
 import { KartAudio } from './audio';
+import { KartFx, type FxFrame } from './fx';
+import { Haptics } from './haptics';
 import { Atmosphere, resolveTime, type TimePref } from './atmosphere';
 import { awardMedal, earnedMedal, MEDAL_NAME, MEDALS, medalFor, targets } from './medals';
 import { recordDailyLap } from '../shared/daily';
@@ -94,6 +96,8 @@ export class Race {
   private phys: KartPhysics;
   private input: Input;
   private audio = new KartAudio();
+  private haptics = new Haptics(() => this.audio.muted);
+  private pbSeen: number | null | undefined; // a new personal best buzzes once
   private ground!: THREE.Mesh;
   private root: HTMLElement;
   private hud: Hud;
@@ -134,6 +138,8 @@ export class Race {
   private camMode = 0;
   private camPos = new THREE.Vector3();
   private camLook = new THREE.Vector3();
+  /** Camera springs: impact kick offset (o, v), FOV punch, smooth shake, corner look-ahead, eased FOV. */
+  private cam = { ox: 0, oy: 0, oz: 0, vx: 0, vy: 0, vz: 0, fov: 0, fovV: 0, shake: 0, side: 0, fovBase: 62 };
   private showGhosts = localStorage.getItem('ak:ghosts') !== '0';
   private ghosts: Ghost[] = [];
   private board: BoardResponse | null = null;
@@ -143,7 +149,7 @@ export class Race {
   private throttle = 0;
   private nextSyncAt = 0;
   private minimap!: { bg: HTMLCanvasElement; map: (x: number, z: number) => [number, number] };
-  private skid!: { geo: THREE.BufferGeometry; pos: Float32Array; i: number; prev: (THREE.Vector3 | null)[] };
+  private fx!: KartFx; // particles and skid marks
   autopilot = false;
 
   constructor(private opts: RaceOptions) {
@@ -198,7 +204,7 @@ export class Race {
     if (opts.rival && !opts.mode) this.loadRival(opts.rival);
     this.syncToggles();
     this.buildMinimap();
-    this.buildSkids();
+    this.fx = new KartFx(this.scene, this.track);
     this.resetToGrid();
     this.state = 'intro';
     this.applyMode();
@@ -615,21 +621,6 @@ export class Race {
     this.minimap = { bg, map };
   }
 
-  private buildSkids() {
-    const max = 3000;
-    const pos = new Float32Array(max * 6 * 3);
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    geo.setDrawRange(0, 0);
-    const mesh = new THREE.Mesh(
-      geo,
-      new THREE.MeshBasicMaterial({ color: 0x050505, transparent: true, opacity: 0.42, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }),
-    );
-    mesh.frustumCulled = false;
-    this.scene.add(mesh);
-    this.skid = { geo, pos, i: 0, prev: [null, null] };
-  }
-
   // ------------------------------------------------------------------ flow
 
   private begin() {
@@ -894,6 +885,7 @@ export class Race {
         this.trackScene.lights.forEach((m, k) => (m.emissiveIntensity = k < lit ? 4 : 0));
         this.hud.lights(lit);
         this.audio.beep(false);
+        this.haptics.light(false);
       }
       if (this.gridT >= this.goAt) {
         this.state = 'racing';
@@ -901,6 +893,7 @@ export class Race {
         this.trackScene.lights.forEach((m) => (m.emissiveIntensity = 0));
         this.hud.lights(null);
         this.audio.beep(true);
+        this.haptics.light(true);
         this.hud.banner('Go', 'go', 1.1);
         this.hud.hint(true, 4000);
       }
@@ -909,9 +902,9 @@ export class Race {
     }
     this.simT += dt;
     this.phys.step(dt, c);
-    this.audio.update(this.phys.speed, c.throttle, this.phys.slip, this.phys.surface === 'grass');
     if (this.state === 'racing') this.timing(dt);
-    this.updateSkids(c.drift);
+    this.sectorFlash();
+    this.fx.sense(this.phys, c, dt, this.simT);
     this.throttle = c.throttle;
     this.opts.mode?.addon?.tick?.(dt);
   }
@@ -1023,6 +1016,41 @@ export class Race {
     while (this.ghostRec.length * GHOST_DT * 1000 <= lapT) this.ghostRec.push({ x: this.phys.x, z: this.phys.z, h: this.phys.heading });
     const si = Math.floor(s / SPLIT);
     if (s < L - 5) while (this.splits.length <= si) this.splits.push(lapT);
+  }
+
+  // What timing() had at the end of the previous step, so a sector completed in this one can be shown.
+  private secSeen = { lap: 0, n: 0, start: null as number | null, invalid: false, times: [0, 0], best: [0, 0, 0] };
+
+  /** A sector just completed on a clean lap: flash its chip with the gap to your best sector, chime on purple. */
+  private sectorFlash() {
+    const s = this.secSeen;
+    const n = this.sectorTimes.length;
+    let k = -1;
+    let t = 0;
+    let color: SectorColor = '';
+    if (this.lapNo !== s.lap) {
+      // A new lap began, so timing() has already reset the sectors: S3 = lap time − S1 − S2.
+      if (s.start !== null && this.lapStart !== null && s.n === 2 && !s.invalid) {
+        k = 2;
+        t = (this.lapStart - s.start) * 1000 - s.times[0] - s.times[1];
+        const lead = this.board?.entries[0]?.sectors?.[2];
+        color = !s.best[2] || t <= s.best[2] ? (!lead || t <= lead ? 'purple' : 'green') : 'yellow';
+      }
+    } else if (n > s.n && !this.invalid) {
+      k = n - 1;
+      t = this.sectorTimes[k];
+      color = this.sectorColors[k];
+    }
+    if (k >= 0 && s.best[k] && !this.autopilot) {
+      this.hud.sectorFlash(k, color, (t - s.best[k]) / 1000);
+      if (color === 'purple') this.audio.chime();
+    }
+    s.lap = this.lapNo;
+    s.n = n;
+    s.start = this.lapStart;
+    s.invalid = this.invalid;
+    for (let i = 0; i < 2; i++) s.times[i] = this.sectorTimes[i] ?? 0;
+    for (let i = 0; i < 3; i++) s.best[i] = this.bestSectors[i] ?? 0;
   }
 
   private sectorColor(k: number, t: number): SectorColor {
@@ -1271,11 +1299,55 @@ export class Race {
     this.snapPrev();
     this.camPos.set(this.phys.x - Math.sin(this.phys.heading) * 6, 2.6, this.phys.z - Math.cos(this.phys.heading) * 6);
     this.camLook.set(this.phys.x, 0.6, this.phys.z);
+    Object.assign(this.cam, { ox: 0, oy: 0, oz: 0, vx: 0, vy: 0, vz: 0, fov: 0, fovV: 0, shake: 0, side: 0 });
+  }
+
+  /** A wall hit kicks the camera away from the wall, punches the FOV and starts a short shake. */
+  private kickCamera(speed: number, nx: number, nz: number) {
+    const k = Math.min(1, speed / 8);
+    const c = this.cam;
+    c.vx -= nx * 3 * k;
+    c.vz -= nz * 3 * k;
+    c.vy += 1.3 * k;
+    c.fovV += 55 * k;
+    c.shake = Math.min(1, c.shake + 0.8 * k);
+  }
+
+  /** Advance the camera springs; returns the shake offset to add this frame (deterministic in simT). */
+  private springCamera(dt: number, fb: FxFrame, out: THREE.Vector3) {
+    const c = this.cam;
+    // Damped springs: the kick at ω 18 rad/s, ζ 0.5; the FOV punch softer at ω 12, ζ 0.6.
+    for (let left = dt; left > 1e-6; ) {
+      const h = Math.min(left, 1 / 120);
+      left -= h;
+      c.vx += (-324 * c.ox - 18 * c.vx) * h;
+      c.vy += (-324 * c.oy - 18 * c.vy) * h;
+      c.vz += (-324 * c.oz - 18 * c.vz) * h;
+      c.ox += c.vx * h;
+      c.oy += c.vy * h;
+      c.oz += c.vz * h;
+      c.fovV += (-144 * c.fov - 14.4 * c.fovV) * h;
+      c.fov += c.fovV * h;
+    }
+    c.shake *= Math.exp(-dt / 0.22);
+    const t = this.simT;
+    const sh = c.shake;
+    // Two smooth octaves instead of per-frame white noise; then a few millimetres of kerb buzz at the
+    // stripe rate and a grass rumble.
+    const kerb = fb.kerb * 0.004 * (Math.sin((Math.PI * this.phys.s) / 0.8) > 0 ? 1 : -1);
+    const grass = fb.grass * 0.005 * (Math.sin(53 * t) + Math.sin(71 * t + 1));
+    out.set(
+      c.ox + sh * (0.1 * Math.sin(41 * t) + 0.04 * Math.sin(97 * t + 1.3)),
+      c.oy + sh * (0.08 * Math.sin(37 * t + 0.7) + 0.03 * Math.sin(89 * t + 2.1)) + kerb + grass,
+      c.oz,
+    );
+    return out;
   }
 
   // Scratch objects reused every frame (no per-frame allocations, so no GC hitches).
   private readonly v = { fwd: new THREE.Vector3(), pos: new THREE.Vector3(), look: new THREE.Vector3(), tmp: new THREE.Vector3(), up: new THREE.Vector3(0, 1, 0) };
   private prev = { x: 0, z: 0, h: 0 };
+  private body = { vf: 0, acc: 0 }; // low-passed longitudinal acceleration for the body pitch
   private alpha = 1; // how far between the last two physics steps this frame sits
   private viewW = 1;
   private viewH = 1;
@@ -1293,15 +1365,41 @@ export class Race {
     const heading = this.prev.h + dh * a;
     k.root.position.set(x, 0, z);
     k.root.rotation.y = heading;
-    k.body.rotation.z += (THREE.MathUtils.clamp(p.yawRate * p.forwardSpeed * 0.004, -0.07, 0.07) - k.body.rotation.z) * Math.min(1, dt * 8);
-    k.body.rotation.x += ((this.throttle ? -0.012 : 0.01) - k.body.rotation.x) * Math.min(1, dt * 5);
-    k.body.position.y = p.surface === 'grass' ? Math.sin(this.simT * 40) * 0.012 : p.surface === 'kerb' ? Math.sin(this.simT * 70) * 0.02 : 0;
+    // Body motion from the real accelerations (render only): dive under braking, squat on the power,
+    // roll that only saturates near 3 g, and on the kerb a bob at the stripe rate that follows speed.
+    const vf = p.forwardSpeed;
+    if (dt > 0) this.body.acc += (THREE.MathUtils.clamp((vf - this.body.vf) / dt, -40, 40) - this.body.acc) * (1 - Math.exp(-dt * 50));
+    this.body.vf = vf;
+    k.body.rotation.z += (THREE.MathUtils.clamp(p.yawRate * vf * 0.0028, -0.08, 0.08) - k.body.rotation.z) * Math.min(1, dt * 8);
+    k.body.rotation.x += (THREE.MathUtils.clamp(-0.0035 * this.body.acc, -0.025, 0.04) - k.body.rotation.x) * Math.min(1, dt * 8);
+    const stripe = Math.sin((Math.PI * p.s) / 0.8) > 0 ? 1 : -1;
+    k.body.position.y = p.surface === 'grass' ? Math.sin(this.simT * 40) * 0.012 : p.onKerb ? stripe * 0.014 * Math.min(1, p.speed / 10) : 0;
     for (const f of k.frontPivots) f.rotation.y = -p.steerAngle * 1.2;
     for (const w of k.wheels) w.rotation.x = p.wheelSpin;
+    const live = this.state === 'grid' || this.state === 'racing';
+    const fb = this.fx.frame(live ? dt : 0, this.camera, this.pipeline.renderer, this.pipeline.quality, this.atmos.time === 'night');
+    if (live) {
+      if (fb.impact) {
+        this.audio.impact(fb.impact);
+        this.haptics.impact(fb.impact);
+        this.kickCamera(fb.impact, fb.nx, fb.nz);
+      }
+      this.haptics.kerb(fb.kerb, p.speed);
+      const pb = this.pb?.ms ?? null;
+      if (pb !== this.pbSeen && this.pbSeen !== undefined && pb !== null) this.haptics.personalBest();
+      this.pbSeen = pb;
+      const cockpit = CAMS[this.camMode].id === 'hood';
+      this.audio.update({ speed: p.speed, vmax: p.vmax, throttle: this.throttle, squeal: fb.squeal, kerb: fb.kerb, grass: fb.grass, scrape: fb.scrape, cockpit });
+    }
 
     const { fwd, pos, look, tmp, up } = this.v;
     fwd.set(Math.sin(heading), 0, Math.cos(heading));
     const mode = CAMS[this.camMode].id;
+    const cam = this.cam;
+    // Portrait phones (0 at aspect 0.8 or wider, 1 at 0.48 and taller): with the wider view below, the
+    // chase camera sits higher and looks down a little more, so the road ahead fills the screen between
+    // the timing panels and the speedometer instead of sky.
+    const tall = THREE.MathUtils.clamp((0.8 - this.camera.aspect) / 0.32, 0, 1);
     let lerp = 1 - Math.exp(-dt * 7);
     if (this.state === 'intro') {
       // Slow cinematic orbit; tight so the camera stays on the circuit (real pit buildings often sit beside the grid).
@@ -1324,20 +1422,28 @@ export class Race {
       lerp = 1 - Math.exp(-dt * 3);
     } else {
       const far = mode === 'far';
-      pos.set(x, far ? 4.2 : 2.3, z).addScaledVector(fwd, far ? -9.5 : -5.2);
-      look.set(x, 0.7, z).addScaledVector(fwd, 3.5);
+      // Look a little into the corner, toward the apex (yawRate > 0 turns left).
+      const side = THREE.MathUtils.clamp(-p.yawRate * p.forwardSpeed * 0.04, -1, 1);
+      cam.side += (side - cam.side) * (1 - Math.exp(-dt * 3));
+      tmp.set(-fwd.z, 0, fwd.x); // right of travel
+      pos.set(x, far ? 4.2 + 0.8 * tall : 2.3 + 1.5 * tall, z).addScaledVector(fwd, far ? -9.5 : -5.2 - 0.4 * tall);
+      look.set(x, 0.7 - 0.3 * tall, z).addScaledVector(fwd, 3.5 + 0.5 * tall).addScaledVector(tmp, cam.side);
     }
     this.camPos.lerp(pos, lerp);
     this.camLook.lerp(look, Math.min(1, lerp * 1.6));
-    this.camera.position.copy(this.camPos);
-    if (p.bump > 0.02) {
-      this.camera.position.x += (Math.random() - 0.5) * p.bump * 0.4;
-      this.camera.position.y += (Math.random() - 0.5) * p.bump * 0.3;
-    }
+    const shake = this.springCamera(live ? dt : 0, fb, tmp);
+    const amount = this.state === 'intro' || mode === 'tv' ? 0 : mode === 'hood' ? 0.5 : 1;
+    this.camera.position.copy(this.camPos).addScaledVector(shake, amount);
     this.camera.lookAt(this.camLook);
-    const fov = this.state === 'intro' ? 42 : (mode === 'hood' ? 70 : 60) + p.speed * 0.38;
-    if (Math.abs(this.camera.fov - fov) > 0.05) {
-      this.camera.fov += (fov - this.camera.fov) * Math.min(1, dt * 4);
+    // FOV: wider with speed; never narrower than 44-50° across (portrait phones), at most 100° tall;
+    // plus the impact punch.
+    const base = this.state === 'intro' ? 42 : (mode === 'hood' ? 70 : 60) + p.speed * 0.38;
+    const across = this.state === 'intro' ? 0 : 44 + 6 * Math.min(1, p.speed / p.vmax);
+    const floor = THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(across / 2)) / this.camera.aspect));
+    cam.fovBase += (Math.min(100, Math.max(base, floor)) - cam.fovBase) * Math.min(1, dt * 4);
+    const fov = cam.fovBase + cam.fov * amount;
+    if (Math.abs(this.camera.fov - fov) > 0.01) {
+      this.camera.fov = fov;
       this.camera.updateProjectionMatrix();
     }
     k.root.visible = mode !== 'hood' || this.state === 'intro';
@@ -1415,40 +1521,6 @@ export class Race {
     g.lineWidth = 3.5;
     g.strokeStyle = '#f2f3f5';
     g.stroke();
-  }
-
-  private updateSkids(drift: boolean) {
-    const p = this.phys;
-    const skidding = p.surface !== 'grass' && p.speed > 4 && (p.slip > 2.6 || (drift && Math.abs(p.yawRate) > 0.6));
-    const fx = Math.sin(p.heading);
-    const fz = Math.cos(p.heading);
-    const sk = this.skid;
-    [-0.6, 0.6].forEach((side, w) => {
-      const cx = p.x + fz * side - fx * 0.62;
-      const cz = p.z - fx * side - fz * 0.62;
-      const prev = sk.prev[w];
-      const cur = this.v.tmp.set(cx, 0.05, cz);
-      if (skidding && prev && prev.distanceToSquared(cur) > 0.04) {
-        const dx = cur.x - prev.x;
-        const dz = cur.z - prev.z;
-        const len = Math.hypot(dx, dz) || 1;
-        const nx = (-dz / len) * 0.1;
-        const nz = (dx / len) * 0.1;
-        const quad = [prev.x - nx, prev.z - nz, prev.x + nx, prev.z + nz, cur.x - nx, cur.z - nz, cur.x + nx, cur.z + nz];
-        const tri = [0, 1, 2, 1, 3, 2];
-        const base = (sk.i % 3000) * 18;
-        tri.forEach((v, n) => {
-          sk.pos[base + n * 3] = quad[v * 2];
-          sk.pos[base + n * 3 + 1] = 0.05;
-          sk.pos[base + n * 3 + 2] = quad[v * 2 + 1];
-        });
-        sk.i++;
-        sk.geo.setDrawRange(0, Math.min(sk.i, 3000) * 6);
-        (sk.geo.attributes.position as THREE.BufferAttribute).needsUpdate = true;
-        prev.set(cx, 0.05, cz);
-      } else if (!skidding) sk.prev[w] = null;
-      else if (!prev) sk.prev[w] = new THREE.Vector3(cx, 0.05, cz); // once per skid, not per tick
-    });
   }
 
   private onResize = () => {

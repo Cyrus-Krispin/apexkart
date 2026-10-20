@@ -6,6 +6,27 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+### Added
+- **Particles**: wheels in the grass throw clods and dust, wall hits spark and puff smoke, and hard
+  braking and big slides leave tyre smoke. Skid marks fade over about half a minute, and the grass
+  gets brown ruts.
+- **Sound**: a thump on wall hits, kerb rumble, grass and gravel crunch, wind that rises with speed
+  and a scrape along the barriers. The engine has a rev limiter, pops when you lift off and a
+  slipping clutch at the launch.
+- **Vibration** on Android phones and gamepads for wall hits, kerbs, the start lights and a personal
+  best. It's off when muted or when your system asks for reduced motion.
+- **Sector flash**: when you finish a sector, its chip flashes purple, green or yellow with the gap to
+  your best sector, and a purple sector plays a short chime.
+
+### Changed
+- **Portrait phones see the corners**: the camera shows much more of the road ahead and sits a
+  little higher.
+- **Wall hits kick the camera smoothly** instead of shaking it, and the camera looks slightly into
+  corners.
+- **The kart moves like a kart**: the nose dips under braking, lifts under power, and the body rolls
+  with cornering force.
+- Kerb rumble only happens on the painted kerbs, not along every track edge.
+
 ## [0.24.0] - 2026-10-21
 
 ### Fixed
