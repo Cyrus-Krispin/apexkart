@@ -152,8 +152,11 @@ Everything else lives in its own modules.
      relabels the exit button (`exitLabel`). With `startAt` it skips the briefing (`intro.dispose()`
      then `begin()`), because a synchronised start can't wait for "press any key". Then it calls
      `addon.attach(context())`.
-   - `resetToGrid()`: `gridPose(track, gridSlot)` (in `raceMode.ts`) sets the staggered grid
-     position. Without a slot it is the old centreline spot. `startAt` fixes `goAt` to
+   - `resetToGrid()`: `gridPose(track, gridSlot)` (in `raceMode.ts`) sets the grid position: rows
+     of two side by side, the front row 14 m behind the line and 6 m between rows, measured in real
+     metres and squeezed on a short straight (rows 4 m apart, the front row nearer the line) so
+     all 8 slots sit on the straight. The line never moves. Without a slot it is the old
+     centreline spot (time trial). `startAt` fixes `goAt` to
      `SYNC_GO` (4.4 s; the lights come on at 0.9 + 0.7·k).
    - `tick()`: grid timer from `startAt`; `addon.tick(dt)` after physics.
    - `render()`: `addon.frame(dt)` just before `pipeline.render()`.
