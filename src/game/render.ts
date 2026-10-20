@@ -14,11 +14,58 @@ export function initialQuality(): QualitySetting {
   return saved && ['auto', 'high', 'medium', 'low'].includes(saved) ? saved : 'auto';
 }
 
+/** Auto's first guess on a device it hasn't measured yet. */
 export function autoQuality(): Quality {
   // Ambient occlusion roughly doubles the GPU work per frame, so Auto starts at Medium.
   // High stays available as a manual choice for strong GPUs.
   const coarse = matchMedia('(pointer: coarse)').matches;
   return coarse || innerWidth < 700 ? 'low' : 'medium';
+}
+
+/** What Auto settled on for one GPU and screen, measured on the grid; later races start there. */
+export interface AutoTier {
+  tier: Quality;
+  pixelRatio: number;
+  gpu: string;
+  screen: string;
+  ms: number; // the synced warm-up frame time it was judged on
+}
+
+const AUTO_KEY = 'ak:autoTier';
+const screenKey = () => `${screen.width}x${screen.height}@${devicePixelRatio}`;
+
+/** Auto's earlier verdict for this GPU and screen, if there is one. */
+export function loadAutoTier(gpu: string): AutoTier | null {
+  try {
+    const r = JSON.parse(localStorage.getItem(AUTO_KEY) || 'null') as AutoTier | null;
+    return r && r.gpu === gpu && r.screen === screenKey() && (r.tier === 'medium' || r.tier === 'low') && r.pixelRatio > 0 ? r : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveAutoTier(t: Omit<AutoTier, 'screen'>): AutoTier {
+  const rec = { ...t, screen: screenKey() };
+  try {
+    localStorage.setItem(AUTO_KEY, JSON.stringify(rec));
+  } catch {
+    /* private mode: measure again next time */
+  }
+  return rec;
+}
+
+/** Pixel-ratio range per tier. Low starts at 1 but may go higher on phones that measured fast enough. */
+const RATIO: Record<Quality, { start: number; max: number }> = { high: { start: 1.5, max: 1.5 }, medium: { start: 1.25, max: 1.25 }, low: { start: 1, max: 2 } };
+export const MIN_RATIO = 0.75;
+
+/** The sharpest pixel ratio a tier may use on this screen. */
+export function maxRatio(q: Quality) {
+  return Math.min(devicePixelRatio, RATIO[q].max);
+}
+
+function gpuName(gl: WebGLRenderingContext | WebGL2RenderingContext): string {
+  const ext = gl.getExtension('WEBGL_debug_renderer_info');
+  return String((ext && gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) || gl.getParameter(gl.RENDERER) || 'unknown');
 }
 
 /** Every texture the materials under `root` sample, for uploading before anything draws them. */
@@ -44,6 +91,8 @@ export interface BloomSettings {
 
 export class RenderPipeline {
   readonly renderer: THREE.WebGLRenderer;
+  /** The GPU's name, to remember Auto's verdict per device. */
+  readonly gpu: string;
   quality: Quality;
   private composer: EffectComposer | null = null;
   private bloomPass: UnrealBloomPass | null = null;
@@ -64,14 +113,16 @@ export class RenderPipeline {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
     this.quality = quality;
+    this.gpu = gpuName(this.renderer.getContext());
   }
 
-  setQuality(q: Quality) {
+  /** Switch tier (render path and shaders): only ever on the grid or from the pause menu. */
+  setQuality(q: Quality, ratio = RATIO[q].start) {
     this.quality = q;
     this.composer?.dispose();
     this.composer = null;
     this.bloomPass = null;
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, q === 'high' ? 1.5 : q === 'medium' ? 1.25 : 1));
+    this.renderer.setPixelRatio(this.clampRatio(ratio));
     if (q !== 'low') {
       const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
       const target = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: 4 });
@@ -93,6 +144,36 @@ export class RenderPipeline {
     }
     this.setSize(this.w, this.h);
   }
+
+  private clampRatio(r: number) {
+    const hi = maxRatio(this.quality);
+    return Math.max(Math.min(MIN_RATIO, hi), Math.min(hi, Math.round(r * 8) / 8));
+  }
+
+  get pixelRatio() {
+    return this.renderer.getPixelRatio();
+  }
+
+  /** Dynamic resolution: the same shaders on fewer (or more) pixels. Safe mid-race. */
+  setPixelRatio(r: number) {
+    const v = this.clampRatio(r);
+    if (v === this.renderer.getPixelRatio()) return;
+    this.renderer.setPixelRatio(v);
+    this.setSize(this.w, this.h);
+  }
+
+  /**
+   * Render one frame and wait for the GPU to finish it (a 1-pixel read): CPU plus GPU time in ms.
+   * An upper bound, as the two don't overlap here, but a fair one for choosing a tier.
+   */
+  timedRender(): number {
+    const gl = this.renderer.getContext();
+    const t0 = performance.now();
+    this.render();
+    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, this.px);
+    return performance.now() - t0;
+  }
+  private px = new Uint8Array(4);
 
   setBloom(b: BloomSettings) {
     this.bloom = { ...b };

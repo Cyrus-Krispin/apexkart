@@ -8,7 +8,7 @@ import { Atmosphere, resolveTime, type TimePref } from './atmosphere';
 import { awardMedal, earnedMedal, MEDAL_NAME, MEDALS, medalFor, targets } from './medals';
 import { recordDailyLap } from '../shared/daily';
 import { floodlit, floodTextures } from './floodlights';
-import { RenderPipeline, autoQuality, initialQuality, texturesUnder, type Quality, type QualitySetting } from './render';
+import { RenderPipeline, autoQuality, initialQuality, loadAutoTier, maxRatio, MIN_RATIO, saveAutoTier, texturesUnder, type AutoTier, type Quality, type QualitySetting } from './render';
 import { buildWorld, fetchLiveEnv, type World } from './world';
 import { Hud, type SectorColor } from './hud';
 import { RaceIntro } from '../ui/intro';
@@ -74,7 +74,12 @@ export class Race {
   private worldBuild = 0; // rebuilds can overlap (surroundings arriving late); only the newest is kept
   private rival: { name: string; ms: number; beaten: boolean } | null = null;
   private liveEnvAsked = false;
-  private frameTimes: number[] = [];
+  /** Auto's verdict for this GPU and screen, from an earlier race or this one's warm-up. */
+  private autoRec: AutoTier | null = null;
+  /** The pixel ratio the grid settled on: in the race Auto only goes below it, and back up to it. */
+  private ratioCap = 1;
+  /** Auto's in-race frame-time window (time-based, so 120 Hz screens aren't judged twice as fast). */
+  private perf = { start: 0, t: 0, dts: [] as number[], slow: 0, fast: 0, changed: 0, quietUntil: 0, raised: false, noRaise: false, ghosts: 0 };
   /** Work to run inside the next frame, just before its own render (warm-up views). */
   private frameJobs: (() => void)[] = [];
   private warmGen = 0; // a newer warm-up (time of day, quality, a rebuilt world) supersedes an older one
@@ -149,7 +154,9 @@ export class Race {
     this.root.className = 'race';
     opts.container.appendChild(this.root);
 
-    this.pipeline = new RenderPipeline(this.scene, this.camera, this.qualitySetting === 'auto' ? autoQuality() : this.qualitySetting);
+    this.pipeline = new RenderPipeline(this.scene, this.camera, 'medium');
+    this.autoRec = loadAutoTier(this.pipeline.gpu);
+    this.pipeline.quality = this.qualitySetting === 'auto' ? this.autoTier() : this.qualitySetting;
     this.root.appendChild(this.pipeline.renderer.domElement);
 
     this.hud = new Hud(this.root, { trackName: opts.track.name, dirLabel: rot.label, dirIcon: rot.icon, color: opts.driver.color }, (a) => this.action(a));
@@ -202,7 +209,7 @@ export class Race {
 
   private buildWorld() {
     const s = this.scene;
-    this.pipeline.setQuality(this.pipeline.quality);
+    this.setTier(this.pipeline.quality);
     // Sky, fog, sun or moon, and the floodlights at night.
     const look = resolveTime(this.timeSetting, this.opts.track.center);
     this.atmos = new Atmosphere(s, this.pipeline, this.kart.root, look.time, look.sun);
@@ -282,11 +289,9 @@ export class Race {
       await this.uploadTextures(texturesUnder(this.scene).concat(floodTextures()), live);
       if (!live()) return;
       await this.inFrame(() => this.renderOverview());
-      const n = 12;
-      for (let k = 0; k < n && live(); k++) {
-        await this.inFrame(() => this.renderPose(((k + 0.5) / n) * this.track.length, ghost));
-        this.intro.stage('Warming up', 0.94 + (0.05 * (k + 1)) / n);
-      }
+      const times = await this.tour(12, ghost, live, (f) => this.intro.stage('Warming up', 0.94 + 0.04 * f));
+      if (!live()) return;
+      await this.calibrate(times.slice(4), ghost, live); // the first views still pay first-draw costs
     } catch (e) {
       console.warn('warm-up', e); // best effort: anything missed compiles on first sight, as before
     } finally {
@@ -296,6 +301,57 @@ export class Race {
         this.intro.stage('Ready', 1);
       }
     }
+  }
+
+  /** `n` chase views spread round the lap, one per frame; each one's synced render time in ms. */
+  private async tour(n: number, ghost: THREE.Object3D, live: () => boolean, progress?: (f: number) => void) {
+    const times: number[] = [];
+    for (let k = 0; k < n && live(); k++) {
+      times.push(await this.inFrame(() => this.renderPose(((k + 0.5) / n) * this.track.length, ghost)));
+      progress?.((k + 1) / n);
+    }
+    return times;
+  }
+
+  /**
+   * Auto, once per device: judge the tier on the warm-up's timed frames (render plus a GPU sync, so an
+   * upper bound) and remember it for this GPU and screen. Medium stays if its frames take 9 ms or
+   * less, else Low. Low then takes the sharpest pixel ratio that still fits, up to 2 on phones.
+   * Only on the grid: a tier change recompiles everything, so it never happens in the race.
+   */
+  private async calibrate(times: number[], ghost: THREE.Object3D, live: () => boolean) {
+    if (this.qualitySetting !== 'auto' || this.autoRec || !times.length || (this.state !== 'intro' && this.state !== 'grid')) return;
+    let ms = median(times);
+    let q = this.pipeline.quality;
+    if (q === 'medium' && ms > 9) {
+      this.intro.stage('Tuning the graphics', 0.985);
+      q = 'low';
+      this.setTier(q);
+      await this.compileScene();
+      if (!live()) return;
+      await this.inFrame(() => this.renderOverview());
+      ms = median((await this.tour(5, ghost, live)).slice(1));
+      if (!live()) return;
+    }
+    if (q === 'low') {
+      // Low at ratio 1 on a 3x phone is a soft, 375-pixel-wide picture; many can afford more.
+      // Fill cost grows with pixels, the rest doesn't: estimate, then check.
+      let pr = 1;
+      for (let r = maxRatio('low'); r > 1; r -= 0.25)
+        if (ms * (0.35 + 0.65 * r * r) <= 6.5) {
+          pr = r;
+          break;
+        }
+      if (pr > 1) {
+        this.pipeline.setPixelRatio(pr);
+        const check = median((await this.tour(4, ghost, live)).slice(1));
+        if (!live()) return;
+        if (check > 9) this.pipeline.setPixelRatio(1);
+      }
+    }
+    this.autoRec = saveAutoTier({ tier: q, pixelRatio: this.pipeline.pixelRatio, gpu: this.pipeline.gpu, ms: Math.round(ms * 100) / 100 });
+    this.ratioCap = this.pipeline.pixelRatio;
+    this.syncToggles();
   }
 
   /** Compile every material in the scene for the target it renders into (bounded, in case the driver never answers). */
@@ -417,7 +473,7 @@ export class Race {
           cam.position.set(a.x - fx * 5.2, 2.3, a.z - fz * 5.2);
           cam.lookAt(a.x + fx * 3.5, 0.7, a.z + fz * 3.5);
         },
-        () => this.pipeline.render(),
+        () => this.pipeline.timedRender(),
       );
     } finally {
       // The frame's own render follows straight after: back to where the kart really is.
@@ -544,7 +600,7 @@ export class Race {
       const order: QualitySetting[] = ['auto', 'high', 'medium', 'low'];
       this.qualitySetting = order[(order.indexOf(this.qualitySetting) + 1) % order.length];
       localStorage.setItem('ak:quality', this.qualitySetting);
-      this.applyQuality(this.qualitySetting === 'auto' ? autoQuality() : this.qualitySetting);
+      this.applyQuality(this.qualitySetting === 'auto' ? this.autoTier() : this.qualitySetting);
     }
     if (a === 'time') this.setTime(({ live: 'day', day: 'night', night: 'live' } as const)[this.timeSetting], true);
     if (a === 'controls') {
@@ -584,10 +640,23 @@ export class Race {
     this.syncToggles();
   }
 
+  /** Auto's tier: what it measured on this device before, else its first guess. */
+  private autoTier(): Quality {
+    return this.autoRec?.tier ?? autoQuality();
+  }
+
+  /** Switch tier: render path, pixel ratio and night light rig. Never mid-race: on the grid or from the pause menu. */
+  private setTier(q: Quality) {
+    const rec = this.qualitySetting === 'auto' && this.autoRec?.tier === q ? this.autoRec : null;
+    if (this.atmos && q !== this.pipeline.quality) this.atmos.setQuality(q);
+    this.pipeline.setQuality(q, rec?.pixelRatio);
+    this.ratioCap = this.pipeline.pixelRatio;
+  }
+
+  /** From the pause menu. */
   private applyQuality(q: Quality) {
     if (q === this.pipeline.quality) return;
-    this.pipeline.setQuality(q);
-    this.atmos.setQuality(q);
+    this.setTier(q);
     // Each tier renders into a different target (and at night has its own lights): new shaders.
     if (this.world) this.warmUp();
   }
@@ -692,20 +761,56 @@ export class Race {
     this.adaptQuality(dt);
   };
 
-  /** In auto mode, step quality down if the frame rate can't keep up. */
+  /**
+   * Auto in the race: the tier never changes (that recompiles every shader, and at night changes
+   * the lights); only the pixel ratio moves, in 1/8 steps, judged on the frame rate over 1-second
+   * windows (the mean, as vsync makes the median jump between 16.7 and 33.3 ms).
+   * Nothing moves before lap 1 is done, at most once every 2 s, and windows that saw a known hitch
+   * (a world swap, a ghost arriving, a tab switch) don't count.
+   */
   private adaptQuality(dt: number) {
-    if (this.qualitySetting !== 'auto' || this.state !== 'racing' || document.hidden || this.warming) return; // warm-up frames draw twice
-    this.frameTimes.push(dt);
-    if (this.frameTimes.length < 120) return;
-    const sorted = [...this.frameTimes].sort((a, b) => a - b);
-    const p50 = sorted[Math.floor(sorted.length * 0.5)];
-    const p90 = sorted[Math.floor(sorted.length * 0.9)];
-    this.frameTimes = [];
-    // Step down on a low average *or* on frequent spikes (the spikes are what read as stutter).
-    if ((p50 > 1 / 45 || p90 > 1 / 30) && this.pipeline.quality !== 'low') {
-      this.applyQuality(this.pipeline.quality === 'high' ? 'medium' : 'low');
-      this.syncToggles();
+    const w = this.perf;
+    const now = performance.now();
+    if (this.ghosts.length !== w.ghosts) {
+      w.ghosts = this.ghosts.length;
+      w.quietUntil = now + 1000;
     }
+    if (document.hidden || dt >= 0.1) w.quietUntil = now + 1000;
+    if (this.qualitySetting !== 'auto' || this.state !== 'racing' || this.lapNo < 2 || this.warming) {
+      w.dts.length = 0;
+      return;
+    }
+    if (!w.dts.length) {
+      w.start = now;
+      w.t = 0;
+    }
+    w.dts.push(dt);
+    w.t += dt;
+    if (w.t < 1) return;
+    const clean = w.quietUntil <= w.start;
+    const fps = w.dts.length / w.t;
+    w.dts.length = 0;
+    if (!clean) {
+      w.slow = w.fast = 0;
+      return;
+    }
+    w.slow = fps < 45 ? w.slow + 1 : 0;
+    w.fast = fps > 57 ? w.fast + 1 : 0;
+    if (now - w.changed < 2000) return;
+    const pr = this.pipeline.pixelRatio;
+    let next = pr;
+    if (w.slow >= 2 && pr > MIN_RATIO) {
+      next = pr - 0.125;
+      if (w.raised) w.noRaise = true; // it went up and it didn't hold: stay down for this race
+    } else if (w.fast >= 8 && !w.noRaise && pr < this.ratioCap) {
+      next = Math.min(this.ratioCap, pr + 0.125);
+      w.raised = true;
+    }
+    if (next === pr) return;
+    this.pipeline.setPixelRatio(next);
+    w.changed = now;
+    w.slow = w.fast = 0;
+    w.quietUntil = now + 500; // the resize itself
   }
 
   private tick(dt: number) {
@@ -1324,6 +1429,11 @@ export class Race {
     this.pipeline.renderer.forceContextLoss(); // free the GL context now; multiplayer starts a race every round
     this.root.remove();
   }
+}
+
+function median(xs: number[]) {
+  const s = [...xs].sort((a, b) => a - b);
+  return s.length ? s[s.length >> 1] : 0;
 }
 
 function disposeTree(root: THREE.Object3D) {
