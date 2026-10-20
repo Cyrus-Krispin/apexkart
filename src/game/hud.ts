@@ -62,7 +62,7 @@ export class Hud {
   private lastText = new Map<string, string>();
   private bannerTimer = 0;
   private bannerText = '';
-  private lapCardTimer = 0;
+  private lapCardEl: HTMLElement | null = null;
   private hintTimer = 0;
   private lightsTimer = 0;
   private boardSig = '';
@@ -78,9 +78,10 @@ export class Hud {
     this.root = document.createElement('div');
     this.root.className = 'hud';
     this.root.innerHTML = `
+      <div class="h-left">
       <section class="h-timing">
         <header><span class="pw-code">${code}</span><span class="h-lapno"><span class="pw-k">Lap</span><b class="mono" data-el="lap">OUT</b></span><span class="h-dir" title="${o.dirLabel}">${o.dirIcon}</span></header>
-        <div class="h-time mono" data-el="time">0:00.000</div>
+        <div class="h-time-row"><div class="h-time mono" data-el="time">0:00.000</div><b class="h-dl mono" data-el="delta" hidden title="Gap to your best lap"></b></div>
         <div class="h-sectors" data-el="sectors">${[1, 2, 3].map((k) => `<div class="sec"><i></i><span class="mono">S${k}</span></div>`).join('')}</div>
         <footer>
           <div><span class="pw-k">Last</span><b class="mono" data-el="last">–:––.–––</b></div>
@@ -88,7 +89,6 @@ export class Hud {
         </footer>
       </section>
 
-      <div class="h-right">
         <section class="h-target" data-el="target" hidden>
           <span class="pw-k"><i class="medal" data-el="targetDot"></i><span data-el="targetK"></span></span>
           <b class="h-tdl mono" data-el="targetDl"></b>
@@ -100,12 +100,9 @@ export class Hud {
           <p class="h-ontrack" data-el="onTrack"></p>
         </section>
       </div>
-      <div class="h-lapcard" data-el="lapcard"></div>
 
-      <div class="h-map">
-        <canvas data-el="minimap" aria-hidden="true"></canvas>
-        <b class="h-dl mono" data-el="delta" hidden title="Gap to your best lap"></b>
-      </div>
+      <div class="h-map"><canvas data-el="minimap" aria-hidden="true"></canvas></div>
+      <div class="h-notes" data-el="notes" aria-live="polite"></div>
 
       <section class="h-speed">
         <div class="h-hint" data-el="hint"></div>
@@ -125,7 +122,6 @@ export class Hud {
       <div class="h-lights" data-el="lights" hidden>${'<div class="h-lamp"><i></i><i></i></div>'.repeat(5)}</div>
       <div class="h-banner" data-el="banner"><span data-el="bannerText"></span></div>
       <div class="h-tags" data-el="tags"></div>
-      <div class="h-toasts" data-el="toasts"></div>
       <div class="h-loading" data-el="loading" hidden>Loading the world</div>
       <div class="h-attrib">Track and world © OpenStreetMap contributors</div>
 
@@ -196,7 +192,7 @@ export class Hud {
     this.$.time.classList.toggle('invalid', invalid);
   }
 
-  /** The gap to your best lap: one number on the minimap, green when you're ahead, red behind. */
+  /** The gap to your best lap: one number beside the lap time, green when you're ahead, red behind. */
   delta(seconds: number | null) {
     this.$.delta.hidden = seconds === null;
     if (seconds === null) return;
@@ -287,15 +283,15 @@ export class Hud {
   }
 
   // ---------- moments
+  // Only the big moments take the top centre (lights, GO, a finish, an invalid lap, wrong way); the
+  // middle of the screen stays clear for driving. Everything else is a notification at the side.
 
   banner(text: string, kind: BannerKind = 'info', secs = 2) {
+    if (kind !== 'go' && kind !== 'warn') return void this.note(text, kind, secs + 1);
     clearTimeout(this.bannerTimer);
     if (text !== this.bannerText || !this.$.banner.classList.contains('show')) {
       this.$.bannerText.textContent = text;
       this.$.banner.className = `h-banner is-${kind}`;
-      // A medal banner wears its medal's colour.
-      const m = kind === 'medal' ? MEDALS.find((x) => text.toLowerCase().startsWith(x)) : undefined;
-      this.$.banner.style.setProperty('--m', m ? `var(--${m})` : '');
       void this.$.banner.offsetWidth;
       this.$.banner.classList.add('show');
       this.bannerText = text;
@@ -306,27 +302,41 @@ export class Hud {
     }, secs * 1000);
   }
 
-  /** The lap just completed, held up on a pit board. */
+  /** A notification at the side: slides in, then fades. At most four at once (the oldest goes). */
+  private note(content: string, kind: string, secs: number, html = false): HTMLElement {
+    const box = this.$.notes;
+    const same = [...box.children].find((n) => !html && n.textContent === content && !n.classList.contains('out')) as HTMLElement | undefined;
+    if (same) same.remove(); // the same message again: just move it to the newest place
+    const n = document.createElement('div');
+    n.className = `h-note is-${kind}`;
+    if (html) n.innerHTML = content;
+    else n.textContent = content;
+    // A medal wears its medal's colour.
+    const m = kind === 'medal' ? MEDALS.find((x) => content.toLowerCase().startsWith(x)) : undefined;
+    if (m) n.style.setProperty('--m', `var(--${m})`);
+    box.appendChild(n);
+    while (box.children.length > 4) box.firstElementChild!.remove();
+    setTimeout(() => n.classList.add('out'), secs * 1000);
+    setTimeout(() => n.remove(), secs * 1000 + 450);
+    return n;
+  }
+
+  /** The lap just completed, held up on a pit board at the side. */
   lapCard(o: { lap: number; ms: number; valid: boolean; delta: number | null; sectors: number[]; colors: SectorColor[]; pb: boolean }) {
-    clearTimeout(this.lapCardTimer);
     const d = o.delta;
     const tag = o.pb ? '<span class="g">PB</span>' : o.valid ? '' : '<span class="y">Invalid</span>';
-    this.$.lapcard.innerHTML = `
+    this.lapCardEl = this.note(`
       <div class="pw-board"><div class="pw-board-in">
         <div class="pw-board-row"><span>Lap ${String(o.lap).padStart(2, '0')}</span>${tag}</div>
         <div class="pw-board-row"><span class="sm ${o.valid ? (o.pb ? 'g' : '') : 'x'}">${formatMs(o.ms)}</span></div>
         ${d !== null && o.valid ? `<div class="pw-board-row"><span class="lc-vs">vs ${o.pb ? 'previous' : 'best'}</span><span class="sm ${d < 0 ? 'g' : 'y'}">${signed(d, 3)}</span></div>` : ''}
         <div class="pw-board-row lc-rank" data-el="lcRank"></div>
       </div></div>
-      ${o.valid ? `<div class="lc-secs">${o.sectors.map((s, k) => `<span class="${o.colors[k]}">${(s / 1000).toFixed(3)}</span>`).join('')}</div>` : ''}`;
-    this.$.lapcard.classList.remove('show');
-    void this.$.lapcard.offsetWidth;
-    this.$.lapcard.classList.add('show');
-    this.lapCardTimer = window.setTimeout(() => this.$.lapcard.classList.remove('show'), 6500);
+      ${o.valid ? `<div class="lc-secs">${o.sectors.map((s, k) => `<span class="${o.colors[k]}">${(s / 1000).toFixed(3)}</span>`).join('')}</div>` : ''}`, 'lap', 6.5, true);
   }
 
   lapCardRank(rank: number, total: number) {
-    const el = this.$.lapcard.querySelector('[data-el=lcRank]');
+    const el = this.lapCardEl?.querySelector('[data-el=lcRank]');
     if (el) el.innerHTML = `<span>Board</span><span class="y">P${rank}<small>/${total}</small></span>`;
   }
 
@@ -368,12 +378,7 @@ export class Hud {
   }
 
   toast(text: string, kind: '' | 'warn' | 'gold' = '') {
-    const t = document.createElement('div');
-    t.className = kind ? `h-toast is-${kind}` : 'h-toast';
-    t.textContent = text;
-    this.$.toasts.appendChild(t);
-    setTimeout(() => t.classList.add('out'), 3600);
-    setTimeout(() => t.remove(), 4200);
+    this.note(text, kind || 'info', 3.6);
   }
 
   // ---------- pause + toggles
@@ -410,7 +415,6 @@ export class Hud {
 
   dispose() {
     clearTimeout(this.bannerTimer);
-    clearTimeout(this.lapCardTimer);
     clearTimeout(this.hintTimer);
     clearTimeout(this.lightsTimer);
     this.root.remove();
