@@ -472,7 +472,10 @@ export class KartFx {
     const slide = Math.max(limit, clamp01((p.slip - 1.5) / 3));
     const brake = p.surface !== 'grass' && c.brake > 0.5 && vf > 11 ? c.brake * (0.25 + 0.75 * clamp01((vf - 11) / 14)) : 0;
     const spin = p.surface === 'track' && c.throttle > 0.5 && vf >= 0 && vf < 4.5 ? 1 - vf / 4.5 : 0;
-    g.squeal = Math.max(g.squeal, p.surface === 'grass' ? 0 : Math.max(slide, brake * 0.45));
+    // The tyres only howl when they're properly sliding, or nearly locked under a big stop. Cornering
+    // at the grip limit stays quiet: a squeal there ran for a third of every clean lap and read as hiss.
+    const howl = Math.max(clamp01((p.slip - 2.4) / 4), brake > 0.8 ? (brake - 0.8) * 1.5 : 0);
+    g.squeal = Math.max(g.squeal, p.surface === 'grass' ? 0 : howl);
     const smoke = slide * 16 + brake * 6 + spin * 12;
     REAR.forEach((w, k) => {
       const [wx, wz] = WHEELS[w];

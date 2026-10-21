@@ -1,7 +1,7 @@
 /**
  * Tiny synthesized audio (Web Audio, no sound files): a direct-drive kart engine with a slipping clutch at
- * the launch, a rev limiter, overrun burble and a dip in pitch when you lift; tyre squeal; kerb rumble;
- * grass and gravel; wind that rises with speed; a barrier scrape; impact thumps; start beeps.
+ * the launch, overrun burble and a dip in pitch when you lift; tyre squeal; kerb rumble; grass and
+ * gravel; a low rush of air at speed; a barrier scrape; impact thumps; start beeps.
  */
 
 // Phones only let audio start inside a tap. The race starts on its own once the world is built, so
@@ -41,11 +41,7 @@ export class KartAudio {
   private engSub!: OscillatorNode;
   private engGain!: GainNode;
   private engFilter!: BiquadFilterNode;
-  private engAm!: GainNode; // the limiter cuts the engine in and out through this
   private detune!: ConstantSourceNode; // cents, shared by the three engine oscillators
-  private limLfo!: OscillatorNode;
-  private limDepth!: GainNode;
-  private limAmDepth!: GainNode;
   private wobDepth!: GainNode;
   private squealGain!: GainNode;
   private squealBp!: BiquadFilterNode;
@@ -99,28 +95,22 @@ export class KartAudio {
     // Engine: saw + square an octave up + a sub-octave for body, through a resonant low-pass.
     this.engFilter = filter('lowpass', 900, 4);
     this.engGain = gain(0);
-    this.engAm = gain(1);
     this.engA = osc('sawtooth', 50);
     this.engB = osc('square', 100);
     this.engSub = osc('triangle', 25);
     this.engA.connect(this.engFilter);
     this.engB.connect(gain(0.35)).connect(this.engFilter);
     this.engSub.connect(gain(0.25)).connect(this.engFilter);
-    this.engFilter.connect(this.engGain).connect(this.engAm).connect(this.master);
-    // One detune bus for the pitch dip on lift, the limiter and the wheelspin wobble in the grass.
+    this.engFilter.connect(this.engGain).connect(this.master);
+    // One detune bus for the pitch dip on lift and the wheelspin wobble in the grass.
     this.detune = ctx.createConstantSource();
     this.detune.offset.value = 0;
     for (const o of [this.engA, this.engB, this.engSub]) this.detune.connect(o.detune);
-    this.limLfo = osc('square', 16);
-    this.limDepth = gain(0);
-    this.limAmDepth = gain(0);
-    this.limLfo.connect(this.limDepth).connect(this.detune.offset);
-    this.limLfo.connect(this.limAmDepth).connect(this.engAm.gain);
     const wob = osc('sine', 9);
     this.wobDepth = gain(0);
     wob.connect(this.wobDepth).connect(this.detune.offset);
 
-    // Noise beds: white (squeal, gravel, wind, scrape) and brown (grass), one looping source each.
+    // Noise beds: white (squeal, gravel, scrape) and brown (grass, wind), one looping source each.
     const len = ctx.sampleRate * 2;
     this.white = ctx.createBuffer(1, len, ctx.sampleRate);
     const brown = ctx.createBuffer(1, len, ctx.sampleRate);
@@ -141,7 +131,7 @@ export class KartAudio {
     const white = loop(this.white);
     const brownSrc = loop(brown);
 
-    this.squealBp = filter('bandpass', 2400, 6);
+    this.squealBp = filter('bandpass', 1300, 9); // a tonal howl rather than a hiss
     this.squealGain = gain(0);
     white.connect(this.squealBp).connect(this.squealGain).connect(this.master);
 
@@ -150,9 +140,10 @@ export class KartAudio {
     this.grassGain = gain(0);
     brownSrc.connect(filter('lowpass', 350)).connect(this.grassGain).connect(this.master);
 
-    this.windLp = filter('lowpass', 1500);
+    // Air: a low rush of brown noise (white noise read as a constant "sss" over the engine).
+    this.windLp = filter('lowpass', 300);
     this.windGain = gain(0);
-    white.connect(filter('highpass', 900)).connect(this.windLp).connect(this.windGain).connect(this.master);
+    brownSrc.connect(filter('highpass', 60)).connect(this.windLp).connect(this.windGain).connect(this.master);
 
     this.scrapeGain = gain(0);
     white.connect(filter('bandpass', 3200, 2)).connect(this.scrapeGain).connect(this.master);
@@ -166,7 +157,7 @@ export class KartAudio {
     this.kerbGain = gain(0);
     this.kerbOsc.connect(filter('lowpass', 220)).connect(am).connect(this.kerbGain).connect(this.master);
 
-    for (const s of [this.engA, this.engB, this.engSub, this.detune, this.limLfo, wob, white, brownSrc, this.kerbOsc, this.kerbLfo]) s.start();
+    for (const s of [this.engA, this.engB, this.engSub, this.detune, wob, white, brownSrc, this.kerbOsc, this.kerbLfo]) s.start();
   }
 
   toggleMute() {
@@ -209,15 +200,11 @@ export class KartAudio {
     this.lastThrottle = throttle;
     if (!on && speed > 9 && Math.random() < dt * 14 * Math.exp(-this.liftT / 0.8)) this.pop();
 
-    // Rev limiter flat out near top speed: ±1.5% at 16 Hz and the ignition cutting in and out.
-    const lim = on && speed > 0.97 * k.vmax ? 1 : 0;
-    this.limDepth.gain.setTargetAtTime(lim * 26, t, 0.03);
-    this.limAmDepth.gain.setTargetAtTime(lim * 0.35, t, 0.03);
     // Wheelspin in the grass: the note wobbles ±2%.
     this.wobDepth.gain.setTargetAtTime(k.grass > 0 && on ? 35 : 0, t, 0.05);
 
     this.squealGain.gain.setTargetAtTime(0.12 * k.squeal, t, 0.05);
-    this.squealBp.frequency.setTargetAtTime(2200 + 600 * k.squeal, t, 0.08);
+    this.squealBp.frequency.setTargetAtTime(1150 + 350 * k.squeal, t, 0.08);
     this.kerbLfo.frequency.setTargetAtTime(Math.max(2, speed / 0.8), t, 0.02);
     this.kerbOsc.frequency.setTargetAtTime(80 + speed, t, 0.05);
     this.kerbGain.gain.setTargetAtTime(0.12 * k.kerb, t, 0.01);
@@ -225,8 +212,9 @@ export class KartAudio {
     this.grassGain.gain.setTargetAtTime(0.08 * g, t, 0.04);
     this.crunchGain.gain.setTargetAtTime(0.03 * g, t, 0.04);
     const v = speed / k.vmax;
-    this.windGain.gain.setTargetAtTime(0.05 * v * v * (k.cockpit ? 2 : 1), t, 0.15);
-    this.windLp.frequency.setTargetAtTime(1200 + 160 * speed, t, 0.15);
+    // Only near top speed, and well under the engine (louder in the cockpit view).
+    this.windGain.gain.setTargetAtTime(0.06 * v * v * v * (k.cockpit ? 1.8 : 1), t, 0.2);
+    this.windLp.frequency.setTargetAtTime(220 + 14 * speed, t, 0.2);
     this.scrapeGain.gain.setTargetAtTime(0.07 * k.scrape, t, 0.03);
   }
 
@@ -323,7 +311,6 @@ export class KartAudio {
     const t = this.ctx.currentTime;
     this.engGain.gain.setTargetAtTime(0, t, 0.1);
     for (const g of [this.squealGain, this.kerbGain, this.grassGain, this.crunchGain, this.windGain, this.scrapeGain]) g.gain.setTargetAtTime(0, t, 0.05);
-    this.limAmDepth.gain.setTargetAtTime(0, t, 0.05);
   }
 
   dispose() {
