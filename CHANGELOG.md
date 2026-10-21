@@ -6,6 +6,13 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+### Fixed
+- **No more hiss on the road.** The tyres only squeal when you're properly sliding or locking a
+  wheel (they squealed through a third of every clean lap), and the squeal is a lower howl rather
+  than a hiss.
+- **Calmer at top speed**: the rush of air is a low whoosh near top speed instead of a constant
+  "sss", the engine no longer buzzes flat out, and the rev-limiter stutter is gone.
+
 ## [0.29.0] - 2026-10-21
 
 ### Changed
