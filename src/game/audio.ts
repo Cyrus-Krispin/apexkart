@@ -92,8 +92,8 @@ export class KartAudio {
       return b;
     };
 
-    // Engine: saw + square an octave up + a sub-octave for body, through a resonant low-pass.
-    this.engFilter = filter('lowpass', 900, 4);
+    // Engine: saw + square an octave up + a sub-octave for body, through a gently resonant low-pass.
+    this.engFilter = filter('lowpass', 900, 2.2);
     this.engGain = gain(0);
     this.engA = osc('sawtooth', 50);
     this.engB = osc('square', 100);
@@ -183,8 +183,9 @@ export class KartAudio {
     this.engA.frequency.setTargetAtTime(f, t, 0.04);
     this.engB.frequency.setTargetAtTime(f * 2.01, t, 0.04);
     this.engSub.frequency.setTargetAtTime(f * 0.5, t, 0.04);
-    // Off throttle the note goes dull and quieter.
-    this.engFilter.frequency.setTargetAtTime(on ? 500 + throttle * 1400 + speed * 30 : 380 + speed * 12, t, 0.06);
+    // Off throttle the note goes dull and quieter. Flat out it tops out near 2 kHz: higher, the
+    // harmonics read as a buzzy hiss over everything else.
+    this.engFilter.frequency.setTargetAtTime(on ? 450 + throttle * 1050 + speed * 22 : 380 + speed * 12, t, 0.06);
     this.engGain.gain.setTargetAtTime(on ? 0.09 + throttle * 0.08 : 0.06, t, 0.08);
 
     // Lift: a small dip in pitch as the load comes off, then overrun pops for a moment.
