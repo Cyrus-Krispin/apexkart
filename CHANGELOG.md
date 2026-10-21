@@ -6,6 +6,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+## [0.29.1] - 2026-10-21
+
 ### Fixed
 - **No more hiss on the road.** The tyres only squeal when you're properly sliding or locking a
   wheel (they squealed through a third of every clean lap), and the squeal is a lower howl rather
@@ -519,7 +521,8 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 ### Fixed
 - Leaderboard and lap submission on the live site.
 
-[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.29.0...HEAD
+[Unreleased]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.29.1...HEAD
+[0.29.1]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.29.0...v0.29.1
 [0.29.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/Cyrus-Krispin/apexkart/compare/v0.26.0...v0.27.0
