@@ -7,7 +7,7 @@
 import { gathered, iceServers } from './mesh';
 import { tabIdentity } from './room';
 import type { SignalMsg } from '../shared/room';
-import type { PadButton, PadCtl, PadFrame, PadPollResponse, PadView } from '../shared/pad';
+import { PARTY_MAX, type PadButton, type PadCtl, type PadFrame, type PadPollResponse, type PadView } from '../shared/pad';
 
 export type { PadButton, PadView } from '../shared/pad';
 
@@ -131,31 +131,187 @@ export interface PadInput {
   gas: number;
 }
 
+/** A phone's steering and vibration, as a race uses them (one PadConn per kart in a party). */
+export interface PadSource {
+  input(): PadInput | null;
+  buzz(p: number | number[]): void;
+}
+
 const CODE_KEY = 'ak:pad:code'; // sessionStorage: a reload keeps the code, so the phone reconnects by itself
+const PARTY_KEY = 'ak:pad:party'; // the same for a party's code
 const FRAME_STALE_MS = 400; // no steering for this long: hands off (straight ahead, no pedals)
 const SILENT_MS = 6000; // and for this long: the phone is gone (closed, out of range)
 const POLL_FAST = 1200;
 const POLL_LIVE = 15_000; // connected: keeps the code alive, and lets another phone take over by scanning it
 const GIVE_UP_MS = 5 * 60_000; // waiting this long with no phone: close the code
 
-type ScreenEvents = { status: (s: PadStatus) => void; button: (b: PadButton) => void };
+type ViewMsg = Extract<PadCtl, { k: 'view' }>;
 
-export class PadScreen {
-  status: PadStatus = 'off';
-  code: string | null = null;
+/**
+ * One phone, on the screen's side: the link to it, its newest steering, and pings to notice when
+ * it has gone. The code it joined, and the polling that brings its offers, belong to PadScreen
+ * (one phone) or PartyScreen (a seat each).
+ */
+export class PadConn implements PadSource {
+  status: 'connecting' | 'live' | 'lost' = 'lost';
   rtt: number | null = null;
   /** The phone steers by tilting (false: it has no motion sensor, so it shows steer buttons). */
   tilt = true;
   private link: Link | null = null;
   private frame: PadFrame | null = null;
   private frameAt = 0;
-  private pollTimer = 0;
+  private since = 0; // when the link came up
   private pingTimer = 0;
   private pingAt = 0;
+  private view: ViewMsg = { k: 'view', view: 'menu', scheme: 'simple', mp: false };
+  /** Sent after the view whenever the link comes up (a party seat's colour). */
+  hello: PadCtl | null = null;
+
+  constructor(private h: { status(s: PadConn['status']): void; button(b: PadButton): void; answer(m: SignalMsg, sdp: string): Promise<unknown> }) {}
+
+  get live() {
+    return this.status === 'live';
+  }
+
+  /** The phone (this one again, or a new one taking over) offers a link: answer it with a fresh one. */
+  async connect(m: SignalMsg) {
+    this.drop();
+    this.setStatus('connecting');
+    const link = this.newLink();
+    try {
+      const sdp = await link.answer(m.sdp);
+      if (link !== this.link) return;
+      await this.h.answer(m, sdp);
+    } catch (e) {
+      console.warn('[pad] answer failed', e);
+    }
+    // No channel in time: the phone retries with a new offer.
+    window.setTimeout(() => link === this.link && !link.open && this.lost(), 15_000);
+  }
+
+  /** The phone's steering now, or null when it isn't steering. */
+  input(): PadInput | null {
+    if (this.status !== 'live' || !this.frame || performance.now() - this.frameAt > FRAME_STALE_MS) return null;
+    const [, steer, brake, gas] = this.frame;
+    const c = (x: number, lo: number) => Math.max(lo, Math.min(1, x));
+    return { steer: c(steer, -1), brake: c(brake, 0), gas: c(gas, 0) };
+  }
+
+  /** What the game is showing, so the phone offers the right buttons. */
+  setView(view: PadView, scheme: 'simple' | 'classic', mp = false) {
+    this.view = { k: 'view', view, scheme, mp };
+    this.link?.sendCtl(this.view);
+  }
+
+  send(m: PadCtl) {
+    this.link?.sendCtl(m);
+  }
+
+  buzz(p: number | number[]) {
+    if (this.status === 'live') this.link?.sendCtl({ k: 'buzz', p });
+  }
+
+  /** Let go of the phone without a word to whoever owns this (closing the code, or a seat emptied). */
+  close() {
+    this.link?.sendCtl({ k: 'bye' });
+    this.drop();
+    this.status = 'lost';
+    this.rtt = null;
+  }
+
+  private setStatus(s: PadConn['status']) {
+    if (s === this.status) return;
+    this.status = s;
+    if (s !== 'live') this.rtt = null;
+    this.h.status(s);
+  }
+
+  private newLink() {
+    const link: Link = new Link({
+      open: () => {
+        if (link !== this.link) return;
+        this.frame = null;
+        this.since = performance.now();
+        link.sendCtl(this.view);
+        if (this.hello) link.sendCtl(this.hello);
+        clearInterval(this.pingTimer);
+        this.pingAt = performance.now();
+        this.pingTimer = window.setInterval(() => this.ping(), 1000);
+        this.setStatus('live');
+      },
+      ctl: (m) => link === this.link && this.onCtl(m),
+      frame: (f) => {
+        if (link !== this.link || (this.frame && f[0] <= this.frame[0] && f[0] > this.frame[0] - 1000)) return; // out of order
+        this.frame = f;
+        this.frameAt = performance.now();
+      },
+      lost: () => link === this.link && this.lost(),
+    });
+    this.link = link;
+    return link;
+  }
+
+  private onCtl(m: PadCtl) {
+    if (m.k === 'btn') this.h.button(m.b);
+    else if (m.k === 'hello') this.tilt = m.tilt;
+    else if (m.k === 'ping') this.link?.sendCtl({ k: 'pong', t: m.t });
+    else if (m.k === 'pong') {
+      const rtt = performance.now() - m.t;
+      this.rtt = this.rtt == null ? rtt : this.rtt * 0.7 + rtt * 0.3;
+    } else if (m.k === 'bye') this.lost();
+  }
+
+  private ping() {
+    if (this.status !== 'live') return;
+    const now = performance.now();
+    // This tick came late: the page was busy (building a race), and the phone's frames may still be
+    // waiting to be read. Only judge silence on a tick that came on time.
+    const late = now - this.pingAt > 2500;
+    this.pingAt = now;
+    // A phone that has gone quiet is gone: wait for it to come back.
+    if (!late && now - this.frameAt > SILENT_MS && now - this.since > SILENT_MS) return this.lost();
+    this.link?.sendCtl({ k: 'ping', t: now });
+  }
+
+  /** The link dropped: wait for the phone's next offer. */
+  private lost() {
+    this.drop();
+    this.setStatus('lost');
+  }
+
+  private drop() {
+    clearInterval(this.pingTimer);
+    this.link?.close();
+    this.link = null;
+    this.frame = null;
+  }
+}
+
+type ScreenEvents = { status: (s: PadStatus) => void; button: (b: PadButton) => void };
+
+/** The game's one phone controller: a code for one phone, which steers whatever race is on. */
+export class PadScreen implements PadSource {
+  status: PadStatus = 'off';
+  code: string | null = null;
+  private pollTimer = 0;
   private polling = false;
   private since = 0; // when we started waiting (for GIVE_UP_MS)
-  private view: Extract<PadCtl, { k: 'view' }> = { k: 'view', view: 'menu', scheme: 'simple', mp: false };
   private listeners: { [K in keyof ScreenEvents]: Set<ScreenEvents[K]> } = { status: new Set(), button: new Set() };
+  private conn = new PadConn({
+    status: (s) => {
+      if (s === 'lost') {
+        this.since = performance.now();
+        this.setStatus(this.code ? 'lost' : 'off');
+        this.schedule(0);
+        return;
+      }
+      if (s === 'live') this.since = performance.now();
+      this.setStatus(s);
+      if (s === 'live') this.schedule();
+    },
+    button: (b) => this.listeners.button.forEach((fn) => fn(b)),
+    answer: (m, sdp) => post('signal', { code: this.code, k: 'answer', id: m.id, sdp }),
+  });
 
   on<K extends keyof ScreenEvents>(ev: K, fn: ScreenEvents[K]): () => void {
     (this.listeners[ev] as Set<ScreenEvents[K]>).add(fn);
@@ -164,6 +320,15 @@ export class PadScreen {
 
   get live() {
     return this.status === 'live';
+  }
+
+  get rtt() {
+    return this.conn.rtt;
+  }
+
+  /** The phone steers by tilting (false: it shows steer buttons). */
+  get tilt() {
+    return this.conn.tilt;
   }
 
   /** The join link the QR code holds. */
@@ -194,8 +359,7 @@ export class PadScreen {
 
   /** Disconnect the phone and close the code. */
   close() {
-    this.link?.sendCtl({ k: 'bye' });
-    this.drop();
+    this.conn.close();
     clearTimeout(this.pollTimer);
     if (this.code) post('close', { code: this.code }).catch(() => undefined);
     this.code = null;
@@ -205,26 +369,21 @@ export class PadScreen {
 
   /** The phone's steering now, or null when no phone is steering. */
   input(): PadInput | null {
-    if (this.status !== 'live' || !this.frame || performance.now() - this.frameAt > FRAME_STALE_MS) return null;
-    const [, steer, brake, gas] = this.frame;
-    const c = (x: number, lo: number) => Math.max(lo, Math.min(1, x));
-    return { steer: c(steer, -1), brake: c(brake, 0), gas: c(gas, 0) };
+    return this.status === 'live' ? this.conn.input() : null;
   }
 
   /** What the game is showing, so the phone offers the right buttons. */
   setView(view: PadView, scheme: 'simple' | 'classic', mp = false) {
-    this.view = { k: 'view', view, scheme, mp };
-    this.link?.sendCtl(this.view);
+    this.conn.setView(view, scheme, mp);
   }
 
   buzz(p: number | number[]) {
-    if (this.status === 'live') this.link?.sendCtl({ k: 'buzz', p });
+    this.conn.buzz(p);
   }
 
   private setStatus(s: PadStatus) {
     if (s === this.status) return;
     this.status = s;
-    if (s !== 'live') this.rtt = null;
     this.listeners.status.forEach((fn) => fn(s));
   }
 
@@ -249,7 +408,7 @@ export class PadScreen {
       }
       // Only the newest offer matters: older ones are attempts the phone has given up on.
       const offer = res.mail.filter((m) => m.k === 'offer').pop();
-      if (offer) await this.onSignal(offer);
+      if (offer) await this.conn.connect(offer);
     } catch {
       /* next poll */
     } finally {
@@ -257,88 +416,160 @@ export class PadScreen {
     }
     this.schedule();
   }
-
-  private async onSignal(m: SignalMsg) {
-    // A phone (this one again, or a new one taking over) wants to connect: start a fresh link.
-    this.drop();
-    this.setStatus('connecting');
-    const link = this.newLink();
-    try {
-      const sdp = await link.answer(m.sdp);
-      if (link !== this.link) return;
-      await post('signal', { code: this.code, k: 'answer', id: m.id, sdp });
-    } catch (e) {
-      console.warn('[pad] answer failed', e);
-    }
-    // No channel in time: the phone retries with a new offer.
-    window.setTimeout(() => link === this.link && !link.open && this.lost(), 15_000);
-  }
-
-  private newLink() {
-    const link: Link = new Link({
-      open: () => {
-        if (link !== this.link) return;
-        this.frame = null;
-        this.since = performance.now();
-        this.setStatus('live');
-        link.sendCtl(this.view);
-        clearInterval(this.pingTimer);
-        this.pingAt = performance.now();
-        this.pingTimer = window.setInterval(() => this.ping(), 1000);
-        this.schedule();
-      },
-      ctl: (m) => link === this.link && this.onCtl(m),
-      frame: (f) => {
-        if (link !== this.link || (this.frame && f[0] <= this.frame[0] && f[0] > this.frame[0] - 1000)) return; // out of order
-        this.frame = f;
-        this.frameAt = performance.now();
-      },
-      lost: () => link === this.link && this.lost(),
-    });
-    this.link = link;
-    return link;
-  }
-
-  private onCtl(m: PadCtl) {
-    if (m.k === 'btn') this.listeners.button.forEach((fn) => fn(m.b));
-    else if (m.k === 'hello') this.tilt = m.tilt;
-    else if (m.k === 'ping') this.link?.sendCtl({ k: 'pong', t: m.t });
-    else if (m.k === 'pong') {
-      const rtt = performance.now() - m.t;
-      this.rtt = this.rtt == null ? rtt : this.rtt * 0.7 + rtt * 0.3;
-    } else if (m.k === 'bye') this.lost();
-  }
-
-  private ping() {
-    if (this.status !== 'live') return;
-    const now = performance.now();
-    // This tick came late: the page was busy (building a race), and the phone's frames may still be
-    // waiting to be read. Only judge silence on a tick that came on time.
-    const late = now - this.pingAt > 2500;
-    this.pingAt = now;
-    // A phone that has gone quiet is gone: wait for it to come back.
-    if (!late && now - this.frameAt > SILENT_MS && now - this.since > SILENT_MS) return this.lost();
-    this.link?.sendCtl({ k: 'ping', t: now });
-  }
-
-  /** The link dropped: keep the code open and poll for the phone's next offer. */
-  private lost() {
-    this.drop();
-    this.since = performance.now();
-    this.setStatus(this.code ? 'lost' : 'off');
-    this.schedule(0);
-  }
-
-  private drop() {
-    clearInterval(this.pingTimer);
-    this.link?.close();
-    this.link = null;
-    this.frame = null;
-  }
 }
 
 /** The game's one phone controller. */
 export const phonePad = new PadScreen();
+
+// ======================================================================== party (split screen)
+
+/** A party seat: empty, or a phone that is connecting, steering, or has dropped (it keeps the seat). */
+export type SeatStatus = 'empty' | PadConn['status'];
+
+export class PartySeat {
+  /** The phone in this seat (its public id), or null. */
+  mid: string | null = null;
+  constructor(
+    readonly n: number,
+    readonly conn: PadConn,
+  ) {}
+
+  get status(): SeatStatus {
+    return this.mid ? this.conn.status : 'empty';
+  }
+}
+
+type PartyEvents = { seats: (seats: PartySeat[]) => void; button: (seat: number, b: PadButton) => void; closed: () => void };
+
+/**
+ * A party: one code that up to PARTY_MAX phones join, each in its own seat (P1-P4), each steering
+ * its own kart on the split screen (src/party.ts). Seats are the server's: a phone keeps its seat
+ * through a dropped link or a reload of either side, until it leaves or the game removes it.
+ */
+export class PartyScreen {
+  code: string | null = null;
+  readonly seats: PartySeat[];
+  /** Poll quickly for new phones (the lobby is up). In a race only dropped phones are waited for. */
+  welcoming = true;
+  private pollTimer = 0;
+  private polling = false;
+  private on_ = false;
+  // Offers from a phone this poll didn't see seated yet (it joined between reading the seats and the
+  // mail); kept for the next poll, then dropped (the phone offers again).
+  private pending = new Map<string, { m: SignalMsg; polls: number }>();
+  private listeners: { [K in keyof PartyEvents]: Set<PartyEvents[K]> } = { seats: new Set(), button: new Set(), closed: new Set() };
+
+  constructor(colors: string[]) {
+    this.seats = Array.from({ length: PARTY_MAX }, (_, n) => {
+      const seat: PartySeat = new PartySeat(
+        n,
+        new PadConn({
+          status: (s) => {
+            this.emitSeats();
+            if (s === 'lost') this.schedule(0);
+          },
+          button: (b) => this.listeners.button.forEach((fn) => fn(n, b)),
+          answer: (m, sdp) => post('signal', { code: this.code, k: 'answer', id: m.id, sdp, to: seat.mid }),
+        }),
+      );
+      seat.conn.hello = { k: 'seat', n, color: colors[n] };
+      return seat;
+    });
+  }
+
+  on<K extends keyof PartyEvents>(ev: K, fn: PartyEvents[K]): () => void {
+    (this.listeners[ev] as Set<PartyEvents[K]>).add(fn);
+    return () => (this.listeners[ev] as Set<PartyEvents[K]>).delete(fn);
+  }
+
+  get url() {
+    return this.code ? `${location.origin}/pad.html?c=${this.code}` : '';
+  }
+
+  /** Open the party's code (the same one again after a reload, so the phones find it). */
+  async open() {
+    this.on_ = true;
+    const res = await post<{ code: string }>('open', { code: this.code ?? sessionStorage.getItem(PARTY_KEY) ?? '', party: 1 });
+    if (!this.on_) return;
+    this.code = res.code;
+    sessionStorage.setItem(PARTY_KEY, res.code);
+    this.schedule(0);
+  }
+
+  /** Free a seat: its phone is told it's out of the party. */
+  kick(n: number) {
+    const seat = this.seats[n];
+    if (!seat.mid || !this.code) return;
+    seat.conn.close();
+    seat.mid = null;
+    this.emitSeats();
+    post('kick', { code: this.code, seat: n }).catch(() => undefined);
+  }
+
+  /** End the party: every phone is let go and the code closed. */
+  close() {
+    this.on_ = false;
+    clearTimeout(this.pollTimer);
+    for (const s of this.seats) {
+      s.conn.close();
+      s.mid = null;
+    }
+    if (this.code) post('close', { code: this.code }).catch(() => undefined);
+    this.code = null;
+    sessionStorage.removeItem(PARTY_KEY);
+  }
+
+  setView(view: PadView, scheme: 'simple' | 'classic') {
+    for (const s of this.seats) s.conn.setView(view, scheme, true);
+  }
+
+  private emitSeats() {
+    this.listeners.seats.forEach((fn) => fn(this.seats));
+  }
+
+  private schedule(ms?: number) {
+    clearTimeout(this.pollTimer);
+    if (!this.on_) return;
+    const waiting = this.seats.some((s) => s.mid && s.conn.status !== 'live');
+    ms ??= this.welcoming || waiting ? POLL_FAST * (document.hidden ? 3 : 1) : POLL_LIVE;
+    this.pollTimer = window.setTimeout(() => this.poll(), ms);
+  }
+
+  async poll() {
+    if (this.polling || !this.code || !this.on_) return;
+    this.polling = true;
+    try {
+      const res = await post<PadPollResponse>('poll', { code: this.code });
+      if (!this.on_) return;
+      if (!res.open) {
+        // Expired (the laptop slept for 15 minutes, say): the phones can't follow, so start over.
+        this.close();
+        this.listeners.closed.forEach((fn) => fn());
+        return;
+      }
+      let changed = false;
+      (res.seats ?? []).forEach((mid, n) => {
+        const seat = this.seats[n];
+        if (!seat || seat.mid === mid) return;
+        if (seat.mid) seat.conn.close(); // the phone left
+        seat.mid = mid;
+        changed = true;
+      });
+      if (changed) this.emitSeats();
+      for (const m of res.mail) if (m.k === 'offer') this.pending.set(m.from, { m, polls: 0 }); // the newest per phone
+      for (const [from, p] of this.pending) {
+        const seat = this.seats.find((s) => s.mid === from);
+        if (seat) void seat.conn.connect(p.m);
+        if (seat || ++p.polls > 1) this.pending.delete(from);
+      }
+    } catch {
+      /* next poll */
+    } finally {
+      this.polling = false;
+    }
+    this.schedule(this.pending.size ? 300 : undefined);
+  }
+}
 
 // ======================================================================== phone (the controller)
 
@@ -352,8 +583,9 @@ export type PhoneStatus = 'joining' | 'connecting' | 'live' | 'retry' | 'gone';
 const ATTEMPT_MS = 12_000; // two signaling round trips, ICE gathering on both sides, slow function starts
 const PHONE_POLL_MS = 700;
 // The screen pings every second; this long without one and the link is dead. Generous: the game's
-// page can be busy for a few seconds while it builds a race.
-const PING_SILENT_MS = 10_000;
+// page can be busy for several seconds while it builds a race (four of them, in a party). A screen
+// that closes or reloads closes the link, which the phone notices at once.
+const PING_SILENT_MS = 20_000;
 
 export class PadPhone {
   status: PhoneStatus = 'joining';

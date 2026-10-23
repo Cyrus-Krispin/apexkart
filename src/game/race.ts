@@ -6,7 +6,7 @@ import { availableSchemes, controlsPref, Input, saveControlsPref, SCHEME_LABEL, 
 import { KartAudio } from './audio';
 import { KartFx, type FxFrame } from './fx';
 import { Haptics } from './haptics';
-import { phonePad, type PadStatus, type PadView } from '../net/pad';
+import { phonePad, type PadSource, type PadStatus, type PadView } from '../net/pad';
 import { openPadCard, PAD_STATE } from '../ui/padCard';
 import { Atmosphere, resolveTime, type TimePref } from './atmosphere';
 import { awardMedal, earnedMedal, MEDAL_NAME, MEDALS, medalFor, targets } from './medals';
@@ -37,6 +37,19 @@ export interface RaceOptions {
   daily?: boolean;
   /** A challenge: race this driver's leaderboard lap as a ghost (their public id). */
   rival?: string;
+  /** Party (split screen, src/party.ts): one of several karts on this screen, each steered by its own phone. */
+  party?: PartyRaceOptions;
+}
+
+export interface PartyRaceOptions {
+  /** The phone that steers this kart. The keyboard, touch, gamepads and phonePad don't. */
+  pad: PadSource;
+  /** This kart's share of the sound: several engines play at once. */
+  volume: number;
+  /** Fixed for the party: Auto would measure (and remember) a laptop drawing several races. */
+  quality: Quality;
+  /** The world is built and warmed up (or failed to build): the party waits for every kart. */
+  onReady(): void;
 }
 
 interface LocalPB {
@@ -91,6 +104,7 @@ const CAMS = [
 
 type State = 'intro' | 'grid' | 'racing' | 'paused';
 const SYNC_GO = 4.4; // with a synchronised start (mode.startAt), lights go out this long into the grid phase
+const PARTY_ACROSS = 105; // party: the most the camera takes in across, in degrees (wide split-screen panes)
 
 export class Race {
   private pipeline: RenderPipeline;
@@ -182,7 +196,8 @@ export class Race {
   private minimap!: { bg: HTMLCanvasElement; map: (x: number, z: number) => [number, number] };
   private fx!: KartFx; // particles and skid marks
   private bumpHit: KartHit | null = null; // the hardest kart-to-kart contact since the last frame (multiplayer)
-  private padOff: () => void; // phone controller status listener
+  private padOff = () => {}; // phone controller status listener
+  private readySent = false; // party: onReady called
   autopilot = false;
 
   constructor(private opts: RaceOptions) {
@@ -193,7 +208,13 @@ export class Race {
     localStorage.removeItem('ak:style'); // the satellite world is gone; every world is the stylised one
     if (opts.mode?.ghosts === false) this.showGhosts = false;
     this.chase = opts.mode ? 'pb' : opts.rival ? 'rival' : chasePref(); // a challenge starts on its rival
-    this.pb = this.loadPB();
+    // A party's karts are guests' laps on this device: nothing is saved or sent as its owner's.
+    this.pb = opts.party ? null : this.loadPB();
+    if (opts.party) {
+      this.qualitySetting = opts.party.quality;
+      this.audio.volume = opts.party.volume;
+      this.haptics = new Haptics(() => this.audio.muted, opts.party.pad);
+    }
     this.bestSectors = this.pb?.sectors.slice() ?? [];
 
     this.root = document.createElement('div');
@@ -208,7 +229,7 @@ export class Race {
     this.hud = new Hud(this.root, { trackName: opts.track.name, dirLabel: rot.label, dirIcon: rot.icon, color: opts.driver.color, lapRestart: !opts.mode }, (a) => this.action(a));
     this.hud.setVisible(false);
     this.hud.best(this.pb?.ms ?? null);
-    this.input = new Input(this.hud.touch, controlsPref());
+    this.input = new Input(this.hud.touch, opts.party ? 'simple' : controlsPref(), opts.party?.pad);
     this.hud.setControls(this.input.scheme);
     this.syncToggles();
 
@@ -234,9 +255,11 @@ export class Race {
       onBack: () => opts.onExit(),
       onPhone: () => openPadCard(),
     });
-    this.padOff = phonePad.on('status', (st) => this.onPad(st));
-    this.intro.phone(phonePad.status);
-    this.padView('brief');
+    if (!opts.party) {
+      this.padOff = phonePad.on('status', (st) => this.onPad(st));
+      this.intro.phone(phonePad.status);
+      this.padView('brief');
+    }
 
     this.buildWorld();
     if (opts.rival && !opts.mode) this.loadRival(opts.rival);
@@ -325,7 +348,10 @@ export class Race {
         isDisposed: () => this.disposed,
       }).catch((e) => {
         console.error(e);
-        if (first) this.intro.failed();
+        if (first) {
+          this.intro.failed();
+          this.partyReady(); // the party starts without the world rather than wait for it
+        }
         return null;
       });
       if (!world) return;
@@ -406,6 +432,7 @@ export class Race {
       if (gen === this.warmGen && !this.disposed) {
         this.warming = false;
         this.intro.stage('Ready', 1);
+        this.partyReady();
       }
     }
   }
@@ -871,9 +898,32 @@ export class Race {
     }
   }
 
-  /** Tell a paired phone what's on screen, so it offers Start, Pause or Resume. */
+  /** Tell a paired phone what's on screen, so it offers Start, Pause or Resume. A party tells its own phones. */
   private padView(v: PadView) {
-    phonePad.setView(v, this.input.scheme, !!this.opts.mode);
+    if (!this.opts.party) phonePad.setView(v, this.input.scheme, !!this.opts.mode);
+  }
+
+  private partyReady() {
+    if (this.readySent || !this.opts.party) return;
+    this.readySent = true;
+    this.opts.party.onReady();
+  }
+
+  // ------------------------------------------------------------------ party controls (src/party.ts)
+
+  /** Pause or resume (the party pauses every kart together and shows its own menu). */
+  pause(on: boolean) {
+    this.togglePause(on);
+  }
+
+  /** Back on the track, as the Reset button does. */
+  reset() {
+    if (this.state === 'racing') this.recover();
+  }
+
+  /** Move a synchronised start later (by the time the party spent paused). */
+  shiftStart(ms: number) {
+    if (this.opts.mode?.startAt !== undefined) this.opts.mode.startAt += ms;
   }
 
   /** The phone controller connected or dropped. Dropped mid-race: pause, rather than drive on hands-free. */
@@ -1197,6 +1247,7 @@ export class Race {
     const valid = !this.invalid && this.sectorsHit[0] && this.sectorsHit[1] && sectors.length === 3;
     this.lapsDone++;
     this.hud.last(ms, valid);
+    if (this.opts.party) return; // no personal bests: these are guests' laps
     if (!valid) {
       this.hud.lapCard({ lap: this.lapNo, ms, valid: false, delta: null, sectors: [], colors: [], pb: false });
       return;
@@ -1681,8 +1732,11 @@ export class Race {
     // plus the impact punch.
     const base = this.state === 'intro' ? 42 : (mode === 'hood' ? 70 : 60) + p.speed * 0.38;
     const across = this.state === 'intro' ? 0 : 44 + 6 * Math.min(1, p.speed / p.vmax);
-    const floor = THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(across / 2)) / this.camera.aspect));
-    cam.fovBase += (Math.min(100, Math.max(base, floor)) - cam.fovBase) * Math.min(1, dt * 4);
+    const upright = (deg: number) => THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(deg / 2)) / this.camera.aspect));
+    const floor = upright(across);
+    // A party's wide panes (two players, one above the other) would otherwise see round the sides.
+    const ceiling = this.opts.party ? Math.min(100, upright(PARTY_ACROSS)) : 100;
+    cam.fovBase += (Math.min(ceiling, Math.max(base, floor)) - cam.fovBase) * Math.min(1, dt * 4);
     const fov = cam.fovBase + cam.fov * amount;
     if (Math.abs(this.camera.fov - fov) > 0.01) {
       this.camera.fov = fov;
@@ -1847,7 +1901,7 @@ export class Race {
     this.opts.mode?.addon?.dispose?.();
     this.disposed = true;
     this.padOff();
-    phonePad.setView('menu', this.input.scheme, !!this.opts.mode);
+    this.padView('menu');
     cancelAnimationFrame(this.raf);
     removeEventListener('resize', this.onResize);
     this.intro.dispose();

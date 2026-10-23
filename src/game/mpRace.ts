@@ -1,10 +1,11 @@
 // Multiplayer race add-on for Race (via src/game/raceMode.ts): tracks race progress and the
 // finish, streams the local kart's pose to the room, draws the other karts, and feeds the
-// standings/results overlay.
+// standings/results overlay. The room is an online one (RoomClient), or a party's split screen,
+// where each kart's "room" is a seat on a hub in this page (src/game/partyHub.ts).
 import { RemoteKarts } from './remoteKarts';
-import { RaceOverlay, type OverlayView, type StandingRow } from '../ui/raceOverlay';
+import { RaceOverlay, ordinal, type OverlayView, type StandingRow } from '../ui/raceOverlay';
 import { FINISH_GRACE_MS, type GridSlot, type PoseTuple, type RoomState } from '../shared/room';
-import type { RoomClient } from '../net/room';
+import type { RoomEvents } from '../net/room';
 import { gridPose, type RaceAddon, type RaceContext, type RaceMode } from './raceMode';
 import type { KartPhysics } from './kart';
 import { LaunchHint, TowIndicator } from './hud';
@@ -46,8 +47,26 @@ export class RaceDistance {
   }
 }
 
+/** What a race needs of its room: RoomClient has all of it, and so does a party seat. */
+export interface RaceRoom {
+  readonly mid: string;
+  readonly state: RoomState | null;
+  /** The newest pose sent (heartbeats carry it while the mesh is down). */
+  localPose: PoseTuple | null;
+  /** Room time for a performance.now() time. */
+  readonly clock: { at(perfMs: number): number };
+  readonly mesh: { sendPose(p: PoseTuple): void; relayPeers(): Iterable<string> };
+  on<K extends 'state' | 'pose' | 'ctl'>(ev: K, fn: RoomEvents[K]): () => void;
+  finish(race: number, ms: number | null): Promise<unknown>;
+  /**
+   * A party: everyone's progress as last reported (laps), the same for every kart on the screen, so
+   * the views never disagree on the order (each one's own kart is ahead of what it sees of others).
+   */
+  progressOf?(mid: string): number | undefined;
+}
+
 export interface MpRaceOptions {
-  room: RoomClient;
+  room: RaceRoom;
   race: number;
   grid: GridSlot[];
   laps: number;
@@ -55,6 +74,8 @@ export interface MpRaceOptions {
   startAt: number;
   /** Player wants the lobby (results "Back to lobby"). */
   onLobby: () => void;
+  /** Positions as 1st, 2nd… (a party, where the players are called P1-P4). */
+  ordinals?: boolean;
 }
 
 export class MultiplayerRace implements RaceAddon {
@@ -199,7 +220,7 @@ export class MultiplayerRace implements RaceAddon {
     if (this.finishMs !== undefined && this.lastLap <= this.o.laps) {
       this.lastLap = this.o.laps + 1;
       const pos = this.standings().findIndex((r) => r.me) + 1;
-      if (this.finishMs !== null) this.ctx.banner(`Finished P${pos}`, 'go', 3);
+      if (this.finishMs !== null) this.ctx.banner(`Finished ${this.o.ordinals ? ordinal(pos) : `P${pos}`}`, 'go', 3);
     }
 
     if (perf - this.lastHud > 120) {
@@ -219,6 +240,11 @@ export class MultiplayerRace implements RaceAddon {
 
   private currentLap() {
     return Math.max(1, Math.floor(this.race.dist / this.L) + 1);
+  }
+
+  /** The start moved later (a party paused on the grid or mid-race): lights out, and every time from it, too. */
+  shiftStart(ms: number) {
+    this.o.startAt += ms;
   }
 
   /** Mark the local player as retired (left the race before the flag). */
@@ -242,9 +268,10 @@ export class MultiplayerRace implements RaceAddon {
     const rows = this.o.grid.map((g, i) => {
       const me = g.mid === room.mid;
       const fin = me ? this.finishMs : this.remoteFin.has(g.mid) ? this.remoteFin.get(g.mid) : undefined;
-      const remote = me ? 0 : this.karts.progress(g.mid, now);
+      const shared = room.progressOf?.(g.mid);
+      const remote = me || shared !== undefined ? 0 : this.karts.progress(g.mid, now);
       // Before their first pose, a player is where the grid put them.
-      const prog = me ? this.progress() : remote >= -0.5 ? remote : gridPose(this.ctx.track, i).s / this.L - 1;
+      const prog = shared ?? (me ? this.progress() : remote >= -0.5 ? remote : gridPose(this.ctx.track, i).s / this.L - 1);
       const status: StandingRow['status'] =
         typeof fin === 'number' ? 'finished' : fin === null ? 'dnf' : !me && this.gone.has(g.mid) ? 'out' : 'racing';
       return { mid: g.mid, name: me ? 'You' : g.name, color: g.color, me, status, ms: typeof fin === 'number' ? fin : null, lap: Math.max(1, Math.floor(prog) + 1), prog };
@@ -256,7 +283,7 @@ export class MultiplayerRace implements RaceAddon {
 
   private view(): OverlayView {
     const rows = this.standings();
-    rows.forEach((r, i) => !r.me && this.karts.setLabel(r.mid, `P${i + 1}`));
+    rows.forEach((r, i) => !r.me && this.karts.setLabel(r.mid, this.o.ordinals ? ordinal(i + 1) : `P${i + 1}`));
     const untilGo = (this.o.startAt - performance.now()) / 1000;
     const times = rows.filter((r) => r.status === 'finished').map((r) => r.ms!);
     const graceEnd = times.length ? this.o.startAt + Math.min(...times) + FINISH_GRACE_MS : null;
@@ -269,6 +296,7 @@ export class MultiplayerRace implements RaceAddon {
       finished: this.finishMs !== undefined,
       final: this.final,
       graceLeft: graceEnd !== null ? Math.max(0, (graceEnd - performance.now()) / 1000) : null,
+      ordinals: this.o.ordinals,
     };
   }
 

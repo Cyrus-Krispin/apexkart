@@ -111,6 +111,16 @@ Phones without a motion sensor get ◀ ▶ buttons instead. Pair one phone per l
 in a multiplayer room can have their own. The details are in
 [docs/phone-controller.md](docs/phone-controller.md).
 
+## Party: split screen, a phone each
+
+Press **Party** on a laptop or a TV and everyone scans the same QR code. Up to four phones join as
+P1 to P4, each steering its own kart in its own view on the one screen: one above the other for two
+players on a wide screen, a 2 × 2 grid for three or four (with three, the fourth corner is the live
+standings). It is a real race, with a synchronised start, kart-to-kart contact, slipstream and a
+classification at the end, because each view runs the same race code as an online room. Any phone
+can start, pause and restart; if one drops out the race pauses until it is back, or the rest race on
+without it. The details are in [docs/party.md](docs/party.md).
+
 ## Made for phones too
 
 <img src="docs/media/phones.jpg" alt="Four phone screenshots: the timing tower, the circuit page, the grid, and a race with touch controls" width="100%">
@@ -162,6 +172,7 @@ flowchart LR
   Redis --> Board["Leaderboards, live feed,<br/>who's on track"]
   Race <-->|"WebRTC poses"| Friends["Friends' karts"]
   Phone["Phone controller<br/>pad.html"] -->|"WebRTC tilt"| Race
+  Party["Party: up to 4 phones,<br/>one Race view each<br/>src/partyController.ts"] --> Race
 ```
 
 | Piece | What it is |

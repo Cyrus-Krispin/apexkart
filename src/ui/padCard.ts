@@ -36,6 +36,25 @@ export function initPhonePad(o: { entryParent?: HTMLElement | null }) {
   if (import.meta.env.DEV) (window as { __pad?: typeof phonePad }).__pad = phonePad;
 }
 
+/** A QR code of `url`, as SVG markup. The encoder loads the first time a code is shown. */
+export async function qrSvg(url: string) {
+  const { encode } = await import('uqr');
+  const { data, size } = encode(url, { ecc: 'M', border: 2 });
+  let d = '';
+  data.forEach((row, y) => row.forEach((on, x) => on && (d += `M${x} ${y}h1v1h-1z`)));
+  return `<svg viewBox="0 0 ${size} ${size}" shape-rendering="crispEdges" role="img" aria-label="QR code: ${escapeHtml(url)}"><rect width="${size}" height="${size}" fill="#fff"/><path d="${d}" fill="#0b0c10"/></svg>`;
+}
+
+/** Things that stop a phone joining from here, in development mostly (HTML, or ''). */
+export function joinWarning() {
+  const local = /^(localhost|127\.|\[::1\])/.test(location.hostname);
+  return local
+    ? 'Your phone can’t reach “localhost”. Open the game at this computer’s network address instead (<code class="mono">npm run dev -- --host</code>).'
+    : location.protocol !== 'https:'
+      ? 'Over plain http, phones won’t share their motion sensor: the phone will offer steer buttons instead of tilt.'
+      : '';
+}
+
 let open: PadCard | null = null;
 
 /** Show the pairing card (or bring the open one back). */
@@ -154,22 +173,12 @@ class PadCard {
       qr.innerHTML = '<span class="pc-qr-wait mono">…</span>';
       return;
     }
-    const { encode } = await import('uqr'); // only when someone pairs a phone
-    if (this.shownCode !== code) return;
-    const { data, size } = encode(phonePad.url, { ecc: 'M', border: 2 });
-    let d = '';
-    data.forEach((row, y) => row.forEach((on, x) => on && (d += `M${x} ${y}h1v1h-1z`)));
-    qr.innerHTML = `<svg viewBox="0 0 ${size} ${size}" shape-rendering="crispEdges" role="img" aria-label="QR code: ${escapeHtml(phonePad.url)}"><rect width="${size}" height="${size}" fill="#fff"/><path d="${d}" fill="#0b0c10"/></svg>`;
+    const svg = await qrSvg(phonePad.url);
+    if (this.shownCode === code) qr.innerHTML = svg;
   }
 
-  /** Things that stop a phone joining from here, in development mostly. */
   private warn() {
-    const local = /^(localhost|127\.|\[::1\])/.test(location.hostname);
-    const msg = local
-      ? 'Your phone can’t reach “localhost”. Open the game at this computer’s network address instead (<code class="mono">npm run dev -- --host</code>).'
-      : location.protocol !== 'https:'
-        ? 'Over plain http, phones won’t share their motion sensor: the phone will offer steer buttons instead of tilt.'
-        : '';
+    const msg = joinWarning();
     this.$('warn').hidden = !msg;
     this.$('warn').innerHTML = msg;
   }

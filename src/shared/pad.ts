@@ -7,12 +7,17 @@ import type { SignalMsg } from './room';
 /** A pairing code lives this long after the screen's last poll. */
 export const PAD_TTL_S = 15 * 60;
 
+/** Phones a party code (split screen, src/party.ts) seats. */
+export const PARTY_MAX = 4;
+
 export interface PadPollResponse {
   now: number;
   /** false: the code has expired or was closed (the screen opens a new one), or another phone took it. */
   open: boolean;
   /** The paired phone's id, or null while no phone has joined. */
   pad: string | null;
+  /** A party code: the phone in each seat (PARTY_MAX of them), or null for an empty seat. */
+  seats?: (string | null)[];
   mail: SignalMsg[];
 }
 
@@ -31,6 +36,7 @@ export type PadCtl =
   | { k: 'hello'; tilt: boolean } // phone -> screen: whether it steers by tilt or by buttons
   | { k: 'view'; view: PadView; scheme: 'simple' | 'classic'; mp: boolean } // screen -> phone
   | { k: 'buzz'; p: number | number[] } // screen -> phone: vibrate (Android)
+  | { k: 'seat'; n: number; color: string } // screen -> phone, in a party: which kart it drives (0 = P1)
   | { k: 'ping'; t: number }
   | { k: 'pong'; t: number }
   | { k: 'bye' };

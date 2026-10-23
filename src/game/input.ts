@@ -1,5 +1,5 @@
 import type { Controls } from './kart';
-import { phonePad, type PadButton } from '../net/pad';
+import { phonePad, type PadButton, type PadSource } from '../net/pad';
 
 /** Simple accelerates by itself (brake and steer only); Classic is throttle and brake. */
 export type ControlScheme = 'simple' | 'classic';
@@ -31,7 +31,10 @@ export function saveControlsPref(s: ControlScheme) {
 /** Phone controller buttons act as these keys (Start is handled by the briefing's own key listener). */
 const PAD_KEY: Record<Exclude<PadButton, 'go'>, string> = { pause: 'Escape', reset: 'r' };
 
-/** Keyboard + gamepad + touch + a paired phone (src/net/pad.ts), merged into one Controls value per frame. */
+/**
+ * Keyboard + gamepad + touch + a paired phone (src/net/pad.ts), merged into one Controls value per frame.
+ * A party kart (src/party.ts) has only its own phone: `pad`.
+ */
 export class Input {
   private keys = new Set<string>();
   private fingers = new Map<number, TouchKey | null>(); // pointerId -> the control under that finger
@@ -43,7 +46,9 @@ export class Input {
   constructor(
     private touchRoot: HTMLElement,
     public scheme: ControlScheme,
+    private pad?: PadSource,
   ) {
+    if (pad) return; // the party handles the keyboard and the phones' buttons for every kart
     const down = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' ', 'Backspace'].includes(e.key)) e.preventDefault();
@@ -137,6 +142,7 @@ export class Input {
   }
 
   read(dt: number): Controls {
+    if (this.pad) return this.readPad();
     const k = this.keys;
     const classic = this.scheme === 'classic';
     const pad = navigator.getGamepads?.().find((p) => p && p.connected);
@@ -174,6 +180,13 @@ export class Input {
     // reverses (KartPhysics), so a player can back off a wall.
     if (!classic) throttle = 1 - brake;
     return { throttle, brake, steer, drift: false }; // no drift: the field stays for the physics and ghosts
+  }
+
+  /** A party kart: its phone alone, read as below. A phone that isn't steering lets the kart roll to a stop. */
+  private readPad(): Controls {
+    const p = this.pad!.input();
+    if (!p) return { throttle: 0, brake: 0, steer: 0, drift: false };
+    return { throttle: this.scheme === 'classic' ? p.gas : 1 - p.brake, brake: p.brake, steer: p.steer, drift: false };
   }
 
   dispose() {
