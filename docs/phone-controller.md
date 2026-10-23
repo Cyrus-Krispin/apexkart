@@ -3,7 +3,7 @@
 A phone steers the kart on another screen. The laptop shows a QR code, the phone scans it, and
 from then on the phone is the steering wheel: hold it sideways and tilt to steer, press the screen
 to brake. It works in time trials and in multiplayer (each player pairs their own phone with their
-own laptop).
+own laptop). A party (split screen, [party.md](party.md)) seats up to four phones on one code.
 
 ## How it connects
 
@@ -74,8 +74,9 @@ don't share the sensor and fall back to the ◀ ▶ buttons.
 ```
 src/shared/pad.ts      protocol: messages, frame format, timings (client and API)
 api/pad.ts             the pairing endpoint: open, join, signal, poll, close
-src/net/pad.ts         Link (one RTCPeerConnection), PadScreen (phonePad, the laptop's one
-                       controller) and PadPhone (the phone side)
+src/net/pad.ts         Link (one RTCPeerConnection), PadConn (one phone, on the laptop's side),
+                       PadScreen (phonePad, the laptop's one controller), PartyScreen (a
+                       party's four seats) and PadPhone (the phone side)
 src/ui/padCard.ts      the Phone button in the home header and the QR card
 src/ui/pad.css         its styles
 pad.html               the phone page (a second Vite entry, see vite.config.ts)

@@ -7,6 +7,7 @@ import { loadDriver } from './net/api';
 import { initMultiplayer } from './multiplayer';
 import { initChangelog } from './ui/changelog';
 import { initPhonePad } from './ui/padCard';
+import { initParty } from './party';
 
 const driver = await loadDriver();
 const atlasRoot = document.getElementById('atlas')!;
@@ -63,6 +64,19 @@ initMultiplayer({
 
 // Your phone as the steering wheel: a QR code to scan, then tilt to steer. See docs/phone-controller.md.
 initPhonePad({ entryParent: atlasRoot.querySelector<HTMLElement>('.top-right') });
+
+// Party: split screen on this computer, a phone for each player (#/party). See docs/party.md.
+initParty({
+  container: gameRoot,
+  entryParent: atlasRoot.querySelector<HTMLElement>('.top-right'),
+  enter: () => {
+    starting++;
+    race?.dispose();
+    race = null;
+    atlas.hide();
+  },
+  leave: () => atlas.show(),
+});
 
 // What's new (#/changelog) and the version link in the top bar.
 initChangelog({ entryParent: atlasRoot.querySelector<HTMLElement>('.top-right') });

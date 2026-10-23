@@ -59,6 +59,8 @@ export class KartAudio {
   private lastT = 0;
   private lastImpact = 0;
   private _muted = localStorage.getItem('ak:muted') === '1';
+  /** Share of the full volume (a party plays one kart per player). Set before start(). */
+  volume = 1;
 
   get muted() {
     return this._muted;
@@ -71,7 +73,7 @@ export class KartAudio {
     void ctx.resume();
     this.ctx = ctx;
     this.master = ctx.createGain();
-    this.master.gain.value = this._muted ? 0 : VOLUME;
+    this.master.gain.value = this._muted ? 0 : VOLUME * this.volume;
     this.master.connect(ctx.destination);
     const gain = (v = 0) => {
       const g = ctx.createGain();
@@ -163,7 +165,7 @@ export class KartAudio {
   toggleMute() {
     this._muted = !this._muted;
     localStorage.setItem('ak:muted', this._muted ? '1' : '0');
-    if (this.ctx) this.master.gain.setTargetAtTime(this._muted ? 0 : VOLUME, this.ctx.currentTime, 0.05);
+    if (this.ctx) this.master.gain.setTargetAtTime(this._muted ? 0 : VOLUME * this.volume, this.ctx.currentTime, 0.05);
     return this._muted;
   }
 

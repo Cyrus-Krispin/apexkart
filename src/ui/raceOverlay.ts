@@ -22,6 +22,14 @@ export interface OverlayView {
   finished: boolean; // local player has taken the flag (or retired)
   final: boolean; // race is over for everyone
   graceLeft: number | null; // seconds until stragglers are marked DNF
+  /** Positions as 1st, 2nd… (a party, where P1-P4 are the players). */
+  ordinals?: boolean;
+}
+
+/** 1st, 2nd, 3rd, 4th… */
+export function ordinal(n: number) {
+  const s = n % 100 >= 11 && n % 100 <= 13 ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th');
+  return `${n}${s}`;
 }
 
 export class RaceOverlay {
@@ -57,8 +65,8 @@ export class RaceOverlay {
 
   render(v: OverlayView) {
     const n = v.rows.length;
-    this.set('pos', `P${v.pos}<small> / ${n}</small>`);
-    this.set('lap', v.finished ? 'FINISHED' : `LAP ${Math.min(v.lap, v.laps)}/${v.laps}`);
+    this.set('pos', `${v.ordinals ? ordinal(v.pos) : `P${v.pos}`}<small> / ${n}</small>`);
+    this.set('lap', v.finished ? (v.rows.find((r) => r.me)?.status === 'dnf' ? 'RETIRED' : 'FINISHED') : `LAP ${Math.min(v.lap, v.laps)}/${v.laps}`);
     const leader = v.rows[0]?.ms;
     // Interval to the leader, like a timing tower: the winner's time in purple (fastest), then gaps.
     const right = (r: StandingRow) =>

@@ -18,6 +18,15 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
     drops mid-race the game pauses, and the phone reconnects by itself, even after reloading the
     laptop page. Scanning the code with another phone hands it over.
   - No QR scanner? Open the game's `/pad.html` on the phone and type the 4-character code.
+- **Party: split screen with a phone each.** Press **Party**, pick a circuit, and everyone scans the
+  one QR code. Up to four players race on the same screen, each in their own view and each steering
+  with their own phone (P1 red, P2 blue, P3 green, P4 pink).
+  - Two players race one above the other, three or four in a 2 × 2 grid; with three, the fourth
+    corner shows the live standings.
+  - Start, Pause and Resume work from any phone, and Reset puts that player back on the track. The
+    grid order turns round each race, and the results show who won with everyone's gaps.
+  - If a phone drops out mid-race, everyone pauses until it reconnects, or the rest race on without
+    it. Phones keep their seat through a dropped link or a reload of the laptop.
 
 ## [0.29.1] - 2026-10-21
 

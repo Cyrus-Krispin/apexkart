@@ -1,9 +1,10 @@
 // Haptics: the Vibration API on Android phones (iOS Safari has none), rumble on gamepads that have
-// it, and a buzz in the hand on a paired phone controller (src/net/pad.ts).
+// it, and a buzz in the hand on a paired phone controller (src/net/pad.ts). A party kart buzzes
+// only its own phone.
 // Calls are throttled, and everything stays off while the sound is muted or the system asks for
 // reduced motion.
 import { touchDevice } from './input';
-import { phonePad } from '../net/pad';
+import { phonePad, type PadSource } from '../net/pad';
 
 type Pad = Gamepad & {
   vibrationActuator?: { playEffect?: (type: string, params: Record<string, number>) => Promise<unknown> } | null;
@@ -15,7 +16,10 @@ export class Haptics {
   private touch = touchDevice();
   private reduced = matchMedia('(prefers-reduced-motion: reduce)');
 
-  constructor(private muted: () => boolean) {}
+  constructor(
+    private muted: () => boolean,
+    private pad?: PadSource,
+  ) {}
 
   private get on() {
     return !this.muted() && !this.reduced.matches && document.hasFocus();
@@ -51,6 +55,10 @@ export class Haptics {
     if (now - this.last < (priority ? 15 : 50)) return false;
     this.last = now;
     try {
+      if (this.pad) {
+        this.pad.buzz(pattern);
+        return true;
+      }
       if (this.touch && 'vibrate' in navigator) navigator.vibrate(pattern);
       phonePad.buzz(pattern);
       const pad = navigator.getGamepads?.().find((p) => p?.connected && (p as Pad).vibrationActuator) as Pad | undefined;

@@ -36,6 +36,7 @@ root.innerHTML = `
   <section class="pd-screen pd-start" data-screen="start">
     <div class="pd-card">
       <div class="pd-hold">${WHEEL}</div>
+      <p class="pd-seat display" data-el="seat1" hidden></p>
       <h1 class="display">Hold it like a wheel</h1>
       <p class="pd-lede">Turn your phone sideways and tilt it to steer. Press the screen to brake.</p>
       <button class="btn go lg block" data-act="start">Start</button>
@@ -45,6 +46,7 @@ root.innerHTML = `
 
   <section class="pd-screen pd-drive" data-screen="drive">
     <header class="pd-bar">
+      <span class="pd-seat display" data-el="seat2" hidden></span>
       <span class="pd-link-line"><i class="pd-dot"></i><span data-el="status2">Connecting…</span></span>
       <span class="pd-note" data-el="note"></span>
       <nav class="pd-tools">
@@ -75,6 +77,7 @@ let mp = false;
 let useTilt = true;
 let tiltNote = ''; // why the phone steers with buttons instead
 let started = false;
+let seat: { n: number; color: string } | null = null; // in a party: which kart this phone drives
 const tilt = new Tilt((why) => tiltFailed(why));
 
 // ---------------------------------------------------------------- code
@@ -142,6 +145,15 @@ function onCtl(m: PadCtl) {
     mp = m.mp;
     paintView();
   } else if (m.k === 'buzz') buzz(m.p);
+  else if (m.k === 'seat') {
+    seat = { n: m.n, color: m.color };
+    for (const el of [$('seat1'), $('seat2')]) {
+      el.hidden = false;
+      el.textContent = `P${m.n + 1}`;
+      el.style.setProperty('--c', m.color);
+    }
+    paintView();
+  }
 }
 
 const MAIN: Record<PadView, { label: string; cls: string; btn: PadButton | null }> = {
@@ -164,7 +176,8 @@ function paintView() {
   area.classList.toggle('simple', scheme !== 'classic');
   area.classList.toggle('notilt', !useTilt);
   $('recentre').hidden = !useTilt;
-  $('note').textContent = live && view === 'menu' ? (mp ? 'In the lobby' : 'Pick a circuit on the laptop') : tiltNote;
+  $('note').textContent =
+    live && view === 'menu' ? (mp ? 'In the lobby' : 'Pick a circuit on the laptop') : live && seat && view === 'brief' && !tiltNote ? 'Everyone in? Start the race' : tiltNote;
 }
 
 function press(b: PadButton) {
