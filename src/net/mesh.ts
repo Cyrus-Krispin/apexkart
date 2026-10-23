@@ -34,7 +34,7 @@ const MAX_FAST_ATTEMPTS = 2; // after this many failed attempts, use the relay a
 const SLOW_RETRY_MS = 45_000;
 const RESPONDER_WAIT_MS = 18_000; // responder gives up waiting for an offer and uses the relay meanwhile
 
-function iceServers(): RTCIceServer[] {
+export function iceServers(): RTCIceServer[] {
   const custom = import.meta.env.VITE_ICE_SERVERS as string | undefined;
   if (custom) {
     try {
@@ -46,7 +46,8 @@ function iceServers(): RTCIceServer[] {
   return DEFAULT_ICE;
 }
 
-function gathered(pc: RTCPeerConnection, ms = 2500): Promise<void> {
+/** Wait for ICE gathering (non-trickle signaling sends every candidate in one SDP). */
+export function gathered(pc: RTCPeerConnection, ms = 2500): Promise<void> {
   return new Promise((resolve) => {
     if (pc.iceGatheringState === 'complete') return resolve();
     const t = setTimeout(resolve, ms);

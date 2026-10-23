@@ -2,6 +2,7 @@ import { escapeHtml, formatMs, type BoardResponse, type Dir, type Driver } from 
 import type { TrackData } from '../track/osm';
 import type { TimeOfDay, TimePref } from '../game/atmosphere';
 import { SCHEME_LABEL, touchDevice, type ControlScheme } from '../game/input';
+import type { PadStatus } from '../net/pad';
 import { MEDAL_NAME, MEDALS, targets } from '../game/medals';
 import type { TrackShape } from '../track/shape';
 import { circuitCode, stripeStyle } from './pitwall';
@@ -22,7 +23,17 @@ export interface IntroOptions {
   onControls: (s: ControlScheme) => void;
   onStart: () => void;
   onBack: () => void;
+  /** Pair a phone as the steering wheel (src/ui/padCard.ts). */
+  onPhone: () => void;
 }
+
+const PHONE_LINE: Record<PadStatus, string> = {
+  off: 'Steer with your phone',
+  waiting: 'Pairing your phone…',
+  connecting: 'Pairing your phone…',
+  live: 'Phone connected · tilt to steer, press to brake',
+  lost: 'Phone dropped · reconnecting…',
+};
 
 /** The controls for a scheme, short enough for one or two lines of the briefing. */
 function controlsHelp(s: ControlScheme): string {
@@ -68,6 +79,7 @@ export class RaceIntro {
   private pct: HTMLElement;
   private go: HTMLButtonElement;
   private help: HTMLElement;
+  private phoneBtn!: HTMLElement;
   private medals: HTMLElement;
   private record: HTMLElement;
   private art: HTMLElement;
@@ -137,6 +149,7 @@ export class RaceIntro {
         <div class="io-block io-ctl">
           <span class="pw-k">Controls · <span data-el="scheme"></span><em>switch any time in the pause menu</em></span>
           <p class="io-help" data-el="help"></p>
+          <button type="button" class="io-phone" data-act="phone" data-el="phone"></button>
         </div>
         <div class="io-block io-tod">
           <span class="pw-k">Time of day</span>
@@ -192,6 +205,11 @@ export class RaceIntro {
     this.markControls = (s) => (scheme.textContent = SCHEME_LABEL[s]);
     this.setControls(o.controls);
     this.el.querySelector('[data-act=back]')!.addEventListener('click', () => o.onBack());
+    this.phoneBtn = $('phone');
+    this.phoneBtn.addEventListener('click', (e) => {
+      if (e.detail > 0) this.phoneBtn.blur(); // after a pointer click, the next key press starts the race
+      o.onPhone();
+    });
     this.go.addEventListener('click', () => this.start());
     addEventListener('keydown', this.onKey);
     // START waits for the race to say it's settled (world built, shaders and textures warm), or for
@@ -204,6 +222,12 @@ export class RaceIntro {
   setControls(s: ControlScheme) {
     this.markControls(s);
     this.help.innerHTML = controlsHelp(s);
+  }
+
+  /** The phone controller's state, on its button under the controls. */
+  phone(s: PadStatus) {
+    this.phoneBtn.textContent = PHONE_LINE[s];
+    this.phoneBtn.dataset.status = s;
   }
 
   /** The live board for this circuit: the record, and the medal targets set from it. */

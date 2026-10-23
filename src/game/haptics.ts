@@ -1,7 +1,9 @@
-// Haptics: the Vibration API on Android phones (iOS Safari has none) and rumble on gamepads that have it.
+// Haptics: the Vibration API on Android phones (iOS Safari has none), rumble on gamepads that have
+// it, and a buzz in the hand on a paired phone controller (src/net/pad.ts).
 // Calls are throttled, and everything stays off while the sound is muted or the system asks for
 // reduced motion.
 import { touchDevice } from './input';
+import { phonePad } from '../net/pad';
 
 type Pad = Gamepad & {
   vibrationActuator?: { playEffect?: (type: string, params: Record<string, number>) => Promise<unknown> } | null;
@@ -50,6 +52,7 @@ export class Haptics {
     this.last = now;
     try {
       if (this.touch && 'vibrate' in navigator) navigator.vibrate(pattern);
+      phonePad.buzz(pattern);
       const pad = navigator.getGamepads?.().find((p) => p?.connected && (p as Pad).vibrationActuator) as Pad | undefined;
       pad?.vibrationActuator?.playEffect?.('dual-rumble', { startDelay: 0, duration: ms, strongMagnitude: strong, weakMagnitude: weak })?.catch(() => {});
     } catch {

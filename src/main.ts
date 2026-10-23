@@ -6,6 +6,7 @@ import type { Race } from './game/race';
 import { loadDriver } from './net/api';
 import { initMultiplayer } from './multiplayer';
 import { initChangelog } from './ui/changelog';
+import { initPhonePad } from './ui/padCard';
 
 const driver = await loadDriver();
 const atlasRoot = document.getElementById('atlas')!;
@@ -59,6 +60,9 @@ initMultiplayer({
   },
   leave: () => atlas.show(),
 });
+
+// Your phone as the steering wheel: a QR code to scan, then tilt to steer. See docs/phone-controller.md.
+initPhonePad({ entryParent: atlasRoot.querySelector<HTMLElement>('.top-right') });
 
 // What's new (#/changelog) and the version link in the top bar.
 initChangelog({ entryParent: atlasRoot.querySelector<HTMLElement>('.top-right') });
