@@ -1,0 +1,50 @@
+/* Phone controller, screen side (src/ui/padCard.ts): the "Phone" button in the home header and the
+   pairing card with its QR code. Pit Wall tokens and pieces from styles/base.css; the header button
+   borrows the "Race friends" look (.mp-entry in ui/multiplayer.css). */
+
+.pc-entry.live::after { content: ''; position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 2px var(--panel); }
+
+.pc-scrim {
+  position: fixed; inset: 0; z-index: 3000; display: grid; place-items: center; overflow-y: auto;
+  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  background: rgba(6, 7, 8, 0.72); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+  animation: pc-in 0.18s var(--ease);
+}
+.pc-scrim.out { opacity: 0; transition: opacity 0.18s; }
+@keyframes pc-in { from { opacity: 0; } }
+.pc-card { width: min(640px, 100%); display: grid; gap: 14px; padding: 16px 18px 18px; border-radius: 6px; background: var(--panel); border: 1px solid var(--line-2); box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55); }
+.pc-head { display: flex; align-items: center; justify-content: space-between; }
+.pc-head .label { margin: 0; color: var(--yellow); }
+.pc-x { width: 36px; height: 36px; margin: -6px -8px -6px 0; font-size: 26px; line-height: 1; color: var(--muted); }
+.pc-x:hover { color: var(--text); }
+
+.pc-body { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 20px; align-items: center; }
+.pc-qr { width: 220px; aspect-ratio: 1; display: grid; place-items: center; border-radius: 4px; background: #fff; overflow: hidden; }
+.pc-qr svg { width: 100%; height: 100%; display: block; }
+.pc-qr-wait { color: #8a90a0; font-size: 22px; }
+.pc-card[data-status='live'] .pc-qr { outline: 3px solid var(--green); outline-offset: 3px; }
+.pc-side { display: grid; gap: 12px; min-width: 0; }
+.pc-side h2 { margin: 0; font-size: 34px; }
+.pc-steps { margin: 0; padding-left: 20px; display: grid; gap: 4px; color: var(--text-2); font-size: 14.5px; }
+.pc-steps b { color: var(--text); }
+.pc-typed { display: grid; gap: 4px; }
+.pc-typed .pw-k { letter-spacing: 0.1em; text-transform: none; font-size: 13px; }
+.pc-typed .pw-k .mono { color: var(--text-2); letter-spacing: 0; }
+.pc-code { font-size: 40px; font-weight: 600; letter-spacing: 0.24em; line-height: 1; color: var(--yellow); }
+
+.pc-warn { margin: 0; padding: 8px 10px; border-radius: 3px; background: rgba(255, 214, 10, 0.08); border-left: 3px solid var(--yellow); color: var(--text-2); font-size: 13.5px; }
+.pc-foot { display: flex; align-items: center; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.pc-foot .btn[hidden] { display: none; }
+.pc-status { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; margin: 0; font-family: var(--ui); font-weight: 700; font-size: 15px; letter-spacing: 0.04em; color: var(--text-2); }
+.pc-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--yellow); animation: live 1.2s infinite; }
+.pc-card[data-status='live'] .pc-dot { background: var(--green); animation: none; }
+.pc-card[data-status='live'] .pc-status { color: var(--text); }
+.pc-card[data-status='lost'] .pc-dot, .pc-card[data-status='off'] .pc-dot { background: var(--red); }
+
+@media (max-width: 560px) {
+  .pc-body { grid-template-columns: 1fr; justify-items: center; }
+  .pc-qr { width: min(240px, 70vw); }
+  .pc-side h2 { font-size: 28px; }
+  .pc-foot { flex-wrap: wrap; }
+  .pc-status { flex-basis: 100%; }
+}

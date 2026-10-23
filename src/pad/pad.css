@@ -1,0 +1,93 @@
+/* The phone controller page (pad.html), in the Pit Wall style (docs/pit-wall.md): built on the
+   tokens and pieces in styles/base.css. Made for a phone held sideways; portrait still works. */
+
+.pd { position: fixed; inset: 0; display: flex; flex-direction: column; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+.pd-screen { display: none; }
+.pd[data-screen='code'] .pd-code, .pd[data-screen='start'] .pd-start { display: grid; place-items: center; flex: 1; overflow-y: auto; padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
+.pd[data-screen='drive'] .pd-drive { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+
+/* ---------- Code and Start */
+.pd-card { width: min(420px, 100%); display: grid; gap: 12px; text-align: center; justify-items: center; }
+.pd-card .label { color: var(--yellow); }
+.pd-card h1 { margin: 0; font-size: 40px; }
+.pd-lede { margin: 0; color: var(--text-2); font-size: 15px; }
+.pd-lede b { color: var(--text); }
+.pd-join { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; width: 100%; margin-top: 4px; }
+.pd-join input {
+  height: 52px; min-width: 0; padding: 0 14px; border-radius: var(--radius); border: 1.5px solid var(--line-2); background: var(--panel);
+  font-size: 28px; letter-spacing: 0.3em; text-transform: uppercase; text-align: center; -webkit-user-select: text; user-select: text;
+}
+.pd-join input:focus { outline: none; border-color: var(--yellow); }
+.pd-join .btn { height: 52px; }
+.pd-err { margin: 0; min-height: 1.4em; color: var(--yellow); font-family: var(--ui); font-weight: 700; font-size: 15px; letter-spacing: 0.03em; }
+.pd-hold { width: 96px; height: 96px; color: var(--text); animation: pd-rock 2.4s var(--ease) infinite; }
+.pd-hold svg { width: 100%; height: 100%; }
+@keyframes pd-rock { 0%, 100% { transform: rotate(-24deg); } 50% { transform: rotate(24deg); } }
+@media (prefers-reduced-motion: reduce) { .pd-hold { animation: none; } }
+.pd-start .btn.go { margin-top: 6px; }
+
+/* Link state: a dot, yellow while connecting, green when live, red while reconnecting. */
+.pd-link-line { display: inline-flex; align-items: center; gap: 8px; margin: 0; font-family: var(--ui); font-weight: 700; font-size: 14px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.pd-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--yellow); animation: live 1.2s infinite; }
+.pd.live .pd-dot { background: var(--green); animation: none; }
+.pd.live .pd-link-line { color: var(--text); }
+.pd.retry .pd-dot { background: var(--red); }
+
+/* ---------- Driving */
+.pd-bar {
+  display: flex; align-items: center; gap: 10px; flex: none; min-height: 52px;
+  padding: max(6px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 6px max(12px, env(safe-area-inset-left));
+  border-bottom: 1px solid var(--line); background: var(--carbon-2);
+}
+.pd-bar .pd-link-line { flex: none; }
+.pd-note { flex: 1; min-width: 0; color: var(--muted); font-size: 13px; line-height: 1.25; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.pd-tools { display: flex; gap: 6px; flex: none; margin-left: auto; }
+.pd-tools .btn { height: 40px; padding: 0 14px; font-size: 14px; }
+.pd-tools .btn:disabled { opacity: 0.45; cursor: default; }
+.pd-tools .btn[hidden] { display: none; }
+
+.pd-area {
+  flex: 1; min-height: 0; display: grid; gap: 8px; touch-action: none;
+  padding: 8px max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+}
+/* Simple: steer on the left (the wheel, or ◀ ▶), one big Brake on the right. */
+.pd-area.simple { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: 'steer brake'; }
+.pd-area.simple .pd-gas { display: none; }
+/* Classic: pedals either side, Brake left and Gas right, the wheel between. */
+.pd-area.classic { grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr) minmax(0, 1fr); grid-template-areas: 'brake steer gas'; }
+.pd-brake { grid-area: brake; }
+.pd-gas { grid-area: gas; }
+.pd-steer { grid-area: steer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-height: 0; }
+
+.pd-pad { display: grid; place-items: center; border-radius: 8px; border: 1.5px solid var(--line-2); background: var(--panel); transition: background 0.06s, border-color 0.06s, transform 0.06s; }
+.pd-pad .display { font-size: clamp(28px, 7vmin, 48px); pointer-events: none; }
+.pd-brake { background: linear-gradient(180deg, rgba(255, 59, 48, 0.16), rgba(255, 59, 48, 0.06)); border-color: rgba(255, 59, 48, 0.45); color: #ff8a83; }
+.pd-brake.on { background: var(--red); border-color: var(--red); color: #fff; transform: scale(0.985); }
+.pd-gas { background: linear-gradient(180deg, rgba(43, 212, 107, 0.16), rgba(43, 212, 107, 0.06)); border-color: rgba(43, 212, 107, 0.45); color: #7ef0a8; }
+.pd-gas.on { background: var(--green); border-color: var(--green); color: #05170b; transform: scale(0.985); }
+
+.pd-wheel { width: min(46vmin, 220px); aspect-ratio: 1; color: var(--text); will-change: transform; }
+.pd-wheel svg { width: 100%; height: 100%; }
+.pd-steer-k { margin: 0; }
+.pd-arrows { display: none; }
+/* No motion sensor (or access refused): two big steer buttons instead of the wheel. */
+.pd-area.notilt .pd-wheel, .pd-area.notilt .pd-steer-k { display: none; }
+.pd-area.notilt .pd-steer { align-items: stretch; }
+.pd-area.notilt .pd-arrows { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; flex: 1; }
+.pd-arrows .pd-pad { font-size: 40px; color: var(--text-2); }
+.pd-arrows .pd-pad.on { background: var(--text); color: var(--carbon); }
+
+/* Portrait: it still works, but a wheel wants to be held sideways. */
+.pd-turn { display: none; }
+@media (orientation: portrait) {
+  .pd-turn { display: block; position: absolute; left: 0; right: 0; bottom: max(10px, env(safe-area-inset-bottom)); margin: 0; text-align: center; color: var(--yellow); pointer-events: none; }
+  .pd-bar { flex-wrap: wrap; }
+  .pd-note { order: 3; flex-basis: 100%; }
+  .pd-area { padding-bottom: 40px; }
+  .pd-area.classic { grid-template-columns: 1fr 1fr; grid-template-rows: minmax(0, 1fr) minmax(0, 1.2fr); grid-template-areas: 'steer steer' 'brake gas'; }
+  .pd-area.simple { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: 'steer' 'brake'; }
+}
+@media (max-height: 360px) {
+  .pd-bar { min-height: 44px; }
+  .pd-tools .btn { height: 36px; padding: 0 10px; }
+}

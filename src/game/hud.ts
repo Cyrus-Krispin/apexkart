@@ -32,6 +32,7 @@ const ICON = {
   left: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   right: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   flag: '<svg viewBox="0 0 24 24" width="18" height="18"><path d="M6 21V4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M6 4.5h11.5l-2.6 4 2.6 4H6" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>',
+  phone: '<svg viewBox="0 0 24 24" width="18" height="18"><rect x="7" y="3" width="10" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M11 17.5h2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   reset: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.5 9.5A7 7 0 1 1 5 14" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/><path d="M4.5 4.5v5h5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 };
 
@@ -161,6 +162,7 @@ export class Hud {
               <p class="pw-k">Settings</p>
               <div class="hp-toggles">
                 <button data-act="controls" data-el="controlsToggle"></button>
+                <button data-act="phone" data-el="phoneToggle" title="Steer by tilting your phone"></button>
                 <button data-act="mute" data-el="muteToggle"></button>
                 <button data-act="ghosts" data-el="ghostToggle"></button>
                 <button data-act="chase" data-el="chaseToggle" hidden></button>
@@ -437,10 +439,11 @@ export class Hud {
   }
 
   /** chase: whose lap the gap is to (time trials; null hides the row). */
-  toggles(o: { controls: string; muted: boolean; ghosts: boolean; cam: string; quality: string; night: boolean; time: string; chase: string | null }) {
+  toggles(o: { controls: string; phone: string; muted: boolean; ghosts: boolean; cam: string; quality: string; night: boolean; time: string; chase: string | null }) {
     const row = (icon: string, label: string, value: string, off = false) =>
       `${icon}<span>${label}</span><b class="${off ? 'off' : ''}">${escapeHtml(value)}</b><i aria-hidden="true">›</i>`;
     this.$.controlsToggle.innerHTML = row(ICON.wheel, 'Controls', o.controls);
+    this.$.phoneToggle.innerHTML = row(ICON.phone, 'Phone', o.phone, o.phone === 'Off');
     this.$.muteToggle.innerHTML = row(ICON.sound, 'Sound', o.muted ? 'Off' : 'On', o.muted);
     this.$.ghostToggle.innerHTML = row(ICON.ghost, 'Ghosts', o.ghosts ? 'On' : 'Off', !o.ghosts);
     this.$.chaseToggle.hidden = o.chase === null;

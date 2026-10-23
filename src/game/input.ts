@@ -1,4 +1,5 @@
 import type { Controls } from './kart';
+import { phonePad, type PadButton } from '../net/pad';
 
 /** Simple accelerates by itself (brake and steer only); Classic is throttle and brake. */
 export type ControlScheme = 'simple' | 'classic';
@@ -27,7 +28,10 @@ export function saveControlsPref(s: ControlScheme) {
   localStorage.setItem('ak:controls', s);
 }
 
-/** Keyboard + gamepad + touch, merged into one Controls value per frame. */
+/** Phone controller buttons act as these keys (Start is handled by the briefing's own key listener). */
+const PAD_KEY: Record<Exclude<PadButton, 'go'>, string> = { pause: 'Escape', reset: 'r' };
+
+/** Keyboard + gamepad + touch + a paired phone (src/net/pad.ts), merged into one Controls value per frame. */
 export class Input {
   private keys = new Set<string>();
   private fingers = new Map<number, TouchKey | null>(); // pointerId -> the control under that finger
@@ -60,6 +64,7 @@ export class Input {
       window.removeEventListener('keyup', up);
       window.removeEventListener('blur', blur);
     });
+    this.cleanup.push(phonePad.on('button', (b) => b !== 'go' && this.pressed.add(PAD_KEY[b])));
     this.bindTouch();
   }
 
@@ -157,6 +162,13 @@ export class Input {
         if (now && !this.padPrev[btn]) this.pressed.add(key);
         this.padPrev[btn] = now;
       }
+    }
+    // A paired phone: its tilt steers unless a key or the stick is steering; its pedals add to the rest.
+    const phone = phonePad.input();
+    if (phone) {
+      if (target === 0 && !(pad && Math.abs(pad.axes[0] ?? 0) > 0.12)) steer = phone.steer;
+      brake = Math.max(brake, phone.brake);
+      if (classic) throttle = Math.max(throttle, phone.gas);
     }
     // Simple: always on the throttle except while braking. Brake held at a standstill
     // reverses (KartPhysics), so a player can back off a wall.

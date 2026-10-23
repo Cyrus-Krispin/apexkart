@@ -52,5 +52,10 @@ function devApi(): Plugin {
 
 export default defineConfig({
   plugins: [devApi()],
-  build: { target: 'es2022', chunkSizeWarningLimit: 1200 },
+  build: {
+    target: 'es2022',
+    chunkSizeWarningLimit: 1200,
+    // The game, and the phone controller page that a QR code in the game opens (docs/phone-controller.md).
+    rolldownOptions: { input: { main: 'index.html', pad: 'pad.html' } },
+  },
 });

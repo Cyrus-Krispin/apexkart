@@ -101,6 +101,16 @@ laps). It's peer-to-peer over WebRTC with a synchronised start, kart-to-kart con
 slipstream when you tuck in behind someone. Positions and results are live. The details are in
 [MULTIPLAYER.md](MULTIPLAYER.md).
 
+## Your phone is the steering wheel
+
+Press **Phone** on the laptop and scan the QR code. The phone becomes a wheel: hold it sideways and
+tilt to steer, and press the screen to brake (Brake and Gas in Classic). It also has Start, Pause and
+Reset, and buzzes when you hit something (on Android). It connects straight to the laptop over
+WebRTC, using the same room-code signaling as multiplayer, so steering arrives in a few milliseconds.
+Phones without a motion sensor get ◀ ▶ buttons instead. Pair one phone per laptop, and every player
+in a multiplayer room can have their own. The details are in
+[docs/phone-controller.md](docs/phone-controller.md).
+
 ## Made for phones too
 
 <img src="docs/media/phones.jpg" alt="Four phone screenshots: the timing tower, the circuit page, the grid, and a race with touch controls" width="100%">
@@ -123,6 +133,7 @@ Two schemes, on keyboard, gamepad and touch. Switch any time from the pause menu
 | Brake (and reverse when stopped) | `Space` / `S` / `↓` | `Space` / `S` / `↓` |
 | Gamepad | stick or d-pad steers, LT or B brakes | RT or A throttle, LT or B brake, stick steers |
 | Touch | ◀ ▶ on the left, Brake on the right | ◀ ▶ on the left, Brake and Gas on the right |
+| Phone controller | tilt to steer, Brake on the right | tilt to steer, Brake on the left, Gas on the right |
 
 In every scheme:
 
@@ -150,6 +161,7 @@ flowchart LR
   API --> Redis[("Upstash Redis")]
   Redis --> Board["Leaderboards, live feed,<br/>who's on track"]
   Race <-->|"WebRTC poses"| Friends["Friends' karts"]
+  Phone["Phone controller<br/>pad.html"] -->|"WebRTC tilt"| Race
 ```
 
 | Piece | What it is |

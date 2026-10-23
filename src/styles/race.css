@@ -99,6 +99,14 @@
 .io-panel .pw-tabs > * { height: 44px; align-content: center; line-height: 1.1; }
 .io-panel .pw-tabs small { display: block; font-family: var(--mono); font-size: 10px; font-weight: 500; letter-spacing: 0; text-transform: uppercase; opacity: 0.7; }
 .io-help { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--text-2); }
+.io-phone {
+  justify-self: start; display: inline-flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 2px;
+  font-family: var(--ui); font-weight: 700; font-size: 14px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--yellow);
+}
+.io-phone::before { content: ''; width: 8px; height: 13px; border: 2px solid currentColor; border-radius: 2px; }
+.io-phone:hover { color: var(--text); }
+.io-phone[data-status='live'] { color: var(--green); }
+.io-phone[data-status='lost'] { color: var(--red); }
 .io-keys { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 6px; color: var(--text); font-family: var(--ui); font-weight: 600; font-size: 14px; letter-spacing: 0.02em; }
 .io-keys > span { display: inline-flex; align-items: center; gap: 3px; }
 .io-keys kbd { height: 20px; min-width: 20px; padding: 0 5px; font-size: 10.5px; }

@@ -11,6 +11,8 @@ import { circuitCode, stripeStyle } from './pitwall';
 import { cleanDriverName } from './profile';
 import type { RoomClient } from '../net/room';
 import type { LinkInfo } from '../net/mesh';
+import { phonePad } from '../net/pad';
+import { openPadCard, PHONE_ICON } from './padCard';
 
 export interface LobbyActions {
   create(track: TrackData, dir: Dir, laps: number): Promise<void>;
@@ -140,6 +142,9 @@ export class Lobby {
         if (el && this.root.contains(el)) fn(el);
       });
     click('[data-act="close"]', () => this.actions.close());
+    click('[data-act="phone"]', () => openPadCard());
+    const phoneBtn = this.root.querySelector<HTMLElement>('[data-act="phone"]')!;
+    phonePad.on('status', (s) => phoneBtn.classList.toggle('live', s === 'live'));
     // Esc goes back from create/join; in a room it would mean leaving, so it does nothing there.
     addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && !e.defaultPrevented && !this.root.hidden && !this.$.home.hidden) this.actions.close();
@@ -403,7 +408,10 @@ const LOBBY_HTML = /* html */ `
 <div class="mp-wrap">
   <header class="mp-bar">
     <button class="mp-back ui" data-act="close"><span class="mono">‹</span> Circuits</button>
-    <span class="mp-bar-t ui">Race friends</span>
+    <span class="mp-bar-r">
+      <span class="mp-bar-t ui">Race friends</span>
+      <button class="btn primary mp-entry pc-entry" data-act="phone" aria-label="Phone controller" title="Steer with your phone">${PHONE_ICON}<span class="mp-entry-label">Phone</span></button>
+    </span>
   </header>
 
   <section class="mp-home" data-el="home">

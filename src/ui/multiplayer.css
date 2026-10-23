@@ -43,6 +43,7 @@
 .mp-back .mono { font-size: 20px; line-height: 1; }
 .mp-back:hover { color: var(--text); }
 .mp-bar-t { font-size: 14px; letter-spacing: 0.14em; color: var(--muted); }
+.mp-bar-r { display: flex; align-items: center; gap: 14px; }
 
 .mp-msg { font-family: var(--ui); font-weight: 700; font-size: 15px; letter-spacing: 0.03em; color: var(--yellow); }
 .mp-net { font-family: var(--ui); font-weight: 700; font-size: 15px; letter-spacing: 0.03em; color: var(--red); }

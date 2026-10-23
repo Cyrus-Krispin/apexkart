@@ -6,6 +6,19 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+### Added
+- **Your phone is the steering wheel.** Press **Phone** on the laptop (in the top bar, the multiplayer
+  lobby, the grid screen or the pause menu) and scan the QR code. Hold the phone sideways and tilt it
+  to steer, and press the screen to brake. In Classic it has Brake and Gas pedals.
+  - The phone also has **Start**, **Pause**/**Resume**, **Reset** and **Recentre**, and buzzes on
+    impacts, kerbs and the start lights (Android).
+  - On iPhone, tapping Start on the phone asks for motion access. Without it, or on a phone with no
+    motion sensor, you steer with ◀ ▶ buttons on the phone instead.
+  - It connects straight to the laptop, so steering arrives in a few milliseconds. If the link
+    drops mid-race the game pauses, and the phone reconnects by itself, even after reloading the
+    laptop page. Scanning the code with another phone hands it over.
+  - No QR scanner? Open the game's `/pad.html` on the phone and type the 4-character code.
+
 ## [0.29.1] - 2026-10-21
 
 ### Fixed

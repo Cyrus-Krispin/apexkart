@@ -6,6 +6,8 @@ import { availableSchemes, controlsPref, Input, saveControlsPref, SCHEME_LABEL, 
 import { KartAudio } from './audio';
 import { KartFx, type FxFrame } from './fx';
 import { Haptics } from './haptics';
+import { phonePad, type PadStatus, type PadView } from '../net/pad';
+import { openPadCard, PAD_STATE } from '../ui/padCard';
 import { Atmosphere, resolveTime, type TimePref } from './atmosphere';
 import { awardMedal, earnedMedal, MEDAL_NAME, MEDALS, medalFor, targets } from './medals';
 import { recordDailyLap } from '../shared/daily';
@@ -180,6 +182,7 @@ export class Race {
   private minimap!: { bg: HTMLCanvasElement; map: (x: number, z: number) => [number, number] };
   private fx!: KartFx; // particles and skid marks
   private bumpHit: KartHit | null = null; // the hardest kart-to-kart contact since the last frame (multiplayer)
+  private padOff: () => void; // phone controller status listener
   autopilot = false;
 
   constructor(private opts: RaceOptions) {
@@ -229,7 +232,11 @@ export class Race {
       onControls: (s) => this.setControls(s),
       onStart: () => this.begin(),
       onBack: () => opts.onExit(),
+      onPhone: () => openPadCard(),
     });
+    this.padOff = phonePad.on('status', (st) => this.onPad(st));
+    this.intro.phone(phonePad.status);
+    this.padView('brief');
 
     this.buildWorld();
     if (opts.rival && !opts.mode) this.loadRival(opts.rival);
@@ -655,6 +662,7 @@ export class Race {
   // ------------------------------------------------------------------ flow
 
   private begin() {
+    this.padView('race');
     this.audio.start();
     this.hud.setVisible(true);
     this.resetToGrid();
@@ -683,6 +691,7 @@ export class Race {
     if (a === 'reset' && this.state === 'racing') this.recover();
     if (a === 'relap') this.restartLap();
     if (a === 'pause') this.togglePause();
+    if (a === 'phone') openPadCard();
     if (a === 'mute') this.audio.toggleMute();
     if (a === 'ghosts') this.toggleGhosts();
     if (a === 'chase') this.cycleChase();
@@ -708,6 +717,7 @@ export class Race {
     saveControlsPref(s);
     this.hud.setControls(s);
     this.intro.setControls(s);
+    this.padView(this.state === 'intro' ? 'brief' : this.state === 'paused' ? 'paused' : 'race'); // the phone shows Gas in Classic
     if (this.state === 'paused') this.hintPending = true;
     else if (this.state !== 'intro') this.hud.hint(true, 4000);
     this.syncToggles();
@@ -757,7 +767,7 @@ export class Race {
     const q = this.qualitySetting === 'auto' ? `Auto · ${this.pipeline.quality}` : this.qualitySetting;
     const night = this.atmos?.time === 'night';
     const time = this.timeSetting === 'live' ? `Live · ${night ? 'Night' : 'Day'}` : night ? 'Night' : 'Day';
-    this.hud.toggles({ controls: SCHEME_LABEL[this.input.scheme], muted: this.audio.muted, ghosts: this.showGhosts, cam: CAMS[this.camMode].label, quality: q, night, time, chase: this.opts.mode ? null : this.chaseLabel });
+    this.hud.toggles({ controls: SCHEME_LABEL[this.input.scheme], phone: PAD_STATE[phonePad.status], muted: this.audio.muted, ghosts: this.showGhosts, cam: CAMS[this.camMode].label, quality: q, night, time, chase: this.opts.mode ? null : this.chaseLabel });
   }
 
   private resetToGrid() {
@@ -841,6 +851,7 @@ export class Race {
     if (pause && this.state !== 'paused') {
       this.prevState = this.state as Exclude<State, 'paused'>;
       this.state = 'paused';
+      this.padView('paused');
       this.audio.silence();
       const mine = this.board?.entries.find((e) => e.pid === this.opts.driver.pid);
       this.hud.pause(true, {
@@ -853,9 +864,26 @@ export class Race {
       });
     } else if (!pause && this.state === 'paused') {
       this.state = this.prevState;
+      this.padView('race');
       this.hud.pause(false);
       if (this.hintPending) this.hud.hint(true, 4000);
       this.hintPending = false;
+    }
+  }
+
+  /** Tell a paired phone what's on screen, so it offers Start, Pause or Resume. */
+  private padView(v: PadView) {
+    phonePad.setView(v, this.input.scheme, !!this.opts.mode);
+  }
+
+  /** The phone controller connected or dropped. Dropped mid-race: pause, rather than drive on hands-free. */
+  private onPad(s: PadStatus) {
+    this.intro.phone(s);
+    this.syncToggles();
+    if (s === 'live') this.hud.toast('Phone connected');
+    if (s === 'lost') {
+      this.hud.toast('Phone disconnected', 'warn');
+      if (this.state === 'racing' || this.state === 'grid') this.togglePause(true);
     }
   }
 
@@ -1818,6 +1846,8 @@ export class Race {
   dispose() {
     this.opts.mode?.addon?.dispose?.();
     this.disposed = true;
+    this.padOff();
+    phonePad.setView('menu', this.input.scheme, !!this.opts.mode);
     cancelAnimationFrame(this.raf);
     removeEventListener('resize', this.onResize);
     this.intro.dispose();
