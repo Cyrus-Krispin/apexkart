@@ -4,6 +4,7 @@
 // STUN only: when two networks can't be traversed without TURN, the pair falls back to the
 // room's low-rate HTTP relay (see RoomClient).
 import type { PoseTuple, SignalMsg } from '../shared/room';
+import type { PadCtlMsg } from '../shared/pad';
 
 export type LinkState = 'connecting' | 'p2p' | 'relay';
 
@@ -15,6 +16,8 @@ export interface LinkInfo {
 export interface MeshHooks {
   signal(to: string, msg: Omit<SignalMsg, 'from'>): Promise<void>;
   onPose(from: string, pose: PoseTuple): void;
+  /** Anything else on the unreliable channel (the phone wheel's steering, src/net/pad.ts). */
+  onData?(from: string, data: unknown[]): void;
   onCtl(from: string, msg: CtlMsg): void;
   onLinks(): void;
 }
@@ -24,7 +27,8 @@ export type CtlMsg =
   | { k: 'fin'; race: number; ms: number | null }
   | { k: 'bye' }
   | { k: 'ping'; t: number }
-  | { k: 'pong'; t: number };
+  | { k: 'pong'; t: number }
+  | PadCtlMsg;
 
 const DEFAULT_ICE: RTCIceServer[] = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }];
 // An attempt is two signaling round trips through the room API (each answered on the
@@ -118,6 +122,7 @@ class Peer {
       try {
         const p = JSON.parse(e.data);
         if (Array.isArray(p) && p.length === 10) this.mesh.hooks.onPose(this.mid, p as PoseTuple);
+        else if (Array.isArray(p)) this.mesh.hooks.onData?.(this.mid, p);
       } catch {
         /* ignore junk */
       }
@@ -278,8 +283,13 @@ export class Mesh {
   }
 
   sendPose(pose: PoseTuple) {
-    const data = JSON.stringify(pose);
-    for (const p of this.peers.values()) p.send('pos', data);
+    this.sendData(pose);
+  }
+
+  /** Send on the unreliable channel to everyone (dropped, not queued, on a congested link). */
+  sendData(data: unknown[]) {
+    const s = JSON.stringify(data);
+    for (const p of this.peers.values()) p.send('pos', s);
   }
 
   sendCtl(msg: CtlMsg, to?: string) {

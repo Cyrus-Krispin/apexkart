@@ -101,6 +101,13 @@ laps). It's peer-to-peer over WebRTC with a synchronised start, kart-to-kart con
 slipstream when you tuck in behind someone. Positions and results are live. The details are in
 [MULTIPLAYER.md](MULTIPLAYER.md).
 
+## Your phone is the wheel
+
+Open ApexKart on a laptop or TV, press **Phone wheel** and scan the QR code. Hold the phone sideways
+and tilt it to steer; your thumbs work the pedals, and Android phones buzz when you hit a wall. The
+phone links straight to the screen over WebRTC (no app, nothing to install) and stays paired across
+races and multiplayer rooms, so a room of laptops and phones makes a party.
+
 ## Made for phones too
 
 <img src="docs/media/phones.jpg" alt="Four phone screenshots: the timing tower, the circuit page, the grid, and a race with touch controls" width="100%">
@@ -123,6 +130,7 @@ Two schemes, on keyboard, gamepad and touch. Switch any time from the pause menu
 | Brake (and reverse when stopped) | `Space` / `S` / `↓` | `Space` / `S` / `↓` |
 | Gamepad | stick or d-pad steers, LT or B brakes | RT or A throttle, LT or B brake, stick steers |
 | Touch | ◀ ▶ on the left, Brake on the right | ◀ ▶ on the left, Brake and Gas on the right |
+| Phone wheel | tilt steers, Brake on the right | tilt steers, Brake on the left, Gas on the right |
 
 In every scheme:
 
@@ -194,6 +202,7 @@ circuit, add it to `PRESETS` in `scripts/fetch-tracks.ts` and run `npm run track
 | `GET /api/track?id` | geometry for raced tracks, so shared links don't depend on Overpass |
 | `GET/POST /api/layout` | community-corrected layouts (list / save) |
 | `POST /api/room` | multiplayer rooms: lobby state, WebRTC signaling, pose relay |
+| `POST /api/pad` | phone wheel pairings: a screen and a phone, WebRTC signaling |
 
 Every lap is checked before it's kept: top speed, the ghost's duration against the lap time, the
 ghost's path against the track, and a full replay of the ghost under the game's own lap rules

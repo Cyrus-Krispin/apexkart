@@ -249,3 +249,44 @@ Those preview tests never completed a lap, so nothing was submitted to the real 
 - **No spectating**: late joiners wait in the lobby until the race ends.
 - **Client-trusted** results, as with the leaderboard.
 - Background tabs freeze your kart, as browsers pause `requestAnimationFrame`. The race clock keeps running.
+
+## Phone as a wheel
+
+A phone can steer the kart on another screen: **Phone wheel** in the home header shows a QR code for
+`/pad.html#CODE`, a small separate page (about 22 KB of JavaScript, no Three.js). The pairing reuses
+the multiplayer pieces: the room-code alphabet, per-tab identity (`tabIdentity`), polled signaling
+through Redis and the WebRTC `Mesh`, so a screen and a phone are a two-member mesh.
+
+```
+src/shared/pad.ts      protocol: PadPollResponse, PadTuple, PadCtlMsg
+api/pad.ts             pairing endpoint: create (screen), join (phone), poll, signal, leave
+src/net/pad.ts         PadLink: either end of a pairing, on the Mesh
+src/ui/padPair.ts      the header button, the QR dialog, PadLink -> remotePad
+src/game/remotePad.ts  latest phone steering (Input reads it) and the way back (scheme, buzz)
+pad.html, src/pad/     the phone page: join, tilt (src/pad/tilt.ts), pedals, send loop
+```
+
+- **Pairing** (`ak:pad:{code}` hash: `h` screen, `c` phone, `s:` seen, `m:` signal count; inbox
+  `ak:pad:{code}:in:{mid}`; 120 s TTL). The screen creates it; one phone joins. A second phone
+  replaces the first (told `replaced` on its next poll). A phone reload keeps its seat (same tab
+  identity) and makes a fresh offer. The screen closing ends the pairing (`sendBeacon` leave); a
+  quiet member is dropped after 45 s, and a phone dropped while asleep rejoins by itself.
+- **Traffic**: the phone sends `[seq, steer, brake, gas]` every animation frame (~60 Hz, ~30 bytes)
+  on the unreliable `pos` channel (`Mesh.sendData`; anything that isn't a 10-number pose goes to
+  `onData`). The screen drops packets older than the last `seq` and ignores steering older than
+  400 ms, so a sleeping phone hands control back to the keyboard. Buttons go on `ctl`:
+  `{k:'key'}` presses the game's own shortcut (`p` starts from the briefing or pauses, `r` resets)
+  by dispatching a key event, so nothing in the race had to change. The screen sends
+  `{k:'scheme'}` (Classic shows a Gas pedal) and `{k:'buzz'}` (every `Haptics` effect).
+- **Input**: `Input.read` uses the phone's steering unless a steer key is held, and adds its brake
+  (and gas in Classic) to the others.
+- **Tilt** is the v0.14 Tilt scheme's sensor code: gravity from `beta`/`gamma` turned into a wheel
+  angle in the screen's current rotation, 27° for full lock, a 2.5° dead zone, Recentre. iOS asks
+  for motion access only from a tap, so Connect calls `DeviceOrientationEvent.requestPermission()`
+  before any `await`. The page also holds a screen wake lock.
+- **Requirements**: HTTPS on both ends (motion sensors and `crypto.subtle` need a secure context), so
+  test on a deployment or through an HTTPS tunnel, not `http://<LAN IP>`. Phone and screen must be
+  able to link directly (same Wi-Fi always works); there is no relay fallback, since 3 updates a
+  second can't steer.
+- **Budget**: while the QR code is showing, the screen polls every 1.5 s (6 s with it closed; it gives
+  up after 10 minutes). Once linked, both sides poll every 15 s as a heartbeat only.

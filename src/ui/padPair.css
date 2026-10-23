@@ -1,0 +1,46 @@
+/* "Phone wheel" on the game's screen (src/ui/padPair.ts): the header button and the QR dialog.
+   Pit Wall style (docs/pit-wall.md); the button shares the multiplayer entry's look (.mp-entry). */
+
+.pp-entry .pp-dot { display: none; width: 7px; height: 7px; border-radius: 50%; background: var(--green); flex: none; }
+.pp-entry.on .pp-dot { display: inline-block; }
+.pp-entry.on svg { color: var(--green); }
+@media (max-width: 600px) {
+  .pp-entry.on .pp-dot { position: absolute; top: 5px; right: 5px; }
+}
+
+.pp-page {
+  position: fixed; inset: 0; z-index: 1650; display: grid; place-items: center; overflow-y: auto; overscroll-behavior: contain;
+  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  background: rgba(6, 7, 8, 0.72); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+.pp-card { width: min(720px, 100%); background: var(--panel); background-image: var(--hatch); border: 1.5px solid var(--line-2); border-radius: 8px; }
+.pp-bar { display: flex; align-items: center; justify-content: space-between; height: 48px; padding: 0 8px 0 18px; border-bottom: 1px solid var(--line); }
+.pp-bar .label { color: var(--yellow); }
+.pp-x { width: 40px; height: 40px; font-size: 26px; line-height: 1; color: var(--muted); }
+.pp-x:hover { color: var(--text); }
+
+.pp-body { display: grid; grid-template-columns: minmax(0, 260px) minmax(0, 1fr); gap: 24px; padding: 22px; align-items: start; }
+.pp-body > .pp-status:only-child { grid-column: 1 / -1; margin: 12px 0; }
+/* Dark on white with a quiet zone: what phone cameras read best. */
+.pp-qr { aspect-ratio: 1; background: #fff; border-radius: 6px; padding: 6px; }
+.pp-qr svg { display: block; width: 100%; height: 100%; }
+.pp-qr:empty { background: var(--panel-2); }
+
+.pp-side { display: grid; gap: 10px; align-content: start; min-width: 0; }
+.pp-side h2 { margin: 0; font-size: 40px; }
+.pp-steps { margin: 0; padding-left: 20px; display: grid; gap: 4px; color: var(--text-2); }
+.pp-steps b { color: var(--text); }
+.pp-alt { margin: 6px 0 0; color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
+.pp-alt .mono { color: var(--text-2); }
+.pp-code { margin: 0; font-size: 44px; font-weight: 600; letter-spacing: 0.25em; color: var(--yellow); line-height: 1; }
+.pp-status { display: flex; align-items: center; gap: 8px; margin: 4px 0 0; font-family: var(--ui); font-weight: 700; font-size: 16px; letter-spacing: 0.03em; color: var(--text-2); }
+.pp-status i { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; animation: live 1.2s infinite; }
+.pp-status[data-s='live'] { color: var(--green); }
+.pp-status[data-s='live'] i { background: var(--green); animation: none; }
+.pp-note { margin: 0; font-size: 13px; color: var(--yellow); }
+.pp-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
+
+@media (max-width: 620px) {
+  .pp-body { grid-template-columns: 1fr; }
+  .pp-qr { width: min(240px, 100%); justify-self: center; }
+}

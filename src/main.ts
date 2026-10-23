@@ -6,6 +6,7 @@ import type { Race } from './game/race';
 import { loadDriver } from './net/api';
 import { initMultiplayer } from './multiplayer';
 import { initChangelog } from './ui/changelog';
+import { initPhoneWheel } from './ui/padPair';
 
 const driver = await loadDriver();
 const atlasRoot = document.getElementById('atlas')!;
@@ -59,6 +60,9 @@ initMultiplayer({
   },
   leave: () => atlas.show(),
 });
+
+// Phone as a steering wheel: a QR code to pad.html (src/pad/main.ts). See MULTIPLAYER.md.
+initPhoneWheel({ entryParent: atlasRoot.querySelector<HTMLElement>('.top-right') });
 
 // What's new (#/changelog) and the version link in the top bar.
 initChangelog({ entryParent: atlasRoot.querySelector<HTMLElement>('.top-right') });

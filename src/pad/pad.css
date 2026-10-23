@@ -1,0 +1,71 @@
+/* The phone wheel (pad.html) in the Pit Wall style (docs/pit-wall.md): a join card, then a driving
+   surface of big pedals either side of a steering indicator. Built on the tokens in styles/base.css. */
+
+.pd { position: fixed; inset: 0; display: grid; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.pd [hidden] { display: none !important; }
+
+/* ---------- Join */
+.pd-join {
+  width: min(460px, 100%); margin: auto; display: grid; gap: 14px; align-content: center;
+  padding: max(24px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 24px max(16px, env(safe-area-inset-left));
+}
+.pd-join .label:first-child { color: var(--yellow); }
+.pd-join h1 { margin: 0; font-size: 44px; }
+.pd-lede { margin: 0; color: var(--text-2); font-size: 15px; }
+.pd-field { display: grid; gap: 6px; }
+.pd-code {
+  height: 64px; padding: 0 16px; border-radius: var(--radius); border: 1.5px solid var(--line-2); background: var(--panel);
+  font-size: 36px; font-weight: 600; letter-spacing: 0.3em; text-align: center; text-transform: uppercase; user-select: text; -webkit-user-select: text;
+}
+.pd-code:focus { outline: none; border-color: var(--yellow); }
+.pd-msg { margin: 0; min-height: 1.4em; font-family: var(--ui); font-weight: 700; font-size: 15px; letter-spacing: 0.03em; color: var(--yellow); }
+.btn:disabled { opacity: 0.6; cursor: default; }
+
+/* ---------- Driving */
+.pd-drive {
+  display: grid; grid-template-rows: auto 1fr; gap: 10px; min-height: 0;
+  padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+}
+.pd-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pd-tools { display: flex; gap: 8px; margin-left: auto; }
+.pd-tools .btn { height: 40px; padding: 0 12px; font-size: 13px; }
+.pd-status { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
+.pd-status i { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); animation: live 1.2s infinite; }
+.pd-status[data-s='live'] { color: var(--green); }
+.pd-status[data-s='live'] i { background: var(--green); animation: none; }
+.pd-status[data-s='closed'] i { background: var(--red); animation: none; }
+.pd-warn { font-size: 13px; color: var(--yellow); flex: 1 1 200px; }
+.pd-warn:empty { display: none; }
+
+/* Simple: the kart accelerates by itself, so it's the wheel and one brake pedal under the right thumb.
+   Classic (the screen says so): brake on the left, gas on the right, like the pedals. */
+.pd-deck { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; min-height: 0; }
+.pd-deck .gas { display: none; }
+.pd-deck .brake { order: 2; }
+.pd.classic .pd-deck { grid-template-columns: 1fr minmax(0, 0.8fr) 1fr; }
+.pd.classic .pd-deck .gas { display: flex; order: 3; }
+.pd.classic .pd-deck .brake { order: 0; }
+
+.pd-pedal {
+  display: flex; align-items: center; justify-content: center; border-radius: 10px; border: 2px solid var(--line-2);
+  background: var(--panel); background-image: var(--hatch); touch-action: none; transition: background-color 0.06s, border-color 0.06s;
+}
+.pd-pedal .display { font-size: 34px; color: var(--muted); pointer-events: none; }
+.pd-pedal.brake.on { background-color: rgba(255, 59, 48, 0.28); border-color: var(--red); }
+.pd-pedal.gas.on { background-color: rgba(43, 212, 107, 0.24); border-color: var(--green); }
+.pd-pedal.on .display { color: var(--text); }
+
+.pd-wheel { display: grid; place-items: center; align-content: center; gap: 8px; min-width: 0; color: var(--text-2); touch-action: none; }
+.pd-wheel svg { width: min(100%, 46vh, 220px); height: auto; will-change: transform; }
+.pd-wheel-mark { fill: var(--yellow); }
+.pd-hint { margin: 0; font-size: 13px; color: var(--muted); text-align: center; }
+.pd-hint b { color: var(--text-2); }
+
+/* Upright, the pedals stack under the wheel. Tilt works either way up, but sideways grips best. */
+@media (orientation: portrait) {
+  .pd-deck, .pd.classic .pd-deck { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr minmax(120px, 0.7fr); }
+  .pd-wheel { grid-column: 1 / -1; order: -1 !important; }
+  .pd-deck .brake { grid-column: 1 / -1; }
+  .pd.classic .pd-deck .brake { grid-column: auto; }
+  .pd-hint::after { content: ' · sideways grips best'; }
+}

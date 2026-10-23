@@ -17,6 +17,7 @@
   "dependencies": {
     "@upstash/redis": "^1.39.0",
     "leaflet": "^1.9.4",
+    "qrcode-generator": "^2.0.4",
     "three": "^0.186.1"
   },
   "devDependencies": {

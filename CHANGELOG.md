@@ -6,6 +6,13 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
 
 ## [Unreleased]
 
+### Added
+- **Your phone is the wheel.** Press **Phone wheel** at the top of the home screen and scan the QR
+  code with your phone. Hold it sideways and tilt to steer, with big Brake (and, in Classic, Gas)
+  pedals under your thumbs, and Reset and Start · Pause buttons. Android phones buzz on wall hits
+  and at lights out. The phone keeps its screen on and stays paired across races and multiplayer
+  rooms. On iPhone, tap Allow when it asks for motion access.
+
 ## [0.29.1] - 2026-10-21
 
 ### Fixed
