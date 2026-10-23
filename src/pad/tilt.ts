@@ -1,8 +1,15 @@
 // Tilt steering for the phone controller: the phone, held sideways, is the steering wheel.
 // (This was the in-game Tilt scheme in v0.14; it lives on here, steering a kart on another screen.)
 
-const FULL_LOCK = 27; // degrees of tilt for full lock
-const DEAD_ZONE = 2.5; // degrees either side of straight ahead that do nothing
+/** How far you tilt for full lock, from Gentle (the v0.14 feel) to Sharp. */
+export const SENSITIVITY = [
+  { name: 'Gentle', lock: 27 },
+  { name: 'Normal', lock: 18 },
+  { name: 'Quick', lock: 13 },
+  { name: 'Sharp', lock: 9 },
+] as const;
+export const DEFAULT_SENSITIVITY = 1;
+const DEAD_ZONE = 0.09; // of full lock, either side of straight ahead, does nothing
 
 export type TiltFailure = 'denied' | 'gesture' | 'silent';
 
@@ -20,6 +27,8 @@ export class Tilt {
   private zero = 0;
   private steer = 0;
   private timer = 0;
+  /** Degrees of tilt for full lock (see SENSITIVITY). */
+  fullLock: number = SENSITIVITY[DEFAULT_SENSITIVITY].lock;
 
   constructor(private onFail: (why: TiltFailure) => void) {}
 
@@ -52,11 +61,12 @@ export class Tilt {
     if (this.roll !== null) this.zero = this.roll;
   }
 
-  /** Steering -1..1: a small dead zone, full lock at FULL_LOCK degrees, lightly smoothed. */
+  /** Steering -1..1: a small dead zone, full lock at `fullLock` degrees, lightly smoothed. */
   read(dt: number): number {
     if (this.roll === null) return 0;
     const d = ((this.roll - this.zero + 540) % 360) - 180;
-    const mag = Math.min(1, Math.max(0, Math.abs(d) - DEAD_ZONE) / (FULL_LOCK - DEAD_ZONE));
+    const dead = this.fullLock * DEAD_ZONE;
+    const mag = Math.min(1, Math.max(0, Math.abs(d) - dead) / (this.fullLock - dead));
     this.steer += (Math.sign(d) * mag - this.steer) * Math.min(1, dt * 15);
     return this.steer;
   }

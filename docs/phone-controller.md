@@ -63,8 +63,13 @@ laptop (screen)                 /api/pad (Redis)                  phone (pad.htm
 
 `src/pad/tilt.ts` is the Tilt scheme from v0.14, now on the phone. It turns the sensor's beta and
 gamma into gravity along the screen as it's held (either landscape direction, or portrait), so the
-wheel angle doesn't depend on how far the phone is tipped back. 2.5° dead zone, full lock at 27°,
-lightly smoothed. Straight ahead is the phone held level; **Recentre** sets it to however it's held now.
+wheel angle doesn't depend on how far the phone is tipped back. Lightly smoothed, with a dead zone of
+9% of full lock either side of straight ahead. Straight ahead is the phone held level; **Recentre**
+sets it to however it's held now.
+
+The **Tilt** button on the phone sets how far you tilt for full lock: Gentle 27° (the v0.14 feel),
+Normal 18° (the default), Quick 13°, Sharp 9°. The phone keeps the choice in `localStorage`, so it
+applies to every game that phone steers.
 
 DeviceOrientation needs a secure context. Over plain http (a laptop on the LAN in development), phones
 don't share the sensor and fall back to the ◀ ▶ buttons.
@@ -109,6 +114,6 @@ motion sensor it shows the ◀ ▶ buttons. In DevTools, `__pad` is the laptop's
 is the steering it's getting). Headless, dispatch `DeviceOrientationEvent`s on the phone page to tilt it.
 
 Tested with two headless Chromium contexts (a laptop at 1280×800 and a phone at 844×390 with touch):
-QR and code, connecting before Start, tilt both ways (±15° gives ±0.6 steer), Brake, a laptop
+QR and code, connecting before Start, tilt both ways (±15° gives ±0.95 steer on Normal), Brake, a laptop
 reload (reconnects in ≈5 s), Start on the briefing, Pause and Resume from the phone, a tilted phone
 turning the kart, the race pausing when the phone goes away, and a second phone taking over.

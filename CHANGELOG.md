@@ -37,6 +37,9 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
     under way.
   - The players see who's watching in the lobby. Watching screens don't take a grid slot, and the
     race never waits for them.
+- **Tilt steering is more sensitive, and you can set it.** Full lock now takes 18° of tilt instead of
+  27°. The **Tilt** button on the phone steps through Gentle (the old feel), Normal, Quick and Sharp
+  (9°), and the phone remembers your choice.
 - **Screens stay on with nobody touching them**: a screen watching a race, the party screen, and a
   laptop steered by a phone no longer dim or go to sleep mid-race.
 
