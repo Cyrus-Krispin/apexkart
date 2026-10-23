@@ -8,6 +8,7 @@ import type { Race } from './game/race';
 import type { WatchRace } from './game/watchRace';
 import { RoomClient, type RoomCloseReason } from './net/room';
 import { WatchBoard } from './ui/watchBoard';
+import { keepAwake } from './ui/wakeLock';
 import { roomTime, type RoomState } from './shared/room';
 import type { TrackData } from './track/osm';
 import { WATCH_HASH, type WatchHost } from './watch';
@@ -31,6 +32,7 @@ export class WatchController {
   private tracks = new Map<string, Promise<TrackData>>();
   private track: TrackData | null = null;
   private active = false;
+  private awake: (() => void) | null = null; // keeps the screen on: nobody touches it while this is up
   private joining: string | null = null;
 
   /** `returnHash`: the page to go back to (the one open before #/watch). */
@@ -74,6 +76,7 @@ export class WatchController {
     if (!this.active) {
       this.active = true;
       this.host.enter();
+      this.awake = keepAwake();
     }
     if (this.room?.code === code) return;
     this.join(code);
@@ -227,6 +230,8 @@ export class WatchController {
     this.board.hide();
     this.active = false;
     if (setHash) location.hash = WATCH_HASH.test(this.returnHash) ? '' : this.returnHash;
+    this.awake?.();
+    this.awake = null;
     this.host.leave();
   }
 }

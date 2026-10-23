@@ -60,7 +60,8 @@ players' race views ──WebRTC poses──▶ RoomClient.watch (src/net/room.t
   overlay.
 - **The controller** (`src/watchController.ts`) loads on the first `#/watch` (`src/watch.ts` is just
   the route). It opens a race view for each race the room starts, shows the board between races, and
-  handles Esc.
+  handles Esc. While it's open it holds a screen wake lock (`src/ui/wakeLock.ts`, shared with the
+  party screen, a laptop with a live phone wheel and the phone page), so the screen doesn't dim.
 
 ## Testing
 

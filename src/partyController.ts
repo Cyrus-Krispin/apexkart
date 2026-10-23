@@ -10,6 +10,7 @@ import type { PartyHub } from './game/partyHub';
 import { PartyScreen, type PartySeat } from './net/pad';
 import { escapeHtml, formatMs } from './net/api';
 import { PartyLobby, loadPartySettings } from './ui/partyLobby';
+import { keepAwake } from './ui/wakeLock';
 import type { GridSlot, RaceResult } from './shared/room';
 import type { PadButton } from './shared/pad';
 import type { TrackData } from './track/osm';
@@ -27,6 +28,7 @@ export class PartyController {
   private lobby: PartyLobby;
   private session: PartySession | null = null;
   private active = false;
+  private awake: (() => void) | null = null; // keeps the screen on: nobody touches it while this is up
   private races = 0;
   private starting = false;
 
@@ -63,6 +65,7 @@ export class PartyController {
     if (this.active) return;
     this.active = true;
     this.host.enter();
+    this.awake = keepAwake();
     this.showLobby();
     this.openCode();
   }
@@ -153,6 +156,8 @@ export class PartyController {
     this.lobby.message('');
     this.active = false;
     if (setHash) location.hash = PARTY_HASH.test(this.returnHash) ? '' : this.returnHash;
+    this.awake?.();
+    this.awake = null;
     this.host.leave();
   }
 }

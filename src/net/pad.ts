@@ -7,6 +7,7 @@
 import { gathered, iceServers } from './mesh';
 import { tabIdentity } from './room';
 import type { SignalMsg } from '../shared/room';
+import { keepAwake } from '../ui/wakeLock';
 import { PARTY_MAX, type PadButton, type PadCtl, type PadFrame, type PadPollResponse, type PadView } from '../shared/pad';
 
 export type { PadButton, PadView } from '../shared/pad';
@@ -295,6 +296,7 @@ export class PadScreen implements PadSource {
   code: string | null = null;
   private pollTimer = 0;
   private polling = false;
+  private awake: (() => void) | null = null;
   private since = 0; // when we started waiting (for GIVE_UP_MS)
   private listeners: { [K in keyof ScreenEvents]: Set<ScreenEvents[K]> } = { status: new Set(), button: new Set() };
   private conn = new PadConn({
@@ -384,6 +386,12 @@ export class PadScreen implements PadSource {
   private setStatus(s: PadStatus) {
     if (s === this.status) return;
     this.status = s;
+    // Steering from the phone, nobody touches the laptop: keep its screen on.
+    if (s === 'live') this.awake ??= keepAwake();
+    else {
+      this.awake?.();
+      this.awake = null;
+    }
     this.listeners.status.forEach((fn) => fn(s));
   }
 

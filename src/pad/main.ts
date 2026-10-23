@@ -8,6 +8,7 @@ import { PadPhone, type PhoneStatus } from '../net/pad';
 import { CODE_RE } from '../shared/room';
 import type { PadButton, PadCtl, PadView } from '../shared/pad';
 import { Tilt, type TiltFailure } from './tilt';
+import { keepAwake } from '../ui/wakeLock';
 
 type Pad = 'left' | 'right' | 'brake' | 'gas';
 
@@ -228,19 +229,6 @@ function tiltFailed(why: TiltFailure) {
   phone?.send({ k: 'hello', tilt: false });
   paintView();
 }
-
-type WakeLock = { release(): Promise<void> };
-let wake: WakeLock | null = null;
-async function keepAwake() {
-  try {
-    wake = (await (navigator as Navigator & { wakeLock?: { request(t: 'screen'): Promise<WakeLock> } }).wakeLock?.request('screen')) ?? null;
-  } catch {
-    /* not offered (older iOS); the screen may sleep */
-  }
-}
-document.addEventListener('visibilitychange', () => {
-  if (!document.hidden && started && wake) keepAwake(); // the lock is released when the page is hidden
-});
 
 function buzz(p: number | number[]) {
   try {
