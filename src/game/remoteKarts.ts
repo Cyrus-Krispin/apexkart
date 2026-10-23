@@ -295,6 +295,21 @@ export class RemoteKarts {
     return this.karts.values();
   }
 
+  private seen = { x: 0, z: 0, h: 0, speed: 0, yaw: 0 };
+
+  /** A kart as drawn this frame, for a watcher's camera (reused: read it at once); null when it isn't on screen. */
+  view(mid: string) {
+    const k = this.karts.get(mid);
+    if (!k?.shown) return null;
+    const v = this.seen;
+    v.x = k.x;
+    v.z = k.z;
+    v.h = k.h;
+    v.speed = Math.hypot(k.vx, k.vz);
+    v.yaw = k.snap?.yaw ?? 0;
+    return v;
+  }
+
   /** Progress (laps + fraction) for standings, extrapolated to `now`; -1 before the first pose. */
   progress(mid: string, now: number) {
     const s = this.karts.get(mid)?.snap;

@@ -21,7 +21,7 @@ import { analyzeShape } from '../track/shape';
 import { decodeGhost, encodeGhost, sampleGhost, GHOST_DT, type GhostData, type GhostFrame } from '../shared/ghost';
 import type { TrackData } from '../track/osm';
 import { api, formatMs, type BoardEntry, type BoardResponse, type Dir, type Driver } from '../net/api';
-import { gridPose, type RaceContext, type RaceMode } from './raceMode';
+import { gridPose, type Follow, type RaceContext, type RaceMode } from './raceMode';
 import { speedProfile } from './speedProfile';
 import { autopilot } from './autopilot';
 
@@ -198,6 +198,9 @@ export class Race {
   private bumpHit: KartHit | null = null; // the hardest kart-to-kart contact since the last frame (multiplayer)
   private padOff = () => {}; // phone controller status listener
   private readySent = false; // party: onReady called
+  /** Watching a room (mode.watch): no kart, no sound, the camera on the add-on's follow(). */
+  private watch: boolean;
+  private followKey = '';
   autopilot = false;
 
   constructor(private opts: RaceOptions) {
@@ -208,17 +211,22 @@ export class Race {
     localStorage.removeItem('ak:style'); // the satellite world is gone; every world is the stylised one
     if (opts.mode?.ghosts === false) this.showGhosts = false;
     this.chase = opts.mode ? 'pb' : opts.rival ? 'rival' : chasePref(); // a challenge starts on its rival
+    this.watch = !!opts.mode?.watch;
     // A party's karts are guests' laps on this device: nothing is saved or sent as its owner's.
-    this.pb = opts.party ? null : this.loadPB();
+    this.pb = opts.party || this.watch ? null : this.loadPB();
     if (opts.party) {
       this.qualitySetting = opts.party.quality;
       this.audio.volume = opts.party.volume;
       this.haptics = new Haptics(() => this.audio.muted, opts.party.pad);
     }
+    if (this.watch) {
+      this.haptics = new Haptics(() => true);
+      this.camMode = CAMS.findIndex((c) => c.id === 'far');
+    }
     this.bestSectors = this.pb?.sectors.slice() ?? [];
 
     this.root = document.createElement('div');
-    this.root.className = 'race';
+    this.root.className = this.watch ? 'race watching' : 'race';
     opts.container.appendChild(this.root);
 
     this.pipeline = new RenderPipeline(this.scene, this.camera, 'medium');
@@ -235,6 +243,7 @@ export class Race {
 
     this.phys = new KartPhysics(this.track);
     this.kart = buildKart(opts.driver.color, { number: 7 });
+    this.kart.root.visible = !this.watch;
     this.scene.add(this.kart.root);
 
     this.timeSetting = opts.mode?.time ?? 'live'; // every race starts at the real time of day there
@@ -255,7 +264,7 @@ export class Race {
       onBack: () => opts.onExit(),
       onPhone: () => openPadCard(),
     });
-    if (!opts.party) {
+    if (!opts.party && !this.watch) {
       this.padOff = phonePad.on('status', (st) => this.onPad(st));
       this.intro.phone(phonePad.status);
       this.padView('brief');
@@ -690,7 +699,7 @@ export class Race {
 
   private begin() {
     this.padView('race');
-    this.audio.start();
+    if (!this.watch) this.audio.start();
     this.hud.setVisible(true);
     this.resetToGrid();
     if (this.rival) this.hud.banner(`Chasing ${this.rival.name} · ${formatMs(this.rival.ms)}`, 'info', 3);
@@ -722,7 +731,10 @@ export class Race {
     if (a === 'mute') this.audio.toggleMute();
     if (a === 'ghosts') this.toggleGhosts();
     if (a === 'chase') this.cycleChase();
-    if (a === 'cam') this.camMode = (this.camMode + 1) % CAMS.length;
+    if (a === 'cam') {
+      do this.camMode = (this.camMode + 1) % CAMS.length;
+      while (this.watch && CAMS[this.camMode].id === 'hood'); // a watcher has no cockpit to sit in
+    }
     if (a === 'quality') {
       const order: QualitySetting[] = ['auto', 'high', 'medium', 'low'];
       this.qualitySetting = order[(order.indexOf(this.qualitySetting) + 1) % order.length];
@@ -900,7 +912,18 @@ export class Race {
 
   /** Tell a paired phone what's on screen, so it offers Start, Pause or Resume. A party tells its own phones. */
   private padView(v: PadView) {
-    if (!this.opts.party) phonePad.setView(v, this.input.scheme, !!this.opts.mode);
+    if (!this.opts.party && !this.watch) phonePad.setView(v, this.input.scheme, !!this.opts.mode);
+  }
+
+  // ------------------------------------------------------------------ watching (src/watchController.ts)
+
+  /** The camera: Chase, Far chase or TV (C cycles them too). */
+  cycleCamera() {
+    this.action('cam');
+  }
+
+  get cameraLabel() {
+    return CAMS[this.camMode].label;
   }
 
   private partyReady() {
@@ -950,7 +973,11 @@ export class Race {
     this.lastFrame = now;
     this.realT += dt;
 
-    if (this.state !== 'intro') {
+    if (this.watch) {
+      // Nothing to pause or reset: C changes the camera (Esc belongs to the watching screen).
+      if (this.input.consume('c')) this.action('cam');
+      ['Escape', 'p', 'm', 'g', 'r', 'Backspace'].forEach((k) => this.input.consume(k));
+    } else if (this.state !== 'intro') {
       if (this.input.consume('Escape') || this.input.consume('p')) this.togglePause();
       if (this.input.consume('c')) this.action('cam');
       if (this.input.consume('m')) this.action('mute');
@@ -998,7 +1025,7 @@ export class Race {
       w.quietUntil = now + 1000;
     }
     if (document.hidden || dt >= 0.1) w.quietUntil = now + 1000;
-    if (this.qualitySetting !== 'auto' || this.state !== 'racing' || this.lapNo < 2 || this.warming) {
+    if (this.qualitySetting !== 'auto' || this.state !== 'racing' || (this.lapNo < 2 && !this.watch) || this.warming) {
       w.dts.length = 0;
       return;
     }
@@ -1062,6 +1089,7 @@ export class Race {
       c.throttle = c.brake = 0;
     }
     this.simT += dt;
+    if (this.watch) return; // no kart of our own: only the lights
     this.phys.step(dt, c);
     if (this.state === 'racing') this.timing(dt);
     this.sectorFlash();
@@ -1663,7 +1691,7 @@ export class Race {
     kartLights(k, this.atmos.time === 'night', this.pipeline.quality !== 'low');
     const live = this.state === 'grid' || this.state === 'racing';
     const fb = this.fx.frame(live ? dt : 0, this.camera, this.pipeline.renderer, this.pipeline.quality, this.atmos.time === 'night');
-    if (live) {
+    if (live && !this.watch) {
       if (fb.impact) {
         this.audio.impact(fb.impact);
         this.haptics.impact(fb.impact);
@@ -1685,15 +1713,24 @@ export class Race {
     }
     this.bumpHit = null;
 
+    // What the camera follows: your kart, or (watching) the kart the add-on picks.
+    const f: Follow | null = this.watch ? (this.opts.mode?.addon?.follow?.(dt) ?? null) : null;
+    const cx = f ? f.x : x;
+    const cz = f ? f.z : z;
+    const speed = f ? f.speed : p.speed;
+    const turn = f ? f.yawRate * f.speed : p.yawRate * vf;
+    const cut = !!f && f.key !== this.followKey; // someone else to follow: cut, don't sweep across the circuit
+    if (f) this.followKey = f.key;
     const { fwd, pos, look, tmp, up } = this.v;
-    fwd.set(Math.sin(heading), 0, Math.cos(heading));
+    fwd.set(Math.sin(f ? f.heading : heading), 0, Math.cos(f ? f.heading : heading));
     const mode = CAMS[this.camMode].id;
     const cam = this.cam;
     // Portrait phones (0 at aspect 0.8 or wider, 1 at 0.48 and taller): with the wider view below, the
     // chase camera sits higher and looks down a little more, so the road ahead fills the screen between
     // the timing panels and the speedometer instead of sky.
     const tall = THREE.MathUtils.clamp((0.8 - this.camera.aspect) / 0.32, 0, 1);
-    let lerp = 1 - Math.exp(-dt * 7);
+    let lerp = cut ? 1 : 1 - Math.exp(-dt * 7);
+    if (cut) cam.side = 0;
     if (this.state === 'intro') {
       // Slow cinematic orbit; tight so the camera stays on the circuit (real pit buildings often sit beside the grid).
       const ang = this.realT * 0.18 + 2.2;
@@ -1710,17 +1747,17 @@ export class Race {
       look.set(x, 0.9, z).addScaledVector(fwd, 10);
       lerp = 1;
     } else if (mode === 'tv') {
-      pos.set(x, 34, z).addScaledVector(fwd, -18);
-      look.set(x, 0, z).addScaledVector(fwd, 6);
-      lerp = 1 - Math.exp(-dt * 3);
+      pos.set(cx, 34, cz).addScaledVector(fwd, -18);
+      look.set(cx, 0, cz).addScaledVector(fwd, 6);
+      if (!cut) lerp = 1 - Math.exp(-dt * 3);
     } else {
       const far = mode === 'far';
       // Look a little into the corner, toward the apex (yawRate > 0 turns left).
-      const side = THREE.MathUtils.clamp(-p.yawRate * p.forwardSpeed * 0.04, -1, 1);
+      const side = THREE.MathUtils.clamp(-turn * 0.04, -1, 1);
       cam.side += (side - cam.side) * (1 - Math.exp(-dt * 3));
       tmp.set(-fwd.z, 0, fwd.x); // right of travel
-      pos.set(x, far ? 4.2 + 0.8 * tall : 2.3 + 1.5 * tall, z).addScaledVector(fwd, far ? -9.5 : -5.2 - 0.4 * tall);
-      look.set(x, 0.7 - 0.3 * tall, z).addScaledVector(fwd, 3.5 + 0.5 * tall).addScaledVector(tmp, cam.side);
+      pos.set(cx, far ? 4.2 + 0.8 * tall : 2.3 + 1.5 * tall, cz).addScaledVector(fwd, far ? -9.5 : -5.2 - 0.4 * tall);
+      look.set(cx, 0.7 - 0.3 * tall, cz).addScaledVector(fwd, 3.5 + 0.5 * tall).addScaledVector(tmp, cam.side);
     }
     this.camPos.lerp(pos, lerp);
     this.camLook.lerp(look, Math.min(1, lerp * 1.6));
@@ -1730,8 +1767,8 @@ export class Race {
     this.camera.lookAt(this.camLook);
     // FOV: wider with speed; never narrower than 44-50° across (portrait phones), at most 100° tall;
     // plus the impact punch.
-    const base = this.state === 'intro' ? 42 : (mode === 'hood' ? 70 : 60) + p.speed * 0.38;
-    const across = this.state === 'intro' ? 0 : 44 + 6 * Math.min(1, p.speed / p.vmax);
+    const base = this.state === 'intro' ? 42 : (mode === 'hood' ? 70 : 60) + speed * 0.38;
+    const across = this.state === 'intro' ? 0 : 44 + 6 * Math.min(1, speed / p.vmax);
     const upright = (deg: number) => THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(deg / 2)) / this.camera.aspect));
     const floor = upright(across);
     // A party's wide panes (two players, one above the other) would otherwise see round the sides.
@@ -1742,9 +1779,9 @@ export class Race {
       this.camera.fov = fov;
       this.camera.updateProjectionMatrix();
     }
-    k.root.visible = mode !== 'hood' || this.state === 'intro';
+    k.root.visible = !this.watch && (mode !== 'hood' || this.state === 'intro');
 
-    this.atmos.update(x, z, dt);
+    this.atmos.update(cx, cz, dt);
 
     // Ghost time matches the interpolated kart (one step behind simT, plus the fraction).
     const lapT = this.lapStart !== null && this.state !== 'grid' ? this.simT - STEP * (1 - a) - this.lapStart : -1;
@@ -1768,12 +1805,12 @@ export class Race {
 
     this.opts.mode?.addon?.frame?.(dt);
     this.pipeline.render();
-    this.drawHud(lapT, x, z);
+    this.drawHud(lapT, x, z, speed);
   }
 
-  private drawHud(lapT: number, kx: number, kz: number) {
+  private drawHud(lapT: number, kx: number, kz: number, speed: number) {
     const p = this.phys;
-    this.hud.speed(p.speed * 3.6, p.speed / p.vmax);
+    this.hud.speed(speed * 3.6, speed / p.vmax);
     const L = this.track.length;
     if (lapT >= 0) {
       this.hud.lapTime(lapT * 1000, this.invalid);
@@ -1807,6 +1844,7 @@ export class Race {
         g.stroke();
       }
     });
+    if (this.watch) return; // no kart of our own
     const [mx, my] = map(kx, kz);
     g.beginPath();
     g.arc(mx, my, 9, 0, Math.PI * 2);

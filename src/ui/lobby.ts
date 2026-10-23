@@ -156,11 +156,21 @@ export class Lobby {
         await this.actions.create(t, this.preferred?.id === t.id ? this.preferred.dir : 'fwd', LAPS_DEFAULT);
       }),
     );
+    const typedCode = () => {
+      const code = (this.$.joinCode as HTMLInputElement).value.trim().toUpperCase();
+      if (CODE_RE.test(code)) return code;
+      this.$.homeMsg.textContent = 'Room codes are 4 letters/numbers, like K7QX.';
+      return null;
+    };
     (this.$.joinForm as HTMLFormElement).addEventListener('submit', (e) => {
       e.preventDefault();
-      const code = (this.$.joinCode as HTMLInputElement).value.trim().toUpperCase();
-      if (!CODE_RE.test(code)) return (this.$.homeMsg.textContent = 'Room codes are 4 letters/numbers, like K7QX.');
-      this.run(() => this.actions.join(code));
+      const code = typedCode();
+      if (code) this.run(() => this.actions.join(code));
+    });
+    // Watch instead: this screen shows the race without being on the grid (src/watch.ts).
+    click('[data-act="watch"]', () => {
+      const code = typedCode();
+      if (code) location.hash = `#/watch/${code}`;
     });
     click('[data-act="leave"]', () => this.run(() => this.actions.leave()));
     click('[data-act="copy"]', async (b) => {
@@ -172,6 +182,16 @@ export class Lobby {
         prompt('Copy this link', this.room.link);
       }
       setTimeout(() => (b.textContent = 'Copy link'), 1500);
+    });
+    click('[data-act="watchlink"]', async (b) => {
+      if (!this.room) return;
+      try {
+        await navigator.clipboard.writeText(this.room.watchLink);
+        b.textContent = 'Copied!';
+      } catch {
+        prompt('Open this link on the screen that should show the race', this.room.watchLink);
+      }
+      setTimeout(() => (b.textContent = 'Watch link'), 1500);
     });
     click('[data-act="share"]', () => this.room && navigator.share?.({ title: 'Race me on ApexKart', text: `Join my kart race (room ${this.room.code})`, url: this.room.link }).catch(() => undefined));
     if (!('share' in navigator)) this.root.querySelector<HTMLElement>('[data-act="share"]')!.hidden = true;
@@ -332,6 +352,8 @@ export class Lobby {
       })
       .join('');
     this.$.count.textContent = `${s.players.length} / 8`;
+    const watchers = s.watchers ?? [];
+    this.$.watchers.textContent = watchers.length ? `Watching: ${watchers.map((w) => w.name).join(', ')}` : '';
     this.$.boardGrid.textContent = `${s.players.length}/8`;
     const taken = new Set(s.players.filter((p) => p.mid !== room.mid).map((p) => p.color));
     const mine = room.me?.color;
@@ -426,6 +448,7 @@ const LOBBY_HTML = /* html */ `
     <form class="mp-join" data-el="joinForm">
       <input data-el="joinCode" maxlength="4" placeholder="CODE" autocomplete="off" spellcheck="false" aria-label="Room code" />
       <button class="btn">Join</button>
+      <button class="btn" type="button" data-act="watch" title="Show the room’s races on this screen without racing (a TV for the room)">Watch</button>
     </form>
     <div class="mp-msg" data-el="homeMsg"></div>
   </section>
@@ -443,6 +466,7 @@ const LOBBY_HTML = /* html */ `
         <div class="mp-share">
           <button class="btn" data-act="copy">Copy link</button>
           <button class="btn" data-act="share">Share</button>
+          <button class="btn" data-act="watchlink" title="Copy a link for a screen that shows the race without racing, like a TV">Watch link</button>
         </div>
       </div>
       <div class="mp-banner ui" data-el="banner"></div>
@@ -467,6 +491,7 @@ const LOBBY_HTML = /* html */ `
       <div class="mp-players">
         <h3 class="mp-colh label"><span>Drivers</span><span class="mono" data-el="count"></span></h3>
         <ul class="mp-tower" data-el="players"></ul>
+        <p class="mp-watchers label" data-el="watchers"></p>
         <div class="mp-me">
           <span class="label">Your kart</span>
           <input data-el="myName" maxlength="16" autocomplete="off" spellcheck="false" aria-label="Your name" />

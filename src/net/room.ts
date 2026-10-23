@@ -136,6 +136,8 @@ export class RoomClient {
     readonly code: string,
     readonly secret: string,
     readonly mid: string,
+    /** A screen watching the room (src/watchController.ts): links up with the players, never races. */
+    readonly watching = false,
   ) {
     this.mesh = new Mesh(mid, {
       signal: (to, m) => this.call('signal', { to, ...m }).then(() => undefined),
@@ -173,6 +175,19 @@ export class RoomClient {
     return room;
   }
 
+  /** Watch a room without racing: every player sends this tab their poses. */
+  static async watch(code: string, name: string) {
+    const { secret, mid } = await tabIdentity();
+    const room = new RoomClient(code.toUpperCase(), secret, mid, true);
+    try {
+      room.apply(await room.call('watch', { name }));
+    } catch (e) {
+      room.dispose();
+      throw e;
+    }
+    return room;
+  }
+
   // ---------- events
 
   on<K extends keyof RoomEvents>(ev: K, fn: RoomEvents[K]): () => void {
@@ -196,6 +211,11 @@ export class RoomClient {
 
   get link() {
     return `${location.origin}${location.pathname}#/room/${this.code}`;
+  }
+
+  /** A link that watches the room instead of joining the race (src/watch.ts). */
+  get watchLink() {
+    return `${location.origin}${location.pathname}#/watch/${this.code}`;
   }
 
   // ---------- actions (each returns once the server has applied it)
@@ -265,11 +285,17 @@ export class RoomClient {
     if (rejoined) this.mailN = res.mailN ?? 0;
     else if (fromPoll && res.mailN !== undefined) this.mailN = Math.max(this.mailN, res.mailN);
     this.state = res.state;
-    this.mesh.sync(res.state.players); // before mail, so offers from new peers find their Peer
+    this.mesh.sync(this.links(res.state)); // before mail, so offers from new peers find their Peer
     res.mail?.forEach((m: SignalMsg) => this.mesh.handleSignal(m));
     this.emit('state', res.state);
     this.updateRelay();
     this.schedule();
+  }
+
+  /** Who this tab links up with: a player, with everyone; a watcher, with the players. */
+  private links(s: RoomState) {
+    const watchers = s.watchers ?? [];
+    return [...s.players, ...(this.watching ? watchers.filter((w) => w.mid === this.mid) : watchers)];
   }
 
   private interval() {
@@ -298,10 +324,10 @@ export class RoomClient {
       if (this.failures) this.emit('net', true);
       this.failures = 0;
       // Dropped for being quiet too long (e.g. a long background tab)? Walk back in.
-      if (res.state && !res.state.players.some((p) => p.mid === this.mid)) {
+      if (res.state && !this.links(res.state).some((p) => p.mid === this.mid)) {
         const me = this.lastProfile();
         if (me) {
-          const res = await this.call('join', me);
+          const res = await this.call(this.watching ? 'watch' : 'join', me);
           this.mesh.reset(); // the others dropped their side of every link when we left
           return this.apply(res, false, true);
         }
@@ -323,7 +349,9 @@ export class RoomClient {
   private profileCache: Profile | null = null;
   private lastProfile() {
     const m = this.me;
+    const w = this.state?.watchers?.find((x) => x.mid === this.mid);
     if (m) this.profileCache = { name: m.name, color: m.color };
+    else if (w) this.profileCache = { name: w.name, color: '' };
     return this.profileCache;
   }
 
@@ -340,14 +368,14 @@ export class RoomClient {
   private async relayTick() {
     if (this.relayBusy || this.disposed) return;
     const want = this.mesh.relayPeers();
-    if (!this.localPose) return; // not in the race view ourselves
+    if (!this.localPose && !this.watching) return; // not in the race view ourselves
     this.relayBusy = true;
     try {
       const sent = performance.now();
       const res = await post<{ now: number; poses: Record<string, PoseTuple> }>('relay', {
         s: this.secret,
         code: this.code,
-        pose: this.localPose,
+        pose: this.watching ? null : this.localPose,
         want,
       });
       this.clock.sample(sent, performance.now(), res.now);

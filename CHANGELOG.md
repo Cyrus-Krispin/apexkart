@@ -27,6 +27,16 @@ New features and fixes in ApexKart, newest first. Each release is a git tag on `
     grid order turns round each race, and the results show who won with everyone's gaps.
   - If a phone drops out mid-race, everyone pauses until it reconnects, or the rest race on without
     it. Phones keep their seat through a dropped link or a reload of the laptop.
+- **Watch a room's race on another screen.** In a room, **Watch link** copies a link for a TV or a
+  laptop that isn't racing (or type the room's code and press **Watch**). That screen shows every kart
+  live, with a timing tower, the map and a camera on the leader.
+  - Click a driver in the tower (or press 1–8) to follow them, and A to go back to the leader. C or
+    the camera button switches between Chase, Far chase and an overhead TV camera.
+  - Between races it shows the room: who's ready, the circuit, the last results, and a QR code for
+    joining the room to race. Each race opens on its own when the host starts it, even one already
+    under way.
+  - The players see who's watching in the lobby. Watching screens don't take a grid slot, and the
+    race never waits for them.
 
 ## [0.29.1] - 2026-10-21
 

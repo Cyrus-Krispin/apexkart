@@ -121,6 +121,15 @@ classification at the end, because each view runs the same race code as an onlin
 can start, pause and restart; if one drops out the race pauses until it is back, or the rest race on
 without it. The details are in [docs/party.md](docs/party.md).
 
+## Watch a race on the big screen
+
+Open a room's **Watch link** (or type its code and press **Watch**) on a TV or a laptop that isn't
+racing. It joins the room as a screen, not a driver: every player sends it their kart, and it shows the
+race live with a timing tower, the map, and a camera that follows the leader (or anyone you pick, with
+Chase, Far chase and an overhead TV camera). Between races it shows the room, the last results and a
+QR code for joining. Players race on their own phones or laptops, so a room can be eight people
+racing and everyone else watching. The details are in [docs/watch.md](docs/watch.md).
+
 ## Made for phones too
 
 <img src="docs/media/phones.jpg" alt="Four phone screenshots: the timing tower, the circuit page, the grid, and a race with touch controls" width="100%">
@@ -173,6 +182,7 @@ flowchart LR
   Race <-->|"WebRTC poses"| Friends["Friends' karts"]
   Phone["Phone controller<br/>pad.html"] -->|"WebRTC tilt"| Race
   Party["Party: up to 4 phones,<br/>one Race view each<br/>src/partyController.ts"] --> Race
+  Friends -->|"WebRTC poses"| Watch["Watch screen: no kart,<br/>camera on the leader<br/>src/watchController.ts"]
 ```
 
 | Piece | What it is |

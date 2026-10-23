@@ -8,6 +8,7 @@ import { initMultiplayer } from './multiplayer';
 import { initChangelog } from './ui/changelog';
 import { initPhonePad } from './ui/padCard';
 import { initParty } from './party';
+import { initWatch } from './watch';
 
 const driver = await loadDriver();
 const atlasRoot = document.getElementById('atlas')!;
@@ -69,6 +70,19 @@ initPhonePad({ entryParent: atlasRoot.querySelector<HTMLElement>('.top-right') }
 initParty({
   container: gameRoot,
   entryParent: atlasRoot.querySelector<HTMLElement>('.top-right'),
+  enter: () => {
+    starting++;
+    race?.dispose();
+    race = null;
+    atlas.hide();
+  },
+  leave: () => atlas.show(),
+});
+
+// Watch a room on a screen that doesn't race, like a TV for the room (#/watch/CODE). See docs/watch.md.
+initWatch({
+  driver,
+  container: gameRoot,
   enter: () => {
     starting++;
     race?.dispose();

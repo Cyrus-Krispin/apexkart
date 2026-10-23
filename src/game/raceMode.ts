@@ -20,7 +20,20 @@ export interface RaceMode {
   /** Time of day shared by everyone in the session. Overrides (without changing) the player's
    * own Day/Night preference and hides the pause menu's Time of day toggle. */
   time?: 'day' | 'night';
+  /** Watch only (src/watchController.ts): no kart of your own, no sound; the camera follows the add-on's follow(). */
+  watch?: boolean;
   addon?: RaceAddon;
+}
+
+/** The kart a watching camera follows, where it's drawn this frame. */
+export interface Follow {
+  /** Whose kart: a new one cuts the camera to it instead of sweeping across the circuit. */
+  key: string;
+  x: number;
+  z: number;
+  heading: number;
+  speed: number; // m/s
+  yawRate: number; // rad/s
 }
 
 export interface RaceAddon {
@@ -29,6 +42,8 @@ export interface RaceAddon {
   tick?(dt: number): void;
   /** Once per rendered frame, just before the scene is drawn. */
   frame?(dt: number): void;
+  /** Watching: move the karts to the instant this frame shows, then say which one the camera follows (null: the grid). */
+  follow?(dt: number): Follow | null;
   /** Draw extra markers on the minimap. */
   minimap?(dot: (x: number, z: number, color: string, r: number, ring?: boolean) => void): void;
   dispose?(): void;
