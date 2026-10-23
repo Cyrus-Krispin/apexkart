@@ -7,7 +7,7 @@ import './pad.css';
 import { PadPhone, type PhoneStatus } from '../net/pad';
 import { CODE_RE } from '../shared/room';
 import type { PadButton, PadCtl, PadView } from '../shared/pad';
-import { Tilt, type TiltFailure } from './tilt';
+import { DEFAULT_SENSITIVITY, SENSITIVITY, Tilt, type TiltFailure } from './tilt';
 import { keepAwake } from '../ui/wakeLock';
 
 type Pad = 'left' | 'right' | 'brake' | 'gas';
@@ -51,6 +51,7 @@ root.innerHTML = `
       <span class="pd-link-line"><i class="pd-dot"></i><span data-el="status2">Connecting…</span></span>
       <span class="pd-note" data-el="note"></span>
       <nav class="pd-tools">
+        <button class="btn" data-act="sens" data-el="sens" title="How far you tilt for full lock"></button>
         <button class="btn" data-act="recentre" data-el="recentre" title="Straight ahead is how you hold the phone now">Recentre</button>
         <button class="btn" data-act="reset" data-el="reset" title="Back on track">Reset</button>
         <button class="btn primary" data-act="main" data-el="main">Pause</button>
@@ -80,6 +81,27 @@ let tiltNote = ''; // why the phone steers with buttons instead
 let started = false;
 let seat: { n: number; color: string } | null = null; // in a party: which kart this phone drives
 const tilt = new Tilt((why) => tiltFailed(why));
+
+// Tilt sensitivity, kept on this phone: a tap on the button steps through SENSITIVITY.
+const SENS_KEY = 'apexkart.pad.sens';
+let sens = DEFAULT_SENSITIVITY;
+try {
+  const v = Number(localStorage.getItem(SENS_KEY));
+  if (localStorage.getItem(SENS_KEY) !== null && SENSITIVITY[v]) sens = v;
+} catch {
+  /* storage blocked: the default */
+}
+function setSens(n: number) {
+  sens = n;
+  tilt.fullLock = SENSITIVITY[n].lock;
+  $('sens').textContent = `Tilt: ${SENSITIVITY[n].name}`;
+  try {
+    localStorage.setItem(SENS_KEY, String(n));
+  } catch {
+    /* not kept */
+  }
+}
+setSens(sens);
 
 // ---------------------------------------------------------------- code
 
@@ -177,6 +199,7 @@ function paintView() {
   area.classList.toggle('simple', scheme !== 'classic');
   area.classList.toggle('notilt', !useTilt);
   $('recentre').hidden = !useTilt;
+  $('sens').hidden = !useTilt;
   $('note').textContent =
     live && view === 'menu' ? (mp ? 'In the lobby' : 'Pick a circuit on the laptop') : live && seat && view === 'brief' && !tiltNote ? 'Everyone in? Start the race' : tiltNote;
 }
@@ -189,6 +212,10 @@ function press(b: PadButton) {
 root.addEventListener('click', (e) => {
   const act = (e.target as HTMLElement).closest<HTMLElement>('[data-act]')?.dataset.act;
   if (act === 'start') return begin();
+  if (act === 'sens') {
+    setSens((sens + 1) % SENSITIVITY.length);
+    buzz(12);
+  }
   if (act === 'recentre') {
     tilt.recentre();
     buzz(12);
