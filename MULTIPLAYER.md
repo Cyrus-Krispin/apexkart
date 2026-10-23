@@ -45,6 +45,9 @@ src/ui/raceOverlay.ts     in-race HUD: position, lap X/N, standings, countdown, 
 src/ui/lobby.ts           lobby: create/join, players, track/dir/laps/time, ready/start, last results
 src/ui/multiplayer.css    all multiplayer styles (.mp-* classes, variables with fallbacks)
 src/multiplayer.ts        controller: #/room routing, owns RoomClient + lobby + multiplayer Race
+src/watch.ts              #/watch/CODE route; src/watchController.ts watches a room (docs/watch.md)
+src/game/watchRace.ts     WatchRace add-on: the whole field, standings, the camera's pick (watching)
+src/ui/watchOverlay.ts    a watching screen's tower, who's on camera, results (src/ui/watchBoard.ts between races)
 dev/mp-test.html          dev-only bench: N players side by side in one tab
 ```
 
@@ -58,12 +61,12 @@ Redis keys (all short-lived):
 
 | Key | Contents | Expiry |
 | --- | --- | --- |
-| `ak:room:{code}` (hash) | `cfg` (settings, phase, grid, last results) and per player `p:` profile, `s:` last seen, `r:` ready, `f:` finish, `m:` signal count, `k:` kicked | 120 s after the last heartbeat |
+| `ak:room:{code}` (hash) | `cfg` (settings, phase, grid, last results) and per player `p:` profile, `s:` last seen, `r:` ready, `f:` finish, `m:` signal count, `k:` kicked; per watcher `w:` profile (and `s:`, `m:`) | 120 s after the last heartbeat |
 | `ak:room:{code}:in:{mid}` | that player's pending offers/answers | 120 s |
 | `ak:room:{code}:trk` | the room's track geometry, so every client races identical geometry | 6 h |
 | `ak:room:{code}:rl:{mid}` | latest relayed pose | 5 s |
 
-Actions (`POST /api/room {a, code, s, ...}`): `create`, `join`, `poll`, `leave` (`soft` on tab
+Actions (`POST /api/room {a, code, s, ...}`): `create`, `join`, `watch`, `poll`, `leave` (`soft` on tab
 close), `signal`, `relay`, `ready`, `profile`, `config` (host), `start` (host), `finish`, `end` (host),
 `kick` (host). `GET /api/room?code=&trk=1` returns the track.
 
@@ -78,6 +81,12 @@ Lifecycle and rules (housekeeping runs lazily inside any request that loads the 
   (via `sendBeacon`) that drops you 8 s later unless you come back, so a reload keeps host and ready
   state. Silent players (crash, lost network) are dropped after 35 s without a heartbeat.
 - **Host migration**: the earliest-joined remaining player becomes host. The last player out deletes the room.
+- **Watchers** (`watch`, up to 8, listed in `state.watchers`): screens that watch without racing
+  ([docs/watch.md](docs/watch.md)). They poll and heartbeat like players and are dropped the same way,
+  but they're never on the grid, never ready, never host, and they don't keep a room open: it still
+  closes with its last player. Players link with watchers (and send them their poses); watchers don't
+  link with each other, and can't do any of the player actions. A watcher who `join`s becomes a
+  player; a player who `watch`es leaves the grid first.
 - **Expiry**: a room with no activity (join, settings, start) for 30 min closes. Keys expire 2 min
   after the last heartbeat, so abandoned rooms clean themselves up.
 - Concurrent `cfg` writes use compare-and-set (a tiny Lua script on Redis; plain compare in the
@@ -244,8 +253,10 @@ Those preview tests never completed a lap, so nothing was submitted to the real 
 
 - **No TURN**: strict-NAT pairs use the 3 Hz relay. If that's common, add TURN through
   `VITE_ICE_SERVERS` (that needs a provider account), or move live traffic to a managed service.
-- **Mesh** scales to the 8-player cap. Each client uploads 7 × 20 Hz × ~100 B ≈ 14 KB/s.
+- **Mesh** scales to the 8-player cap. Each client uploads 7 × 20 Hz × ~100 B ≈ 14 KB/s, plus 2 KB/s
+  for each screen watching.
 - **Reloading mid-race** puts you back at your grid slot (the race goes on without you).
-- **No spectating**: late joiners wait in the lobby until the race ends.
+- **Late joiners** wait in the lobby until the race ends. The race can be watched meanwhile from
+  another tab or screen at `#/watch/CODE`.
 - **Client-trusted** results, as with the leaderboard.
 - Background tabs freeze your kart, as browsers pause `requestAnimationFrame`. The race clock keeps running.

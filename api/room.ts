@@ -7,15 +7,16 @@
 //
 // Redis layout (all keys expire ROOM_TTL_S after the last heartbeat):
 //   ak:room:{code}            hash: cfg, p:{mid} profile, s:{mid} last seen, r:{mid} ready version,
-//                                   f:{mid} finish, m:{mid} signal count, k:{mid} kicked
+//                                   f:{mid} finish, m:{mid} signal count, k:{mid} kicked,
+//                                   w:{mid} a watcher's profile (a screen that watches, never races)
 //   ak:room:{code}:in:{mid}   list: pending signaling messages for mid
 //   ak:room:{code}:trk        track geometry (TrackData JSON)
 //   ak:room:{code}:rl:{mid}   latest relayed pose (5 s)
 import { getStore, json, bad, publicId, cleanName, cleanColor, isDir, TRACK_RE, type Store } from './_lib/store.js';
 import {
-  CODE_ALPHABET, CODE_RE, MID_RE, SECRET_RE, ROOM_MAX, LAPS_MIN, LAPS_MAX, LAPS_DEFAULT, START_DELAY_MS, STALE_MS, IDLE_MS,
+  CODE_ALPHABET, CODE_RE, MID_RE, SECRET_RE, ROOM_MAX, WATCH_MAX, LAPS_MIN, LAPS_MAX, LAPS_DEFAULT, START_DELAY_MS, STALE_MS, IDLE_MS,
   ROOM_TTL_S, FINISH_GRACE_MS, KART_COLORS, isReady, raceResult, nearestLivery, isRoomTime, roomTime,
-  type RoomCfg, type RoomPlayer, type RoomState, type PollResponse, type SignalMsg, type RoomTime,
+  type RoomCfg, type RoomPlayer, type RoomState, type RoomWatcher, type PollResponse, type SignalMsg, type RoomTime,
 } from '../src/shared/room.js';
 
 const TRK_TTL_S = 6 * 3600;
@@ -78,6 +79,8 @@ export async function POST(req: Request) {
         return json(await poll(db, code, mid, b, now));
       case 'join':
         return json(await join(db, code, mid, b, now));
+      case 'watch':
+        return json(await watch(db, code, mid, b, now));
       case 'leave':
         if (b.soft) await softLeave(db, code, mid, now);
         else await leave(db, code, mid, now);
@@ -99,7 +102,14 @@ function parse(code: string, hash: Record<string, string>): Loaded | null {
   if (!hash.cfg) return null;
   const cfg: RoomCfg = JSON.parse(hash.cfg);
   const players: RoomPlayer[] = [];
+  const watchers: RoomWatcher[] = [];
   for (const [f, v] of Object.entries(hash)) {
+    if (f.startsWith('w:')) {
+      const mid = f.slice(2);
+      const w = JSON.parse(v);
+      watchers.push({ mid, name: w.name, joined: w.joined, seen: Number(hash[`s:${mid}`] ?? w.joined) });
+      continue;
+    }
     if (!f.startsWith('p:')) continue;
     const mid = f.slice(2);
     const p = JSON.parse(v);
@@ -113,12 +123,17 @@ function parse(code: string, hash: Record<string, string>): Loaded | null {
       fin: hash[`f:${mid}`] ? JSON.parse(hash[`f:${mid}`]) : null,
     });
   }
-  players.sort((a, b) => a.joined - b.joined || (a.mid < b.mid ? -1 : 1));
+  const byJoin = (a: { joined: number; mid: string }, b: { joined: number; mid: string }) => a.joined - b.joined || (a.mid < b.mid ? -1 : 1);
+  players.sort(byJoin);
+  watchers.sort(byJoin);
   cfg.code = code;
-  return { state: { cfg, players }, raw: hash.cfg, hash };
+  return { state: { cfg, players, watchers }, raw: hash.cfg, hash };
 }
 
 const playerFields = (mid: string) => [`p:${mid}`, `s:${mid}`, `r:${mid}`, `f:${mid}`, `m:${mid}`];
+const watcherFields = (mid: string) => [`w:${mid}`, `s:${mid}`, `m:${mid}`];
+/** Everyone with an inbox: players and watchers. */
+const everyone = (s: RoomState) => [...s.players, ...(s.watchers ?? [])].map((p) => p.mid);
 
 async function destroy(db: Store, code: string, mids: string[]) {
   await db.del([K.room(code), K.trk(code), ...mids.map((m) => K.inbox(code, m))]);
@@ -146,20 +161,27 @@ async function load(db: Store, code: string, now: number): Promise<Loaded | { cl
 
     // A race in progress is never idle; it ends on its own (maybeEndRace's hard cap).
     if (cfg.phase !== 'racing' && now - cfg.active > IDLE_MS) {
-      await destroy(db, code, players.map((p) => p.mid));
+      await destroy(db, code, everyone(l.state));
       return { closed: 'idle' };
     }
 
+    // Watchers don't keep a room open: it closes when its last player goes.
     const stale = players.filter((p) => now - p.seen > STALE_MS).map((p) => p.mid);
-    if (stale.length) {
+    if (stale.length || !players.length) {
       const alive = players.filter((p) => !stale.includes(p.mid));
       if (!alive.length) {
-        await destroy(db, code, players.map((p) => p.mid));
+        await destroy(db, code, everyone(l.state));
         return { closed: 'gone' };
       }
       await db.hdel(K.room(code), stale.flatMap(playerFields));
       await db.del(stale.map((m) => K.inbox(code, m)));
       l.state.players = alive;
+    }
+    const gone = l.state.watchers!.filter((w) => now - w.seen > STALE_MS).map((w) => w.mid);
+    if (gone.length) {
+      await db.hdel(K.room(code), gone.flatMap(watcherFields));
+      await db.del(gone.map((m) => K.inbox(code, m)));
+      l.state.watchers = l.state.watchers!.filter((w) => !gone.includes(w.mid));
     }
 
     const next: RoomCfg = { ...cfg };
@@ -267,7 +289,8 @@ async function join(db: Store, code: string, mid: string, b: any, now: number): 
   const profile = { name: cleanName(b.name), color, joined: existing?.joined ?? now };
   await db.hsetMany(K.room(code), { [`p:${mid}`]: JSON.stringify(profile), [`s:${mid}`]: String(now) });
   // A (re)joining page has no use for signals sent to its previous incarnation.
-  await Promise.all([db.hdel(K.room(code), [`k:${mid}`]), db.expire(K.room(code), ROOM_TTL_S), db.del([K.inbox(code, mid)])]);
+  await Promise.all([db.hdel(K.room(code), [`k:${mid}`, `w:${mid}`]), db.expire(K.room(code), ROOM_TTL_S), db.del([K.inbox(code, mid)])]);
+  l.state.watchers = l.state.watchers?.filter((w) => w.mid !== mid);
   if (!existing) {
     players.push({ mid, ...profile, seen: now, ready: 0, fin: null });
     // Joining counts as activity, so a room people keep coming back to stays open.
@@ -277,16 +300,42 @@ async function join(db: Store, code: string, mid: string, b: any, now: number): 
   return { now, state: l.state, mail: [], mailN: Number(l.hash[`m:${mid}`] ?? 0) };
 }
 
+/**
+ * Watch the room from a screen that doesn't race: it sees the room and links up with every player
+ * (they send it their poses), but it isn't on the grid and nobody waits for it. A player who starts
+ * watching leaves the grid first.
+ */
+async function watch(db: Store, code: string, mid: string, b: any, now: number): Promise<PollResponse> {
+  let l = await load(db, code, now);
+  if (!('state' in l)) throw new HttpError('room not found', 404);
+  if (l.state.players.some((p) => p.mid === mid)) {
+    await leave(db, code, mid, now);
+    l = await load(db, code, now);
+    if (!('state' in l)) throw new HttpError('room not found', 404);
+  }
+  const watchers = l.state.watchers!;
+  const existing = watchers.find((w) => w.mid === mid);
+  if (!existing && watchers.length >= WATCH_MAX) throw new HttpError(`${WATCH_MAX} screens are already watching this room`, 409);
+  const profile = { name: cleanName(b.name), joined: existing?.joined ?? now };
+  await db.hsetMany(K.room(code), { [`w:${mid}`]: JSON.stringify(profile), [`s:${mid}`]: String(now) });
+  await db.del([K.inbox(code, mid)]);
+  if (existing) Object.assign(existing, profile, { seen: now });
+  else watchers.push({ mid, ...profile, seen: now });
+  return { now, state: l.state, mail: [], mailN: Number(l.hash[`m:${mid}`] ?? 0) };
+}
+
 async function poll(db: Store, code: string, mid: string, b: any, now: number): Promise<PollResponse> {
   const l = await load(db, code, now);
   if (!('state' in l)) return { now, state: null, closed: l.closed, mail: [], mailN: 0 };
-  const inRoom = l.state.players.some((p) => p.mid === mid);
+  const player = l.state.players.find((p) => p.mid === mid);
+  const watcher = l.state.watchers?.find((w) => w.mid === mid);
+  const inRoom = !!(player || watcher);
   if (!inRoom && l.hash[`k:${mid}`]) return { now, state: null, closed: 'kicked', mail: [], mailN: 0 };
   const work: Promise<unknown>[] = [];
   if (inRoom && b.hb) {
-    work.push(db.hsetMany(K.room(code), { [`s:${mid}`]: String(now) }), db.expire(K.room(code), ROOM_TTL_S));
-    const p = l.state.players.find((x) => x.mid === mid)!;
-    p.seen = now;
+    work.push(db.hsetMany(K.room(code), { [`s:${mid}`]: String(now) }));
+    if (player) work.push(db.expire(K.room(code), ROOM_TTL_S)); // only players keep the room alive
+    (player ?? watcher)!.seen = now;
   }
   const stored = Number(l.hash[`m:${mid}`] ?? 0);
   const seenN = Number(b.mailN) || 0;
@@ -304,8 +353,13 @@ async function poll(db: Store, code: string, mid: string, b: any, now: number): 
 async function leave(db: Store, code: string, mid: string, now: number) {
   const l = await load(db, code, now);
   if (!('state' in l)) return;
+  if (l.state.watchers?.some((w) => w.mid === mid)) {
+    await db.hdel(K.room(code), watcherFields(mid));
+    await db.del([K.inbox(code, mid)]);
+    return;
+  }
   const rest = l.state.players.filter((p) => p.mid !== mid);
-  if (!rest.length) return destroy(db, code, [mid]);
+  if (!rest.length) return destroy(db, code, everyone(l.state));
   await db.hdel(K.room(code), playerFields(mid));
   await db.del([K.inbox(code, mid)]);
   l.state.players = rest;
@@ -322,8 +376,8 @@ async function leave(db: Store, code: string, mid: string, now: number) {
 
 /** Tab closed or reloading: drop the player in a few seconds unless they rejoin (a reload does). */
 async function softLeave(db: Store, code: string, mid: string, now: number) {
-  const exists = await db.hmget(K.room(code), [`p:${mid}`]);
-  if (exists[0]) await db.hsetMany(K.room(code), { [`s:${mid}`]: String(now - STALE_MS + 8000) });
+  const exists = await db.hmget(K.room(code), [`p:${mid}`, `w:${mid}`]);
+  if (exists[0] || exists[1]) await db.hsetMany(K.room(code), { [`s:${mid}`]: String(now - STALE_MS + 8000) });
 }
 
 async function signal(db: Store, code: string, mid: string, b: any, now: number) {
@@ -331,8 +385,11 @@ async function signal(db: Store, code: string, mid: string, b: any, now: number)
   if (!MID_RE.test(to) || (b.k !== 'offer' && b.k !== 'answer') || typeof b.sdp !== 'string' || b.sdp.length > 16_000) throw new HttpError('bad signal');
   const l = await load(db, code, now);
   if (!('state' in l)) throw new HttpError('room not found', 404);
-  me(l, mid);
-  if (!l.state.players.some((p) => p.mid === to)) throw new HttpError('peer not in room', 404);
+  // Players link with everyone; watchers only with players.
+  const isPlayer = (m: string) => l.state.players.some((p) => p.mid === m);
+  const isWatcher = (m: string) => !!l.state.watchers?.some((w) => w.mid === m);
+  if (!isPlayer(mid) && !isWatcher(mid)) throw new HttpError('not in this room', 403);
+  if (!isPlayer(to) && !(isWatcher(to) && isPlayer(mid))) throw new HttpError('peer not in room', 404);
   const msg: SignalMsg = { from: mid, k: b.k, id: Number(b.id) || 0, sdp: b.sdp };
   await db.rpush(K.inbox(code, to), JSON.stringify(msg));
   await Promise.all([db.expire(K.inbox(code, to), ROOM_TTL_S), db.hincrby(K.room(code), `m:${to}`, 1)]);

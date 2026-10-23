@@ -2,6 +2,8 @@
 // See MULTIPLAYER.md for the design.
 
 export const ROOM_MAX = 8;
+/** Screens watching a room without racing (a TV in the room, a friend following along). */
+export const WATCH_MAX = 8;
 export const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O, 1/I/L
 export const CODE_RE = /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{4}$/;
 export const MID_RE = /^[0-9a-f]{12}$/;
@@ -92,9 +94,19 @@ export interface RoomPlayer {
   fin: { r: number; ms: number | null } | null;
 }
 
+/** A screen watching the room: not on the grid, never ready, never host. Players send it their poses. */
+export interface RoomWatcher {
+  mid: string;
+  name: string;
+  joined: number;
+  seen: number;
+}
+
 export interface RoomState {
   cfg: RoomCfg;
   players: RoomPlayer[];
+  /** Missing from rooms served before watching existed. */
+  watchers?: RoomWatcher[];
 }
 
 /** Signaling message relayed through the room (WebRTC offer/answer). */

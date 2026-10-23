@@ -58,7 +58,7 @@
 .mp-field { display: grid; gap: 6px; }
 .mp-or { display: flex; align-items: center; gap: 12px; margin: 4px 0; }
 .mp-or::before, .mp-or::after { content: ''; flex: 1; height: 1px; background: var(--line-2); }
-.mp-join { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+.mp-join { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; }
 .mp-join input, .mp-me input {
   min-width: 0; width: 100%; height: 52px; padding: 0 12px; background: var(--carbon-2); border: 1.5px solid var(--line-2); border-radius: var(--radius);
   color: var(--text); outline: 0;
@@ -82,6 +82,9 @@
 .mp-share { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .mp-share .btn[hidden] + .btn, .mp-share .btn:only-child { grid-column: 1 / -1; }
 .mp-share:has(.btn[hidden]) { grid-template-columns: 1fr; }
+.mp-share [data-act='watchlink'] { grid-column: 1 / -1; }
+.mp-watchers { margin: 8px 0 0; color: var(--muted); }
+.mp-watchers:empty { display: none; }
 
 .mp-banner {
   display: flex; align-items: center; gap: 10px; padding: 11px 12px; font-size: 15px; letter-spacing: 0.05em;

@@ -1,0 +1,59 @@
+/* Watching a room (#/watch/CODE, src/watchController.ts) in the Pit Wall style (docs/pit-wall.md):
+   between races the room board reuses the multiplayer lobby's pieces (multiplayer.css) and the
+   party's QR card (party.css, pad.css); in the race, a timing tower and who's on camera. */
+
+/* ---------- The race view: no kart of our own, so no lap panel, tools, touch controls or menu */
+.race.watching :is(.h-left, .h-tools, .h-touch, .h-pause, .h-hint, .h-stuck, .h-notes) { display: none !important; }
+
+/* The timing tower, top left: every driver, the one on camera ringed. Click a row to follow it. */
+.wt-board { position: absolute; top: var(--top); left: var(--l); width: var(--col, 290px); background: rgba(11, 12, 16, 0.86); border-radius: 4px; overflow: hidden; pointer-events: auto; }
+.wt-head { display: flex; align-items: stretch; height: 44px; border-bottom: 2px solid var(--yellow); }
+.wt-live { display: flex; align-items: center; gap: 7px; padding: 0 11px; background: var(--red); color: #fff; font-weight: 800; font-size: 14px; letter-spacing: 0.12em; text-transform: uppercase; }
+.wt-live::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #fff; animation: live 1.2s infinite; }
+.wt-code { display: flex; align-items: center; padding: 0 10px; color: var(--yellow); font-weight: 600; font-size: 16px; letter-spacing: 0.16em; }
+.wt-head b { margin-left: auto; display: flex; align-items: center; padding: 0 12px; font-weight: 600; font-size: 16px; letter-spacing: -0.02em; white-space: nowrap; }
+.wt-board ol { display: grid; gap: 2px; padding: 4px; }
+.wt-board li { cursor: pointer; }
+.wt-board li:hover { filter: brightness(1.3); }
+.wt-overlay li.on { box-shadow: inset 0 0 0 1.5px var(--yellow); }
+.wt-overlay li.on .pos { background: var(--yellow); }
+.wt-keys { margin: 0; padding: 2px 9px 7px; color: var(--muted); font-size: 11.5px; letter-spacing: 0.03em; }
+.wt-overlay kbd { display: inline-block; min-width: 1.5em; padding: 0 4px; border-radius: 3px; background: var(--panel-3, #2a2e37); color: var(--text-2); font-family: var(--mono); font-size: 0.92em; text-align: center; }
+
+/* Bottom left: who's on camera, then the camera controls */
+.wt-bar { position: absolute; left: var(--l); bottom: var(--b); max-width: calc(50% - 130px); display: grid; justify-items: start; gap: 6px; pointer-events: auto; }
+.wt-row { display: flex; align-items: stretch; gap: 6px; max-width: 100%; }
+.wt-on { display: flex; align-items: center; gap: 9px; min-width: 0; height: 44px; padding: 0 12px 0 0; background: rgba(11, 12, 16, 0.88); border-radius: 3px; overflow: hidden; }
+.wt-on:empty { display: none; }
+.wt-on .pw-stripe { align-self: stretch; width: 6px; height: auto; }
+.wt-on-k { color: var(--yellow); font-weight: 800; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; }
+.wt-on b { font-family: var(--display); font-weight: 800; font-style: italic; font-size: 24px; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 12em; }
+.wt-on-p { padding: 2px 7px; border-radius: 2px; background: var(--text); color: var(--carbon); font-family: var(--display); font-weight: 800; font-style: italic; font-size: 17px; }
+.wt-btn {
+  display: inline-flex; align-items: center; gap: 7px; height: 44px; padding: 0 13px; border: 0; border-radius: 3px; background: rgba(11, 12, 16, 0.88); color: var(--text);
+  font: 700 14px var(--ui); letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer;
+}
+.wt-btn:hover { background: rgba(32, 35, 43, 0.95); }
+.wt-btn:focus-visible { outline: 2px solid var(--yellow); outline-offset: 2px; }
+
+/* The classification, once everyone is home */
+.wt-results li { cursor: default; }
+.wt-overlay.done .wt-bar, .wt-overlay.done .mp-countdown { display: none; }
+
+@media (max-width: 900px) {
+  .wt-board { width: 230px; }
+  .wt-keys { display: none; }
+  .wt-bar { max-width: calc(100% - 2 * var(--gut)); bottom: calc(var(--b) + 96px); }
+  .wt-on b { font-size: 19px; }
+}
+@media (max-width: 600px), (max-height: 480px) {
+  .race.watching .h-speed { display: none; }
+  .wt-bar { bottom: var(--b); }
+  .wt-board li { height: 22px; }
+}
+
+/* ---------- Between races: the room */
+.wt-lede { margin: 0; align-self: center; }
+.wt-join { margin-bottom: 4px; }
+.wt-watchers { margin: 8px 0 0; color: var(--muted); }
+.wt-watchers:empty { display: none; }
